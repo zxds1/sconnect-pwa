@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Store, MessageCircle, Crown, Plug, Mic, Camera, Video } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Camera, Video, Star, Plus, BadgeCheck, TrendingUp, ChevronRight } from 'lucide-react';
 import { Product } from '../types';
 import { SELLERS } from '../mockData';
 
@@ -43,35 +43,6 @@ interface AssistantProps {
   onOpenWhatsApp: () => void;
 }
 
-const QUICK_PROMPTS = [
-  'Natafuta TV ya inchi 55 karibu na mimi',
-  'Nipatie viatu kama hizi lakini vya bei nafuu',
-  'Compare the best wireless mouse',
-  'Show price drop alerts for Samsung TV',
-  'Nataka kusikiliza search (voice)',
-  'Nataka photo + text hybrid search'
-];
-
-const COMMAND_HELP = [
-  '/search <query>',
-  '/compare <product>',
-  '/add <product>',
-  '/open <product|shop>',
-  '/voice <query>',
-  '/photo <hint>',
-  '/video <hint>',
-  '/hybrid <text>',
-  '/rfq <request>',
-  '/rewards',
-  '/profile',
-  '/onboarding',
-  '/bag',
-  '/scan',
-  '/subscribe',
-  '/partners',
-  '/whatsapp'
-];
-
 export const Assistant: React.FC<AssistantProps> = ({
   products,
   onOpenSearch,
@@ -84,7 +55,6 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenProfile,
   onOpenSellerStudio,
   onOpenRFQ,
-  onToast,
   onOpenOnboarding,
   onOpenBag,
   onOpenQrScan,
@@ -122,6 +92,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [activeChatId, setActiveChatId] = useState(() => chats[0]?.id || '');
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [showMediaTray, setShowMediaTray] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     try {
       const raw = localStorage.getItem('soko:assistant_sidebar');
@@ -133,6 +104,26 @@ export const Assistant: React.FC<AssistantProps> = ({
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
+  const lastMessage = activeMessages[activeMessages.length - 1];
+  const progressStars = 2;
+  const totalStars = 50;
+  const progressPct = Math.round((progressStars / totalStars) * 100);
+  const quickActions = [
+    { label: 'Search', icon: Search, onClick: () => setInput('/search ') },
+    { label: 'Compare', icon: ArrowRightLeft, onClick: () => setInput('/compare ') },
+    { label: 'Photo', icon: Camera, onClick: () => onOpenSearchAction('photo search', 'photo') },
+    { label: 'Voice', icon: Mic, onClick: () => onOpenSearchAction('voice search', 'voice') },
+    { label: 'Bag', icon: ShoppingBag, onClick: () => onOpenBag() },
+    { label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ() },
+    { label: 'Rewards', icon: Trophy, onClick: () => onOpenRewards() }
+  ];
+  const suggestionChips = [
+    { label: 'Search for rice deals', value: '/search rice deals' },
+    { label: 'Take a photo of shelf', value: '/photo shelf photo' },
+    { label: 'Compare Omo vs Sunlight', value: '/compare Omo vs Sunlight' },
+    { label: 'Start RFQ for sugar', value: '/rfq sugar 50kg' },
+    { label: 'Open rewards', value: '/rewards' }
+  ];
 
   useEffect(() => {
     if (!activeChatId && chats[0]) {
@@ -442,21 +433,21 @@ export const Assistant: React.FC<AssistantProps> = ({
   };
 
   return (
-    <div className="h-full bg-zinc-950 text-white flex">
-      {/* Sidebar */}
-      <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} ${isSidebarOpen ? 'block' : 'hidden'} sm:block`}>
+    <div className="h-full bg-slate-950 text-white flex">
+      {/* Sidebar (desktop) */}
+      <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:block`}>
         <div className={`flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} mb-4`}>
           {isSidebarOpen && (
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-white/10 rounded-xl">
-                  <MessageCircle className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm font-black">Conversations</p>
-                  <p className="text-[10px] text-white/50">{chats.length} chats</p>
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-white/10 rounded-xl">
+                <MessageCircle className="w-4 h-4 text-white" />
               </div>
-            )}
+              <div>
+                <p className="text-sm font-black">Conversations</p>
+                <p className="text-[10px] text-white/50">{chats.length} chats</p>
+              </div>
+            </div>
+          )}
           {!isSidebarOpen && (
             <div className="p-2 bg-white/10 rounded-xl">
               <MessageCircle className="w-4 h-4 text-white" />
@@ -471,7 +462,7 @@ export const Assistant: React.FC<AssistantProps> = ({
           </button>
         </div>
 
-        {isSidebarOpen ? (
+        {isSidebarOpen && (
           <>
             <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
               {chats
@@ -517,207 +508,239 @@ export const Assistant: React.FC<AssistantProps> = ({
                 ))}
             </div>
 
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">MORE</p>
-              <div className="space-y-2 text-[10px] font-bold">
-                <button
-                  onClick={() => {
-                    const id = `chat_${Date.now()}`;
-                    const newChat: AssistantChat = {
-                      id,
-                      title: 'New chat',
-                      messages: [
-                        {
-                          role: 'assistant',
-                          content: 'Hi! I’m your Sconnect assistant. Ask me to search, compare, add to bag, open a shop, or start an RFQ.',
-                        }
-                      ],
-                      updatedAt: Date.now()
-                    };
-                    setChats(prev => [newChat, ...prev]);
-                    setActiveChatId(id);
-                  }}
-                  className="w-full bg-white/10 rounded-xl py-2 flex items-center justify-center gap-2"
-                >
-                  <Sparkles className="w-3 h-3" /> New Chat
-                </button>
-                <button onClick={() => onOpenSearch('')} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-                  <Search className="w-3 h-3" /> Search
-                </button>
-            <button onClick={() => onOpenRewards()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <Trophy className="w-3 h-3" /> Rewards
-            </button>
-            <button onClick={() => onOpenBag()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <ShoppingBag className="w-3 h-3" /> Bag
-            </button>
-            <button onClick={() => onOpenQrScan()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <MessageCircle className="w-3 h-3" /> Scan QR
-            </button>
-            <button onClick={() => onOpenPartnerships()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <Plug className="w-3 h-3" /> Partnerships
-            </button>
-            <button onClick={() => onOpenSubscriptions()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <Crown className="w-3 h-3" /> Subscriptions
-            </button>
-            <button onClick={() => onOpenProfile()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <User className="w-3 h-3" /> Profile
-            </button>
-            <button onClick={() => onOpenWhatsApp()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-              <MessageCircle className="w-3 h-3" /> WhatsApp Flows
-            </button>
-                <button onClick={() => onOpenSellerStudio()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-                  <Store className="w-3 h-3" /> Seller Studio
-                </button>
-                <button onClick={() => onOpenRFQ()} className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2">
-                  <MessageCircle className="w-3 h-3" /> RFQ
-                </button>
-              </div>
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => setChats(prev => [{
+                  id: `chat_${Date.now()}`,
+                  title: 'New chat',
+                  messages: [
+                    {
+                      role: 'assistant',
+                      content: 'Hi! I’m your Sconnect assistant. Ask me to search, compare, add to bag, open a shop, or start an RFQ.',
+                    }
+                  ],
+                  updatedAt: Date.now()
+                }, ...prev])}
+                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" /> New chat
+              </button>
+              <button
+                onClick={() => onOpenOnboarding()}
+                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+              >
+                <Trophy className="w-4 h-4" /> Onboarding
+              </button>
             </div>
           </>
-        ) : (
-          <div className="flex flex-col gap-3 items-center">
-            <button onClick={() => onOpenSearch('')} className="p-2 bg-white/5 rounded-xl" title="Search">
-              <Search className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenRewards()} className="p-2 bg-white/5 rounded-xl" title="Rewards">
-              <Trophy className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenBag()} className="p-2 bg-white/5 rounded-xl" title="Bag">
-              <ShoppingBag className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenQrScan()} className="p-2 bg-white/5 rounded-xl" title="Scan QR">
-              <MessageCircle className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenPartnerships()} className="p-2 bg-white/5 rounded-xl" title="Partnerships">
-              <Plug className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenSubscriptions()} className="p-2 bg-white/5 rounded-xl" title="Subscriptions">
-              <Crown className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenProfile()} className="p-2 bg-white/5 rounded-xl" title="Profile">
-              <User className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenWhatsApp()} className="p-2 bg-white/5 rounded-xl" title="WhatsApp Flows">
-              <MessageCircle className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenSellerStudio()} className="p-2 bg-white/5 rounded-xl" title="Seller Studio">
-              <Store className="w-4 h-4" />
-            </button>
-            <button onClick={() => onOpenRFQ()} className="p-2 bg-white/5 rounded-xl" title="RFQ">
-              <MessageCircle className="w-4 h-4" />
-            </button>
-          </div>
         )}
       </div>
 
-      {/* Main Chat */}
       <div className="flex-1 flex flex-col">
-        <div className="p-5 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsSidebarOpen(prev => !prev)}
-              className="sm:hidden p-2 bg-white/10 rounded-xl"
-            >
-              <MessageCircle className="w-4 h-4 text-white" />
-            </button>
-            <div className="p-2 bg-white/10 rounded-xl">
-              <Sparkles className="w-4 h-4 text-amber-300" />
-            </div>
+        {/* Header */}
+        <div className="px-5 pt-5 pb-4 border-b border-white/10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center font-black">SC</div>
             <div>
-              <p className="text-sm font-black">Sconnect Assistant</p>
-              <p className="text-[10px] text-white/60">Connected (stub) • Streaming enabled</p>
+              <p className="text-sm font-black">Sconnect</p>
+              <p className="text-[10px] text-white/60">Kenya's duka demand engine</p>
             </div>
           </div>
-          <button 
-            onClick={() => onToast('Assistant is running in stub mode.')}
-            className="text-[10px] font-bold bg-white/10 px-3 py-1 rounded-full"
+          <button
+            onClick={onOpenProfile}
+            className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+            aria-label="Open profile"
           >
-            LiteLLM Stub
+            <User className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {activeMessages.map((msg, i) => (
-            <div key={i} className={`max-w-[85%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
-              <div className={`px-4 py-3 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white/10 text-white'}`}>
-                {msg.content}
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-5 pt-5 pb-40 space-y-5">
+          <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-3xl p-5 border border-white/10">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
+                <h1 className="mt-2 text-xl font-black">Kenya's duka demand engine</h1>
+                <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
               </div>
-              {msg.actions && msg.actions.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {msg.actions.map((action, idx) => (
-                    <button
-                      key={idx}
-                      onClick={action.onClick}
-                      className="px-3 py-1.5 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button
+                onClick={() => onOpenOnboarding()}
+                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                aria-label="Open onboarding"
+              >
+                <Sparkles className="w-5 h-5 text-amber-300" />
+              </button>
             </div>
-          ))}
-          <div ref={endRef} />
+            <div className="mt-4 flex items-center gap-2">
+              <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
+                <MessageCircle className="w-3 h-3" /> WhatsApp
+              </span>
+              <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
+                <BadgeCheck className="w-3 h-3" /> PWA Ready
+              </span>
+            </div>
+          </section>
+
+          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
+                <p className="text-sm font-black mt-2">Sconnect Assistant</p>
+                <p className="text-[11px] text-white/60 mt-1 line-clamp-2">{lastMessage?.content || 'Ask me to search, compare, or open a shop.'}</p>
+              </div>
+              <button
+                onClick={() => setActiveChatId(activeChatId)}
+                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                aria-label="Open conversation"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          </section>
+
+          <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-3xl p-5 border border-emerald-500/20">
+            <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
+              <TrendingUp className="w-3 h-3" /> Insight
+            </div>
+            <div className="mt-3 flex items-end gap-3">
+              <p className="text-3xl font-black">+47%</p>
+              <div className="text-[11px] text-emerald-100/80">
+                Omo demand spike in Mombasa • update your shelf today
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Your Progress</p>
+                <p className="text-sm font-black mt-2">Rank: Bronze</p>
+                <p className="text-[11px] text-white/60">2/50 stars to Free Pro Month</p>
+              </div>
+              <button
+                onClick={onOpenRewards}
+                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                aria-label="Open rewards"
+              >
+                <Trophy className="w-5 h-5 text-amber-300" />
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-10 gap-1">
+              {Array.from({ length: totalStars }).map((_, i) => (
+                <Star
+                  key={`star-${i}`}
+                  className={`w-3 h-3 ${i < progressStars ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`}
+                />
+              ))}
+            </div>
+            <div className="mt-4 h-2 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-amber-400" style={{ width: `${progressPct}%` }} />
+            </div>
+          </section>
+
+          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">Quick Actions</p>
+            <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+              {quickActions.map(action => (
+                <button
+                  key={action.label}
+                  onClick={action.onClick}
+                  className="min-w-[92px] px-3 py-3 bg-white/10 rounded-2xl flex flex-col items-start gap-2 text-left"
+                >
+                  <action.icon className="w-5 h-5" />
+                  <span className="text-[10px] font-bold">{action.label}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Recent Messages</p>
+              <button
+                onClick={() => setActiveChatId(activeChatId)}
+                className="text-[10px] font-bold text-white/60"
+              >
+                Open chat
+              </button>
+            </div>
+            <div className="space-y-2">
+              {activeMessages.slice(-3).map((msg, i) => (
+                <div key={i} className={`px-4 py-3 rounded-2xl text-[11px] ${msg.role === 'user' ? 'bg-indigo-500/80 text-white text-right' : 'bg-white/10 text-white/90'}`}>
+                  {msg.content}
+                </div>
+              ))}
+              <div ref={endRef} />
+            </div>
+          </section>
         </div>
 
-        <div className="p-4 border-t border-white/10">
-          <div className="flex items-center gap-2 mb-3">
-            <button
-              onClick={() => onOpenSearchAction('voice search', 'voice')}
-              className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold flex items-center gap-2"
-            >
-              <Mic className="w-3 h-3" /> Voice
-            </button>
-            <button
-              onClick={() => onOpenSearchAction('photo search', 'photo')}
-              className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold flex items-center gap-2"
-            >
-              <Camera className="w-3 h-3" /> Photo
-            </button>
-            <button
-              onClick={() => onOpenSearchAction('video search', 'video')}
-              className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold flex items-center gap-2"
-            >
-              <Video className="w-3 h-3" /> Video
-            </button>
-            <button
-              onClick={() => onOpenSearchAction('hybrid search', 'hybrid')}
-              className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold flex items-center gap-2"
-            >
-              <Sparkles className="w-3 h-3" /> Hybrid
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {QUICK_PROMPTS.map(prompt => (
-              <button 
-                key={prompt}
-                onClick={() => setInput(prompt)}
-                className="px-3 py-1.5 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+        {/* Sticky Action Bar */}
+        <div className="sticky bottom-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-5">
+          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+            {suggestionChips.map(chip => (
+              <button
+                key={chip.label}
+                onClick={() => setInput(chip.value)}
+                className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold whitespace-nowrap"
               >
-                {prompt}
+                {chip.label}
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {COMMAND_HELP.map(cmd => (
-              <span key={cmd} className="px-2 py-1 bg-white/5 rounded-full text-[9px] font-bold text-white/70">
-                {cmd}
-              </span>
-            ))}
-          </div>
+
+          {showMediaTray && (
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => onOpenSearchAction('photo search', 'photo')}
+                className="flex-1 h-11 rounded-2xl bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold"
+              >
+                <Camera className="w-4 h-4" /> Photo
+              </button>
+              <button
+                onClick={() => onOpenSearchAction('video search', 'video')}
+                className="flex-1 h-11 rounded-2xl bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold"
+              >
+                <Video className="w-4 h-4" /> Video
+              </button>
+              <button
+                onClick={() => onOpenSearchAction('hybrid search', 'hybrid')}
+                className="flex-1 h-11 rounded-2xl bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold"
+              >
+                <Sparkles className="w-4 h-4" /> Hybrid
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => onOpenSearchAction('voice search', 'voice')}
+              className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+              aria-label="Voice search"
+            >
+              <Mic className="w-5 h-5" />
+            </button>
             <input
-              className="flex-1 bg-white/10 rounded-2xl px-4 py-3 text-sm outline-none"
-              placeholder="Ask me to search, compare, or buy..."
+              className="flex-1 h-11 bg-white/10 rounded-full px-4 text-sm outline-none"
+              placeholder="Ask Sconnect to search, compare, or buy..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             />
-            <button 
-              onClick={handleSend}
-              className="p-3 bg-emerald-500 rounded-2xl text-white"
+            <button
+              onClick={() => setShowMediaTray(prev => !prev)}
+              className={`h-11 w-11 rounded-full flex items-center justify-center ${showMediaTray ? 'bg-white/20' : 'bg-white/10'}`}
+              aria-label="Open media options"
             >
-              <Send className="w-4 h-4" />
+              <Plus className="w-5 h-5" />
+            </button>
+            <button
+              onClick={handleSend}
+              className="h-11 w-11 rounded-full bg-emerald-500 flex items-center justify-center text-white"
+              aria-label="Send"
+            >
+              <Send className="w-5 h-5" />
             </button>
           </div>
         </div>
