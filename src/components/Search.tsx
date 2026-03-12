@@ -550,7 +550,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
         </div>
 
         {viewMode === 'map' ? (
-          <div className="h-[500px] w-full bg-zinc-100 rounded-3xl overflow-hidden relative border-2 border-zinc-200">
+          <div className="h-[320px] sm:h-[500px] w-full bg-zinc-100 rounded-3xl overflow-hidden relative border-2 border-zinc-200">
             {/* Mock Map Background */}
             <div className="absolute inset-0 opacity-40 pointer-events-none">
               <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
@@ -1058,7 +1058,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
 
       {/* Visual Search Preview */}
       {capturedPreview && (
-        <div className="fixed bottom-28 right-4 z-[60] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden w-32">
+        <div className="fixed bottom-28 left-4 right-4 sm:left-auto sm:right-4 z-[60] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden sm:w-32">
           <img src={capturedPreview} className="w-full h-24 object-cover" alt="capture" />
           <div className="p-2 text-[9px] font-bold text-zinc-600">
             Visual search applied
@@ -1067,7 +1067,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
       )}
 
       {videoPreview && (
-        <div className="fixed bottom-28 right-40 z-[60] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden w-40">
+        <div className="fixed bottom-28 left-4 right-4 sm:left-auto sm:right-40 z-[60] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden sm:w-40">
           <video src={videoPreview} className="w-full h-24 object-cover" />
           <div className="p-2 text-[9px] font-bold text-zinc-600">
             Video search applied

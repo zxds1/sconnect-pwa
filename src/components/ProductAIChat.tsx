@@ -95,7 +95,7 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="fixed z-[70] bottom-4 right-4 flex flex-col h-[500px] w-[min(420px,90vw)] bg-white rounded-3xl shadow-2xl border border-zinc-100 overflow-hidden"
+      className="fixed inset-0 z-[70] flex flex-col bg-white rounded-none sm:inset-auto sm:bottom-4 sm:right-4 sm:h-[500px] sm:w-[min(420px,90vw)] sm:rounded-3xl shadow-2xl border border-zinc-100 overflow-hidden"
     >
       {/* Header */}
       <div className="p-4 bg-[#0b1d3a] text-white flex items-center justify-between">

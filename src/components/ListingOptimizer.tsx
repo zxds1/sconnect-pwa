@@ -154,7 +154,7 @@ export const ListingOptimizer: React.FC<ListingOptimizerProps> = ({ initialData,
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="flex flex-col h-[600px] bg-white rounded-3xl shadow-2xl border border-zinc-100 overflow-hidden"
+      className="flex flex-col h-[70vh] sm:h-[600px] bg-white rounded-none sm:rounded-3xl shadow-2xl border border-zinc-100 overflow-hidden"
     >
       {/* Header */}
       <div className="p-4 bg-zinc-900 text-white flex items-center justify-between">
