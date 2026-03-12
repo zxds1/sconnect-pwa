@@ -710,7 +710,7 @@ export const Assistant: React.FC<AssistantProps> = ({
 
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <div className="px-5 pt-5 pb-4 border-b border-white/10 flex items-center justify-between">
+        <div className="px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsSidebarOpen(true)}
@@ -735,14 +735,14 @@ export const Assistant: React.FC<AssistantProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 pt-5 pb-40 space-y-5">
+        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-28 sm:px-5 sm:pt-5 sm:pb-40 space-y-4 sm:space-y-5">
           {showIntroCards && (
             <>
-              <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-3xl p-5 border border-white/10">
+              <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
-                    <h1 className="mt-2 text-xl font-black">Kenya's duka demand engine</h1>
+                    <h1 className="mt-2 text-lg sm:text-xl font-black">Kenya's duka demand engine</h1>
                     <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
                   </div>
                   <button
@@ -763,7 +763,7 @@ export const Assistant: React.FC<AssistantProps> = ({
                 </div>
               </section>
 
-              <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+              <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
@@ -780,19 +780,19 @@ export const Assistant: React.FC<AssistantProps> = ({
                 </div>
               </section>
 
-              <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-3xl p-5 border border-emerald-500/20">
+              <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-emerald-500/20">
                 <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
                   <TrendingUp className="w-3 h-3" /> Insight
                 </div>
                 <div className="mt-3 flex items-end gap-3">
-                  <p className="text-3xl font-black">+47%</p>
+                  <p className="text-2xl sm:text-3xl font-black">+47%</p>
                   <div className="text-[11px] text-emerald-100/80">
                     Omo demand spike in Mombasa • update your shelf today
                   </div>
                 </div>
               </section>
 
-              <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+              <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Your Progress</p>
@@ -807,11 +807,11 @@ export const Assistant: React.FC<AssistantProps> = ({
                     <Trophy className="w-5 h-5 text-amber-300" />
                   </button>
                 </div>
-                <div className="mt-4 grid grid-cols-10 gap-1">
+                <div className="mt-4 grid grid-cols-8 sm:grid-cols-10 gap-0.5 sm:gap-1">
                   {Array.from({ length: totalStars }).map((_, i) => (
                     <Star
                       key={`star-${i}`}
-                      className={`w-3 h-3 ${i < progressStars ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`}
+                      className={`w-2.5 h-2.5 sm:w-3 sm:h-3 ${i < progressStars ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`}
                     />
                   ))}
                 </div>
@@ -850,7 +850,7 @@ export const Assistant: React.FC<AssistantProps> = ({
         </div>
 
         {/* Sticky Action Bar */}
-        <div className="sticky bottom-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-5">
+        <div className="sticky bottom-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-4 sm:pb-5">
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
             {suggestionChips.map(chip => (
               <button
