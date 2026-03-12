@@ -735,7 +735,7 @@ export const Assistant: React.FC<AssistantProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-4 pt-24 pb-28 sm:px-5 sm:pt-24 sm:pb-40 space-y-4 sm:space-y-5">
+        <div className="flex-1 min-h-0 px-4 pt-24 pb-28 sm:px-5 sm:pt-24 sm:pb-40 flex flex-col gap-4 sm:gap-5">
           {showIntroCards && (
             <>
               <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
@@ -824,7 +824,7 @@ export const Assistant: React.FC<AssistantProps> = ({
 
           {/* Quick Actions + More moved to sidebar navigation */}
 
-          <div className="space-y-3">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
             {activeMessages.map((msg, i) => (
               <div key={i} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
                 <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
