@@ -24,7 +24,7 @@ import { PRODUCTS, SELLERS } from './mockData';
 import { Product } from './types';
 
 export default function App() {
-  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp'>('feed');
+  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp'>('assistant');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -251,6 +251,7 @@ export default function App() {
                 onOpenSubscriptions={() => setView('subscriptions')}
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenWhatsApp={() => setView('whatsapp')}
+                onOpenFeed={() => setView('feed')}
                 onToast={setToast}
               />
             </motion.div>

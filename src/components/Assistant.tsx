@@ -41,6 +41,7 @@ interface AssistantProps {
   onOpenSubscriptions: () => void;
   onOpenPartnerships: () => void;
   onOpenWhatsApp: () => void;
+  onOpenFeed: () => void;
 }
 
 export const Assistant: React.FC<AssistantProps> = ({
@@ -60,7 +61,8 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenQrScan,
   onOpenSubscriptions,
   onOpenPartnerships,
-  onOpenWhatsApp
+  onOpenWhatsApp,
+  onOpenFeed
 }) => {
   const [chats, setChats] = useState<AssistantChat[]>(() => {
     try {
@@ -110,6 +112,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const totalStars = 50;
   const progressPct = Math.round((progressStars / totalStars) * 100);
   const quickActions = [
+    { label: 'Feed', icon: Sparkles, onClick: onOpenFeed },
     { label: 'Search', icon: Search, onClick: () => setInput('/search ') },
     { label: 'Compare', icon: ArrowRightLeft, onClick: () => setInput('/compare ') },
     { label: 'Photo', icon: Camera, onClick: () => onOpenSearchAction('photo search', 'photo') },
