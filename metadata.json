@@ -1,0 +1,9 @@
+{
+  "name": "Copy of SokoConnect",
+  "description": "Kenya\u0027s premier hyperlocal commerce intelligence platform. Search, compare, and earn rewards for data contribution.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
