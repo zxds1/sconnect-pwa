@@ -710,7 +710,7 @@ export const Assistant: React.FC<AssistantProps> = ({
 
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <div className="px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between">
+        <div className="px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between sticky top-0 z-30 bg-slate-950/95 backdrop-blur">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsSidebarOpen(true)}
