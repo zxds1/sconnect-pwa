@@ -117,6 +117,13 @@ export const Assistant: React.FC<AssistantProps> = ({
     { label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ() },
     { label: 'Rewards', icon: Trophy, onClick: () => onOpenRewards() }
   ];
+  const moreActions = [
+    { label: 'Subscriptions', icon: BadgeCheck, onClick: () => onOpenSubscriptions() },
+    { label: 'Partnerships', icon: Plug, onClick: () => onOpenPartnerships() },
+    { label: 'WhatsApp', icon: MessageCircle, onClick: () => onOpenWhatsApp() },
+    { label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio() },
+    { label: 'Scan QR', icon: Camera, onClick: () => onOpenQrScan() }
+  ];
   const suggestionChips = [
     { label: 'Search for rice deals', value: '/search rice deals' },
     { label: 'Take a photo of shelf', value: '/photo shelf photo' },
@@ -656,19 +663,50 @@ export const Assistant: React.FC<AssistantProps> = ({
           </section>
 
           <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">More</p>
+            <div className="grid grid-cols-2 gap-3">
+              {moreActions.map(action => (
+                <button
+                  key={action.label}
+                  onClick={action.onClick}
+                  className="h-11 px-3 bg-white/10 rounded-2xl flex items-center gap-2 text-[10px] font-bold"
+                >
+                  <action.icon className="w-4 h-4" />
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Recent Messages</p>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Chat</p>
               <button
                 onClick={() => setActiveChatId(activeChatId)}
                 className="text-[10px] font-bold text-white/60"
               >
-                Open chat
+                Sconnect Assistant
               </button>
             </div>
-            <div className="space-y-2">
-              {activeMessages.slice(-3).map((msg, i) => (
-                <div key={i} className={`px-4 py-3 rounded-2xl text-[11px] ${msg.role === 'user' ? 'bg-indigo-500/80 text-white text-right' : 'bg-white/10 text-white/90'}`}>
-                  {msg.content}
+            <div className="space-y-3">
+              {activeMessages.map((msg, i) => (
+                <div key={i} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
+                  <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
+                    {msg.content}
+                  </div>
+                  {msg.actions && msg.actions.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {msg.actions.map((action, idx) => (
+                        <button
+                          key={idx}
+                          onClick={action.onClick}
+                          className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               <div ref={endRef} />
