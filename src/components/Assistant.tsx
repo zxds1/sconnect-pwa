@@ -105,6 +105,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
   const lastMessage = activeMessages[activeMessages.length - 1];
+  const showIntroCards = !activeMessages.some(m => m.role === 'user');
   const progressStars = 2;
   const totalStars = 50;
   const progressPct = Math.round((progressStars / totalStars) * 100);
@@ -564,87 +565,91 @@ export const Assistant: React.FC<AssistantProps> = ({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 pt-5 pb-40 space-y-5">
-          <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-3xl p-5 border border-white/10">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
-                <h1 className="mt-2 text-xl font-black">Kenya's duka demand engine</h1>
-                <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
-              </div>
-              <button
-                onClick={() => onOpenOnboarding()}
-                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                aria-label="Open onboarding"
-              >
-                <Sparkles className="w-5 h-5 text-amber-300" />
-              </button>
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
-                <MessageCircle className="w-3 h-3" /> WhatsApp
-              </span>
-              <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
-                <BadgeCheck className="w-3 h-3" /> PWA Ready
-              </span>
-            </div>
-          </section>
+          {showIntroCards && (
+            <>
+              <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-3xl p-5 border border-white/10">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
+                    <h1 className="mt-2 text-xl font-black">Kenya's duka demand engine</h1>
+                    <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
+                  </div>
+                  <button
+                    onClick={() => onOpenOnboarding()}
+                    className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                    aria-label="Open onboarding"
+                  >
+                    <Sparkles className="w-5 h-5 text-amber-300" />
+                  </button>
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
+                    <MessageCircle className="w-3 h-3" /> WhatsApp
+                  </span>
+                  <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
+                    <BadgeCheck className="w-3 h-3" /> PWA Ready
+                  </span>
+                </div>
+              </section>
 
-          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
-                <p className="text-sm font-black mt-2">Sconnect Assistant</p>
-                <p className="text-[11px] text-white/60 mt-1 line-clamp-2">{lastMessage?.content || 'Ask me to search, compare, or open a shop.'}</p>
-              </div>
-              <button
-                onClick={() => setActiveChatId(activeChatId)}
-                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                aria-label="Open conversation"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </div>
-          </section>
+              <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
+                    <p className="text-sm font-black mt-2">Sconnect Assistant</p>
+                    <p className="text-[11px] text-white/60 mt-1 line-clamp-2">{lastMessage?.content || 'Ask me to search, compare, or open a shop.'}</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveChatId(activeChatId)}
+                    className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                    aria-label="Open conversation"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </section>
 
-          <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-3xl p-5 border border-emerald-500/20">
-            <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
-              <TrendingUp className="w-3 h-3" /> Insight
-            </div>
-            <div className="mt-3 flex items-end gap-3">
-              <p className="text-3xl font-black">+47%</p>
-              <div className="text-[11px] text-emerald-100/80">
-                Omo demand spike in Mombasa • update your shelf today
-              </div>
-            </div>
-          </section>
+              <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-3xl p-5 border border-emerald-500/20">
+                <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
+                  <TrendingUp className="w-3 h-3" /> Insight
+                </div>
+                <div className="mt-3 flex items-end gap-3">
+                  <p className="text-3xl font-black">+47%</p>
+                  <div className="text-[11px] text-emerald-100/80">
+                    Omo demand spike in Mombasa • update your shelf today
+                  </div>
+                </div>
+              </section>
 
-          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Your Progress</p>
-                <p className="text-sm font-black mt-2">Rank: Bronze</p>
-                <p className="text-[11px] text-white/60">2/50 stars to Free Pro Month</p>
-              </div>
-              <button
-                onClick={onOpenRewards}
-                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                aria-label="Open rewards"
-              >
-                <Trophy className="w-5 h-5 text-amber-300" />
-              </button>
-            </div>
-            <div className="mt-4 grid grid-cols-10 gap-1">
-              {Array.from({ length: totalStars }).map((_, i) => (
-                <Star
-                  key={`star-${i}`}
-                  className={`w-3 h-3 ${i < progressStars ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`}
-                />
-              ))}
-            </div>
-            <div className="mt-4 h-2 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-amber-400" style={{ width: `${progressPct}%` }} />
-            </div>
-          </section>
+              <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Your Progress</p>
+                    <p className="text-sm font-black mt-2">Rank: Bronze</p>
+                    <p className="text-[11px] text-white/60">2/50 stars to Free Pro Month</p>
+                  </div>
+                  <button
+                    onClick={onOpenRewards}
+                    className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                    aria-label="Open rewards"
+                  >
+                    <Trophy className="w-5 h-5 text-amber-300" />
+                  </button>
+                </div>
+                <div className="mt-4 grid grid-cols-10 gap-1">
+                  {Array.from({ length: totalStars }).map((_, i) => (
+                    <Star
+                      key={`star-${i}`}
+                      className={`w-3 h-3 ${i < progressStars ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`}
+                    />
+                  ))}
+                </div>
+                <div className="mt-4 h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-400" style={{ width: `${progressPct}%` }} />
+                </div>
+              </section>
+            </>
+          )}
 
           <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
             <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">Quick Actions</p>
