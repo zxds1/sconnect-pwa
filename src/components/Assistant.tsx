@@ -708,9 +708,9 @@ export const Assistant: React.FC<AssistantProps> = ({
         </div>
       )}
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col relative">
         {/* Header */}
-        <div className="px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between sticky top-0 z-30 bg-slate-950/95 backdrop-blur">
+        <div className="fixed top-0 left-0 right-0 px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between z-40 bg-slate-950/95 backdrop-blur">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsSidebarOpen(true)}
@@ -735,7 +735,7 @@ export const Assistant: React.FC<AssistantProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-28 sm:px-5 sm:pt-5 sm:pb-40 space-y-4 sm:space-y-5">
+        <div className="flex-1 overflow-y-auto px-4 pt-24 pb-28 sm:px-5 sm:pt-24 sm:pb-40 space-y-4 sm:space-y-5">
           {showIntroCards && (
             <>
               <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
@@ -850,7 +850,7 @@ export const Assistant: React.FC<AssistantProps> = ({
         </div>
 
         {/* Sticky Action Bar */}
-        <div className="sticky bottom-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-4 sm:pb-5">
+        <div className="fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-4 sm:pb-5 z-40">
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
             {suggestionChips.map(chip => (
               <button
@@ -895,7 +895,7 @@ export const Assistant: React.FC<AssistantProps> = ({
               <Mic className="w-5 h-5" />
             </button>
             <input
-              className="flex-1 h-11 bg-white/10 rounded-full px-4 text-sm outline-none"
+              className="flex-1 min-w-0 h-11 bg-white/10 rounded-full px-4 text-sm outline-none"
               placeholder="Ask Sconnect to search, compare, or buy..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
