@@ -824,40 +824,29 @@ export const Assistant: React.FC<AssistantProps> = ({
 
           {/* Quick Actions + More moved to sidebar navigation */}
 
-          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Chat</p>
-              <button
-                onClick={() => setActiveChatId(activeChatId)}
-                className="text-[10px] font-bold text-white/60"
-              >
-                Sconnect Assistant
-              </button>
-            </div>
-            <div className="space-y-3">
-              {activeMessages.map((msg, i) => (
-                <div key={i} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
-                  <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
-                    {msg.content}
-                  </div>
-                  {msg.actions && msg.actions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {msg.actions.map((action, idx) => (
-                        <button
-                          key={idx}
-                          onClick={action.onClick}
-                          className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+          <div className="space-y-3">
+            {activeMessages.map((msg, i) => (
+              <div key={i} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
+                <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
+                  {msg.content}
                 </div>
-              ))}
-              <div ref={endRef} />
-            </div>
-          </section>
+                {msg.actions && msg.actions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {msg.actions.map((action, idx) => (
+                      <button
+                        key={idx}
+                        onClick={action.onClick}
+                        className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div ref={endRef} />
+          </div>
         </div>
 
         {/* Sticky Action Bar */}
