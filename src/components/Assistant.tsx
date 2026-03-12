@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Store, MessageCircle, Crown, Plug, Mic, Camera, Video } from 'lucide-react';
 import { Product } from '../types';
 import { SELLERS } from '../mockData';

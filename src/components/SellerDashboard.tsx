@@ -359,14 +359,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     const count = ordersForSeller.filter(o => o.channel === name).length;
     return { name: name[0].toUpperCase() + name.slice(1), value: totalOrders ? Math.round((count / totalOrders) * 100) : 0 };
   });
-  const fulfillmentTimeDays = totalOrders
-    ? ordersForSeller.reduce((sum, o) => {
-        const created = new Date(o.createdAt).getTime();
-        const fulfilled = new Date(o.fulfilledAt).getTime();
-        const days = (fulfilled - created) / (1000 * 60 * 60 * 24);
-        return sum + Math.max(0, days);
-      }, 0) / totalOrders
-    : 0;
   const onTimeRate = totalOrders
     ? (ordersForSeller.filter(o => o.slaMet).length / totalOrders) * 100
     : 0;
@@ -488,10 +480,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
   const applyReceiptSimulation = () => {
     if (myProducts.length === 0) return;
-    const next = myProducts.map((p, idx) => {
+    const next: Product[] = myProducts.map((p, idx) => {
       if (idx > 2) return p;
       const sold = Math.min(p.stockLevel, (idx + 1) * 3);
-      return { ...p, stockLevel: Math.max(0, p.stockLevel - sold), stockStatus: p.stockLevel - sold <= 5 ? 'low_stock' : 'in_stock' };
+      return {
+        ...p,
+        stockLevel: Math.max(0, p.stockLevel - sold),
+        stockStatus: (p.stockLevel - sold <= 5 ? 'low_stock' : 'in_stock') as Product['stockStatus']
+      };
     });
     setMyProducts(next);
     pushProducts(next);
@@ -2213,7 +2209,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               </div>
               <div className="relative h-64 rounded-2xl overflow-hidden bg-zinc-100 border border-zinc-200">
                 <div className="absolute inset-0 opacity-40 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' }} />
-                {demandHeatmap.map((p, i) => {
+                {demandHeatmap.map((p) => {
                   const top = ((p.location!.lat - 34) * 11) % 80 + 10;
                   const left = ((p.location!.lng + 120) * 11) % 80 + 10;
                   const size = Math.max(18, Math.min(54, p.demand));

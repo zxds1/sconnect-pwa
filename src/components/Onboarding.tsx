@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Camera, Crown, ChevronRight, CheckCircle2, Info, Star, Trophy, TrendingUp, Sparkles, X, Search, MapPin, ArrowRightLeft, MessageCircle } from 'lucide-react';
+import { Camera, ChevronRight, CheckCircle2, Info, Trophy, TrendingUp, Sparkles, X } from 'lucide-react';
 
 interface OnboardingProps {
   onFinish: () => void;

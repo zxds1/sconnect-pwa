@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { Plug, Search, Filter, Star, MapPin, ShieldCheck, Building2, Layers, Users } from 'lucide-react';
 import { SELLERS, PRODUCTS } from '../mockData';
 
-const SYSTEM_TYPES = ['ERP', 'POS', 'CRM', 'Ecommerce', 'Marketplace', 'CSV', 'Google Sheets', 'API'];
 const DIRECTORY_TYPES = ['Shop', 'Ecommerce', 'Marketplace', 'ERP', 'POS', 'CRM'];
 
 type PartnerEntry = {

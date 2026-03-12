@@ -50,7 +50,7 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
   });
   const [preferredCategories, setPreferredCategories] = React.useState<string[]>(['Electronics', 'Groceries']);
   const [priceRange, setPriceRange] = React.useState<[number, number]>([200, 20000]);
-  const [savedLocations, setSavedLocations] = React.useState({ home: 'Kawangware', work: 'CBD' });
+  const [savedLocations] = React.useState({ home: 'Kawangware', work: 'CBD' });
   const [alertPrefs, setAlertPrefs] = React.useState(() => {
     try {
       const raw = localStorage.getItem('soko:alert_prefs');

@@ -13,12 +13,19 @@ interface BagProps {
   onSwitchAll: (target: Product[]) => void;
 }
 
+type PricingConfig = {
+  basePerShop: number;
+  perKm: number;
+  speedKmh: number;
+  stopMinutes: number;
+};
+
 export const Bag: React.FC<BagProps> = ({ items, allProducts, onBack, onRemove, onOpenProduct, onSwap, onSwitchAll }) => {
   const [deliveryMode, setDeliveryMode] = useState<'single' | 'separate'>('single');
-  const [pricingConfig, setPricingConfig] = useState(() => {
+  const [pricingConfig, setPricingConfig] = useState<PricingConfig>(() => {
     try {
       const raw = localStorage.getItem('soko:delivery_pricing');
-      if (raw) return JSON.parse(raw);
+      if (raw) return JSON.parse(raw) as PricingConfig;
     } catch {}
     return {
       basePerShop: 80,

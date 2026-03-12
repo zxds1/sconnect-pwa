@@ -132,6 +132,10 @@ export type RFQResponse = {
   stock: number;
   etaHours: number;
   rating: number;
+  verified?: boolean;
+  leadTimeDays?: number;
+  moq?: number;
+  paymentTerms?: 'cash' | 'net7' | 'net14' | 'net30';
   distanceKm?: number;
   status: 'responded' | 'pending' | 'declined';
   respondedAt?: string;

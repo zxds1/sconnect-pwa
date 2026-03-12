@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crown, Lock, CheckCircle2, ArrowRight, ShieldCheck, MapPin, Users, BarChart3, Wallet, Megaphone } from 'lucide-react';
+import { Crown, Lock, CheckCircle2, ShieldCheck, BarChart3, Wallet, Megaphone } from 'lucide-react';
 
 type Tab = 'duka' | 'brand' | 'billing';
 

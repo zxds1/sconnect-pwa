@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Send, X, Bot, Loader2, PhoneCall, Paperclip, Mic, Star, Sparkles } from 'lucide-react';
+import { Send, X, Loader2, PhoneCall, Paperclip, Mic, Star, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { GoogleGenAI } from '@google/genai';
 import { Product, Message } from '../types';
