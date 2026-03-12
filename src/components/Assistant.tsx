@@ -540,14 +540,185 @@ export const Assistant: React.FC<AssistantProps> = ({
                 <Trophy className="w-4 h-4" /> Onboarding
               </button>
             </div>
+
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">Quick Actions</p>
+              <div className="space-y-2 text-[10px] font-bold">
+                {quickActions.map(action => (
+                  <button
+                    key={action.label}
+                    onClick={action.onClick}
+                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
+                  >
+                    <action.icon className="w-3 h-3" /> {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">More</p>
+              <div className="space-y-2 text-[10px] font-bold">
+                {moreActions.map(action => (
+                  <button
+                    key={action.label}
+                    onClick={action.onClick}
+                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
+                  >
+                    <action.icon className="w-3 h-3" /> {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </>
         )}
       </div>
+
+      {/* Sidebar (mobile drawer) */}
+      {isSidebarOpen && (
+        <div className="lg:hidden fixed inset-0 z-40">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+          <div className="absolute inset-y-0 left-0 w-72 bg-slate-950 border-r border-white/10 p-4 overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-white/10 rounded-xl">
+                  <MessageCircle className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-black">Conversations</p>
+                  <p className="text-[10px] text-white/50">{chats.length} chats</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="p-2 bg-white/10 rounded-xl"
+                aria-label="Close navigation"
+              >
+                <ArrowRightLeft className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              {chats
+                .sort((a, b) => {
+                  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+                  return b.updatedAt - a.updatedAt;
+                })
+                .slice(0, 12)
+                .map((chat) => (
+                  <div
+                    key={chat.id}
+                    className={`w-full text-left p-2 rounded-xl text-[10px] font-bold flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/70'}`}
+                  >
+                    <button
+                      onClick={() => {
+                        setActiveChatId(chat.id);
+                        setIsSidebarOpen(false);
+                      }}
+                      className="flex-1 text-left"
+                    >
+                      {chat.title || 'New chat'}
+                    </button>
+                    <div className="flex items-center gap-1 ml-2">
+                      <button
+                        onClick={() => setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: !c.pinned } : c))}
+                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
+                        title="Pin chat"
+                      >
+                        {chat.pinned ? 'Unpin' : 'Pin'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => {
+                  const id = `chat_${Date.now()}`;
+                  const newChat: AssistantChat = {
+                    id,
+                    title: 'New chat',
+                    messages: [
+                      {
+                        role: 'assistant',
+                        content: 'Hi! I’m your Sconnect assistant. Ask me to search, compare, add to bag, open a shop, or start an RFQ.',
+                      }
+                    ],
+                    updatedAt: Date.now()
+                  };
+                  setChats(prev => [newChat, ...prev]);
+                  setActiveChatId(id);
+                  setIsSidebarOpen(false);
+                }}
+                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" /> New chat
+              </button>
+              <button
+                onClick={() => {
+                  onOpenOnboarding();
+                  setIsSidebarOpen(false);
+                }}
+                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+              >
+                <Trophy className="w-4 h-4" /> Onboarding
+              </button>
+            </div>
+
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">Quick Actions</p>
+              <div className="space-y-2 text-[10px] font-bold">
+                {quickActions.map(action => (
+                  <button
+                    key={action.label}
+                    onClick={() => {
+                      action.onClick();
+                      setIsSidebarOpen(false);
+                    }}
+                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
+                  >
+                    <action.icon className="w-3 h-3" /> {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">More</p>
+              <div className="space-y-2 text-[10px] font-bold">
+                {moreActions.map(action => (
+                  <button
+                    key={action.label}
+                    onClick={() => {
+                      action.onClick();
+                      setIsSidebarOpen(false);
+                    }}
+                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
+                  >
+                    <action.icon className="w-3 h-3" /> {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col">
         {/* Header */}
         <div className="px-5 pt-5 pb-4 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="lg:hidden h-11 w-11 rounded-2xl bg-white/10 flex items-center justify-center"
+              aria-label="Open navigation"
+            >
+              <MessageCircle className="w-5 h-5" />
+            </button>
             <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center font-black">SC</div>
             <div>
               <p className="text-sm font-black">Sconnect</p>
@@ -651,37 +822,7 @@ export const Assistant: React.FC<AssistantProps> = ({
             </>
           )}
 
-          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">Quick Actions</p>
-            <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
-              {quickActions.map(action => (
-                <button
-                  key={action.label}
-                  onClick={action.onClick}
-                  className="min-w-[92px] px-3 py-3 bg-white/10 rounded-2xl flex flex-col items-start gap-2 text-left"
-                >
-                  <action.icon className="w-5 h-5" />
-                  <span className="text-[10px] font-bold">{action.label}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold mb-3">More</p>
-            <div className="grid grid-cols-2 gap-3">
-              {moreActions.map(action => (
-                <button
-                  key={action.label}
-                  onClick={action.onClick}
-                  className="h-11 px-3 bg-white/10 rounded-2xl flex items-center gap-2 text-[10px] font-bold"
-                >
-                  <action.icon className="w-4 h-4" />
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </section>
+          {/* Quick Actions + More moved to sidebar navigation */}
 
           <section className="bg-white/5 rounded-3xl p-5 border border-white/10">
             <div className="flex items-center justify-between mb-3">
