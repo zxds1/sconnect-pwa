@@ -19,6 +19,7 @@ import { ComparisonView } from './components/ComparisonView';
 import { Rewards } from './components/Rewards';
 import { Onboarding } from './components/Onboarding';
 import { Assistant } from './components/Assistant';
+import { PullToRefresh } from './components/PullToRefresh';
 import { PRODUCTS, SELLERS } from './mockData';
 import { Product } from './types';
 
@@ -146,7 +147,8 @@ export default function App() {
     <div className="h-screen w-screen bg-black overflow-hidden flex flex-col font-sans">
       {/* Main Content Area */}
       <main className="flex-1 relative overflow-hidden">
-        <AnimatePresence mode="wait">
+        <PullToRefresh onRefresh={() => window.location.reload()}>
+          <AnimatePresence mode="wait">
           {view === 'feed' && (
             <motion.div 
               key="feed"
@@ -450,7 +452,8 @@ export default function App() {
               <WhatsAppExperience />
             </motion.div>
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </PullToRefresh>
 
         {/* AI Chat Overlay */}
         <AnimatePresence>
