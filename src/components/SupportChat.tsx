@@ -1,10 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Send, X, Loader2, Paperclip, Mic, Star, Sparkles, ShieldCheck, Minus } from 'lucide-react';
+import {
+  createChatMessage,
+  createChatThread,
+  createSupportTicketAttachment,
+  escalateChatThread,
+  listChatMessages
+} from '../lib/supportApi';
+import { requestUploadPresign } from '../lib/uploadsApi';
+import { createThread, streamThreadMessage, transcribeAudio } from '../lib/assistantApi';
 
 type SupportMode = 'duka' | 'seller-ai' | 'brand';
 
 type SupportMessage = {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
 };
@@ -51,33 +61,78 @@ const QUICK_REPLIES: Record<SupportMode, Array<{ label: string; value: string }>
   ]
 };
 
-type SupportContext = {
-  sellerName: string;
-  sellerRank: number;
-  sellerScore: number;
-  sellerBalance: number;
-  topProductName: string;
-  topProductPrice: number;
-  topProductGapPct: number;
-  topDukas: Array<{ name: string; scans: number }>;
-  demandSpike: string;
-  avgPriceGapText: string;
-};
-
 export const SupportChat: React.FC<{
   mode: SupportMode;
   onClose: () => void;
-  context: SupportContext;
-}> = ({ mode, onClose, context }) => {
+}> = ({ mode, onClose }) => {
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [booting, setBooting] = useState(false);
   const [typingDots, setTypingDots] = useState(0);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [ticketId, setTicketId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [escalating, setEscalating] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    setMessages([{ role: 'assistant', content: MODE_COPY[mode].starter }]);
+    let ignore = false;
+    const boot = async () => {
+      setBooting(true);
+      setErrorMessage(null);
+      setStatusMessage(null);
+      setThreadId(null);
+      setAssistantThreadId(null);
+      setTicketId(null);
+      setMessages([]);
+      try {
+        const thread = await createChatThread({ topic: MODE_COPY[mode].title });
+        if (ignore) return;
+        setThreadId(thread?.id ?? null);
+        try {
+          const aiThread = await createThread({ title: `${MODE_COPY[mode].title} Support` });
+          if (!ignore) setAssistantThreadId(aiThread?.id ?? null);
+        } catch (err: any) {
+          if (!ignore) {
+            setStatusMessage(err?.message || 'AI assistant unavailable.');
+          }
+        }
+        if (thread?.id) {
+          const items = await listChatMessages(thread.id);
+          if (ignore) return;
+          setMessages(
+            items.map((item: any, index: number) => ({
+              id: item?.id ?? `msg_${index}`,
+              role: item?.role === 'user' ? 'user' : 'assistant',
+              content: String(item?.content ?? '')
+            }))
+          );
+        }
+      } catch (err: any) {
+        if (!ignore) {
+          setErrorMessage(err?.message || 'Unable to start support chat.');
+        }
+      } finally {
+        if (!ignore) setBooting(false);
+      }
+    };
+    boot();
+    return () => {
+      ignore = true;
+    };
   }, [mode]);
 
   useEffect(() => {
@@ -85,10 +140,10 @@ export const SupportChat: React.FC<{
   }, [messages, loading]);
 
   useEffect(() => {
-    if (!loading) return;
+    if (!loading && !booting && !assistantLoading && !transcribing) return;
     const timer = setInterval(() => setTypingDots(prev => (prev + 1) % 4), 400);
     return () => clearInterval(timer);
-  }, [loading]);
+  }, [loading, booting, assistantLoading, transcribing]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -98,29 +153,248 @@ export const SupportChat: React.FC<{
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleSend = async () => {
+    if (!input.trim() || !threadId || loading) return;
     const text = input.trim();
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput('');
+    setErrorMessage(null);
+    setStatusMessage(null);
+    const optimistic: SupportMessage = {
+      id: `local_${Date.now()}`,
+      role: 'user',
+      content: text,
+    };
+    setMessages(prev => [...prev, optimistic]);
     setLoading(true);
-    window.setTimeout(() => {
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            mode === 'brand'
-              ? `Demand spike: ${context.demandSpike}. Top 5 dukas right now: ${context.topDukas
-                  .map(d => `${d.name} (${d.scans} scans)`)
-                  .join(', ')}. Want the live heatmap embed?`
-              : mode === 'seller-ai'
-              ? `Rank #${context.sellerRank} today. ${context.avgPriceGapText} Top item: ${context.topProductName} at KES ${context.topProductPrice}. Photo shelf → +2⭐ could push you #1.`
-              : `Hi ${context.sellerName}. QR + receipts are live. SC Wallet: ${context.sellerBalance} SC. 📸 Send counter sticker photo → +5⭐.`
+    try {
+      await createChatMessage(threadId, { role: 'user', content: text });
+      const items = await listChatMessages(threadId);
+      setMessages(
+        items.map((item: any, index: number) => ({
+          id: item?.id ?? `msg_${index}`,
+          role: item?.role === 'user' ? 'user' : 'assistant',
+          content: String(item?.content ?? '')
+        }))
+      );
+      if (assistantThreadId) {
+        setAssistantLoading(true);
+        try {
+          const aiText = await streamThreadMessage(assistantThreadId, {
+            content: text,
+            metadata: { support_thread_id: threadId, mode }
+          });
+          if (aiText?.trim()) {
+            await createChatMessage(threadId, { role: 'assistant', content: aiText.trim() });
+            const refreshed = await listChatMessages(threadId);
+            setMessages(
+              refreshed.map((item: any, index: number) => ({
+                id: item?.id ?? `msg_${index}`,
+                role: item?.role === 'user' ? 'user' : 'assistant',
+                content: String(item?.content ?? '')
+              }))
+            );
+          }
+        } catch (err: any) {
+          setStatusMessage(err?.message || 'AI assistant did not respond.');
+        } finally {
+          setAssistantLoading(false);
         }
-      ]);
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to send message.');
+    } finally {
       setLoading(false);
-    }, 700);
+    }
+  };
+
+  const handleEscalate = async () => {
+    if (!threadId || ticketId || escalating) return;
+    setEscalating(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const ticket = await escalateChatThread(threadId);
+      const id = ticket?.id ?? null;
+      setTicketId(id);
+      setStatusMessage(id ? 'Escalated to human support.' : 'Escalation requested.');
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to escalate chat.');
+    } finally {
+      setEscalating(false);
+    }
+  };
+
+  const handlePickAttachment = () => {
+    if (uploading || !threadId) return;
+    fileInputRef.current?.click();
+  };
+
+  const uploadToPresignedUrl = async (file: File, presign: any) => {
+    const uploadUrl = presign?.upload_url || presign?.url;
+    if (!uploadUrl) throw new Error('Missing upload URL');
+    const method = (presign?.method || 'PUT').toUpperCase();
+    const headers: Record<string, string> = { ...(presign?.headers || {}) };
+    if (!headers['Content-Type'] && file.type) {
+      headers['Content-Type'] = file.type;
+    }
+    const res = await fetch(uploadUrl, { method, headers, body: file });
+    if (!res.ok) {
+      throw new Error(`Upload failed (${res.status})`);
+    }
+    return presign?.s3_key || presign?.key;
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !threadId) return;
+    setUploading(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      let currentTicketId = ticketId;
+      if (!currentTicketId) {
+        const ticket = await escalateChatThread(threadId);
+        currentTicketId = ticket?.id ?? null;
+        setTicketId(currentTicketId);
+      }
+      if (!currentTicketId) {
+        throw new Error('Unable to create support ticket for attachment.');
+      }
+      const presign = await requestUploadPresign({
+        file_name: file.name,
+        mime_type: file.type || 'application/octet-stream',
+        content_length: file.size,
+        context: 'support'
+      });
+      const s3Key = await uploadToPresignedUrl(file, presign);
+      await createSupportTicketAttachment(currentTicketId, {
+        s3_key: s3Key,
+        file_name: file.name,
+        mime_type: file.type || 'application/octet-stream'
+      });
+      await createChatMessage(threadId, { role: 'user', content: `Uploaded attachment: ${file.name}` });
+      const items = await listChatMessages(threadId);
+      setMessages(
+        items.map((item: any, index: number) => ({
+          id: item?.id ?? `msg_${index}`,
+          role: item?.role === 'user' ? 'user' : 'assistant',
+          content: String(item?.content ?? '')
+        }))
+      );
+      setStatusMessage('Attachment uploaded.');
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Attachment upload failed.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleTranscribe = async () => {
+    if (isRecording || transcribing) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      const audioUrl = window.prompt('Audio URL to transcribe:');
+      if (!audioUrl?.trim()) return;
+      setErrorMessage(null);
+      setStatusMessage(null);
+      try {
+        const job = await transcribeAudio({ audio_url: audioUrl.trim() });
+        const transcript = job?.result?.text || job?.result?.transcript;
+        if (transcript && typeof transcript === 'string') {
+          setInput(transcript);
+          setStatusMessage('Transcription ready. Review and send.');
+        } else {
+          setStatusMessage(job?.id ? `Transcription queued: ${job.id}` : 'Transcription queued.');
+        }
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'Transcription failed.');
+      }
+      return;
+    }
+    setErrorMessage(null);
+    setStatusMessage('Recording… click Mic again to stop.');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+      setRecordingSeconds(0);
+      if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+      recorder.ondataavailable = (evt) => {
+        if (evt.data && evt.data.size > 0) recordingChunksRef.current.push(evt.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (recordingTimerRef.current) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (!blob.size) {
+          setStatusMessage('No audio captured.');
+          setIsRecording(false);
+          return;
+        }
+        setIsRecording(false);
+        setTranscribing(true);
+        try {
+          const fileName = `support_audio_${Date.now()}.webm`;
+          const file = new File([blob], fileName, { type: blob.type || 'audio/webm' });
+          const presign = await requestUploadPresign({
+            file_name: file.name,
+            mime_type: file.type || 'audio/webm',
+            content_length: file.size,
+            context: 'support_audio'
+          });
+          const uploadUrl = presign?.upload_url || presign?.url;
+          if (!uploadUrl) throw new Error('Upload URL missing.');
+          const s3Key = await uploadToPresignedUrl(file, presign);
+          const publicUrl = uploadUrl.split('?')[0];
+          const audioUrl = publicUrl || s3Key;
+          if (!audioUrl) throw new Error('Audio URL unavailable for transcription.');
+          const job = await transcribeAudio({ audio_url: audioUrl });
+          const transcript = job?.result?.text || job?.result?.transcript;
+          if (transcript && typeof transcript === 'string') {
+            setInput(transcript);
+            setStatusMessage('Transcription ready. Review and send.');
+          } else {
+            setStatusMessage(job?.id ? `Transcription queued: ${job.id}` : 'Transcription queued.');
+          }
+        } catch (err: any) {
+          setErrorMessage(err?.message || 'Transcription failed.');
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Microphone access failed.');
+      setIsRecording(false);
+    }
+  };
+
+  const handleStopRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    }
   };
 
   if (isMinimized) {
@@ -190,7 +464,7 @@ export const SupportChat: React.FC<{
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#f7faff]">
         {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={m.id ?? i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] p-3 rounded-2xl ${
               m.role === 'user'
                 ? 'bg-[#1976D2] text-white rounded-tr-none'
@@ -200,24 +474,81 @@ export const SupportChat: React.FC<{
             </div>
           </div>
         ))}
-        {loading && (
+        {(loading || booting) && (
           <div className="flex justify-start">
             <div className="bg-white border border-[#d6e6fa] rounded-2xl rounded-tl-none p-3 shadow-sm flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-[#1976D2]" />
-              <span className="text-[10px] font-bold text-zinc-500">Typing{'.'.repeat(typingDots)}</span>
+              <span className="text-[10px] font-bold text-zinc-500">
+                {booting ? 'Connecting' : 'Sending'}{'.'.repeat(typingDots)}
+              </span>
+            </div>
+          </div>
+        )}
+        {assistantLoading && (
+          <div className="flex justify-start">
+            <div className="bg-white border border-[#d6e6fa] rounded-2xl rounded-tl-none p-3 shadow-sm flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-[#1976D2]" />
+              <span className="text-[10px] font-bold text-zinc-500">Assistant typing{'.'.repeat(typingDots)}</span>
+            </div>
+          </div>
+        )}
+        {transcribing && (
+          <div className="flex justify-start">
+            <div className="bg-white border border-[#d6e6fa] rounded-2xl rounded-tl-none p-3 shadow-sm flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-[#1976D2]" />
+              <span className="text-[10px] font-bold text-zinc-500">Transcribing audio{'.'.repeat(typingDots)}</span>
             </div>
           </div>
         )}
       </div>
 
       <div className="p-4 border-t bg-white">
+        {errorMessage && (
+          <div className="mb-2 text-[10px] font-bold text-red-500">
+            {errorMessage}
+          </div>
+        )}
+        {statusMessage && (
+          <div className="mb-2 text-[10px] font-bold text-emerald-600">
+            {statusMessage}
+          </div>
+        )}
         <div className="flex gap-2">
-          <button className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileSelected}
+          />
+          <button
+            onClick={handlePickAttachment}
+            disabled={uploading || !threadId}
+            className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50"
+          >
             <Paperclip className="w-4 h-4" />
           </button>
-          <button className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full">
+          <button
+            onClick={isRecording ? handleStopRecording : handleTranscribe}
+            disabled={transcribing}
+            className={`p-2 rounded-full ${isRecording ? 'bg-red-500 text-white' : 'bg-[#eaf2ff] text-[#1976D2]'} disabled:opacity-50`}
+            title={isRecording ? 'Stop recording' : 'Record voice'}
+          >
             <Mic className="w-4 h-4" />
           </button>
+          {isRecording && (
+            <>
+              <div className="px-2 py-1 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
+                Recording {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
+              </div>
+              <div className="flex items-end gap-1 h-4">
+                <span className="w-1 h-2 bg-red-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-3 bg-red-400 rounded-full animate-pulse" style={{ animationDelay: '120ms' }} />
+                <span className="w-1 h-4 bg-red-400 rounded-full animate-pulse" style={{ animationDelay: '240ms' }} />
+                <span className="w-1 h-3 bg-red-400 rounded-full animate-pulse" style={{ animationDelay: '360ms' }} />
+                <span className="w-1 h-2 bg-red-400 rounded-full animate-pulse" style={{ animationDelay: '480ms' }} />
+              </div>
+            </>
+          )}
           <input
             type="text"
             value={input}
@@ -228,7 +559,7 @@ export const SupportChat: React.FC<{
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || loading}
+            disabled={!input.trim() || loading || !threadId}
             className="p-3 bg-[#1976D2] text-white rounded-full disabled:opacity-50 transition-opacity"
           >
             <Send className="w-5 h-5" />
@@ -236,7 +567,16 @@ export const SupportChat: React.FC<{
         </div>
         <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-400 font-bold">
           <span>Offline-ready • Syncs later</span>
-          <span>Swahili Voice Supported</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleEscalate}
+              disabled={escalating || !threadId || !!ticketId}
+              className="px-2 py-1 rounded-full border border-[#d6e6fa] text-[#1976D2] disabled:opacity-50"
+            >
+              {ticketId ? 'Escalated' : escalating ? 'Escalating…' : 'Escalate'}
+            </button>
+            <span>Swahili Voice Supported</span>
+          </div>
         </div>
       </div>
     </motion.div>

@@ -2,9 +2,6 @@ import React from 'react';
 import { 
   Bell, 
   Lock, 
-  Eye, 
-  Smartphone, 
-  Globe, 
   HelpCircle, 
   LogOut, 
   ChevronRight,
@@ -12,29 +9,34 @@ import {
   CreditCard,
   ShieldCheck,
   Download,
-  WifiOff,
   ToggleLeft,
   ToggleRight,
   Trash2,
   Database,
-  Volume2,
-  Sparkles
+  Volume2
 } from 'lucide-react';
+import { getNotificationPreferences, updateNotificationPreferences } from '../lib/notificationsApi';
+import { getConsents, getSettingsSummary, requestSettingsDeletion, requestSettingsExport, updateConsentByType } from '../lib/settingsApi';
 
 interface SettingsProps {
   onOpenDataDashboard?: () => void;
+  onOpenNotifications?: () => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
-  const [offlineMode, setOfflineMode] = React.useState(false);
-  const [language, setLanguage] = React.useState('English');
+export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenNotifications }) => {
   const [consents, setConsents] = React.useState({
-    location: true,
-    receipts: true,
-    personalization: true,
+    location: false,
+    receipts: false,
+    personalization: false,
     marketing: false
   });
-  const [favoriteAlerts, setFavoriteAlerts] = React.useState(true);
+  const [consentLoading, setConsentLoading] = React.useState<Record<string, boolean>>({});
+  const [notificationPrefs, setNotificationPrefs] = React.useState({
+    price_drops: false,
+    back_in_stock: false,
+    trending: false,
+    watched_items: false
+  });
   const [voiceFeedback, setVoiceFeedback] = React.useState(() => {
     try {
       return localStorage.getItem('soko:voice_feedback') === 'true';
@@ -42,30 +44,167 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
       return false;
     }
   });
-  const [dataSummary] = React.useState({
-    searches: 347,
-    receipts: 128,
-    purchases: 34,
-    reviews: 19
+  const [dataSummary, setDataSummary] = React.useState({
+    searches: 0,
+    receipts: 0,
+    purchases: 0,
+    reviews: 0
   });
-  const [preferredCategories, setPreferredCategories] = React.useState<string[]>(['Electronics', 'Groceries']);
-  const [priceRange, setPriceRange] = React.useState<[number, number]>([200, 20000]);
-  const [savedLocations] = React.useState({ home: 'Kawangware', work: 'CBD' });
-  const [alertPrefs, setAlertPrefs] = React.useState(() => {
+  const [consentHistory, setConsentHistory] = React.useState<Array<{ consent_type: string; consent_given: boolean; created_at?: string }>>([]);
+  const [showConsentHistory, setShowConsentHistory] = React.useState(false);
+  const [exportForm, setExportForm] = React.useState({
+    exportType: '',
+    verificationMethod: 'mfa',
+    recentLoginAt: ''
+  });
+  const [exportStatus, setExportStatus] = React.useState<string | null>(null);
+  const [deleteForm, setDeleteForm] = React.useState({
+    verificationMethod: 'mfa',
+    mfa: false,
+    verifiedDevice: false,
+    supportTicketId: ''
+  });
+  const [deleteStatus, setDeleteStatus] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let ignore = false;
+    const load = async () => {
+      try {
+        const [summary, consentsResp, prefs] = await Promise.all([
+          getSettingsSummary(),
+          getConsents(),
+          getNotificationPreferences()
+        ]);
+        if (ignore) return;
+        setDataSummary({
+          searches: Number(summary.searches || 0),
+          receipts: Number(summary.receipts || 0),
+          purchases: Number(summary.purchases || 0),
+          reviews: Number(summary.reviews || 0)
+        });
+        const nextConsents = { location: false, receipts: false, personalization: false, marketing: false };
+        (consentsResp.current || []).forEach((item) => {
+          switch (item.consent_type) {
+            case 'location':
+              nextConsents.location = Boolean(item.consent_given);
+              break;
+            case 'receipts':
+              nextConsents.receipts = Boolean(item.consent_given);
+              break;
+            case 'personalization':
+              nextConsents.personalization = Boolean(item.consent_given);
+              break;
+            case 'marketing':
+              nextConsents.marketing = Boolean(item.consent_given);
+              break;
+            default:
+              break;
+          }
+        });
+        setConsents(nextConsents);
+        setConsentHistory(
+          (consentsResp.history || []).map((item) => ({
+            consent_type: item.consent_type,
+            consent_given: Boolean(item.consent_given),
+            created_at: item.created_at
+          }))
+        );
+        setNotificationPrefs({
+          price_drops: Boolean(prefs.price_drops),
+          back_in_stock: Boolean(prefs.back_in_stock),
+          trending: Boolean(prefs.trending),
+          watched_items: Boolean(prefs.watched_items)
+        });
+      } catch {
+        if (!ignore) {
+          setDataSummary({ searches: 0, receipts: 0, purchases: 0, reviews: 0 });
+          setConsents({ location: false, receipts: false, personalization: false, marketing: false });
+          setNotificationPrefs({ price_drops: false, back_in_stock: false, trending: false, watched_items: false });
+          setConsentHistory([]);
+        }
+      }
+    };
+    load();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const handleConsentToggle = async (key: keyof typeof consents) => {
+    const nextValue = !consents[key];
+    setConsentLoading((prev) => ({ ...prev, [key]: true }));
     try {
-      const raw = localStorage.getItem('soko:alert_prefs');
-      return raw ? JSON.parse(raw) : { priceDrops: true, backInStock: true, trending: true };
-    } catch {
-      return { priceDrops: true, backInStock: true, trending: true };
+      await updateConsentByType(key, { consent_given: nextValue });
+      setConsents((prev) => ({ ...prev, [key]: nextValue }));
+      const refreshed = await getConsents();
+      setConsentHistory(
+        (refreshed.history || []).map((item) => ({
+          consent_type: item.consent_type,
+          consent_given: Boolean(item.consent_given),
+          created_at: item.created_at
+        }))
+      );
+    } catch {}
+    setConsentLoading((prev) => ({ ...prev, [key]: false }));
+  };
+
+  const handlePrefToggle = async (field: keyof typeof notificationPrefs) => {
+    const nextValue = !notificationPrefs[field];
+    try {
+      await updateNotificationPreferences({ [field]: nextValue } as any);
+      setNotificationPrefs((prev) => ({ ...prev, [field]: nextValue }));
+    } catch {}
+  };
+
+  const handleExport = async () => {
+    setExportStatus(null);
+    if (!exportForm.exportType.trim()) {
+      setExportStatus('export_type is required');
+      return;
     }
-  });
+    if (exportForm.verificationMethod === 'recent_login' && !exportForm.recentLoginAt) {
+      setExportStatus('recent_login_at is required for recent_login');
+      return;
+    }
+    const recentLoginAt = exportForm.recentLoginAt
+      ? new Date(exportForm.recentLoginAt).toISOString()
+      : undefined;
+    try {
+      const resp = await requestSettingsExport({
+        export_type: exportForm.exportType.trim(),
+        verification_method: exportForm.verificationMethod,
+        recent_login_at: recentLoginAt
+      });
+      setExportStatus(resp?.status || 'queued');
+    } catch (err: any) {
+      setExportStatus(err?.message || 'export failed');
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleteStatus(null);
+    if (!deleteForm.supportTicketId.trim()) {
+      setDeleteStatus('support_ticket_id is required');
+      return;
+    }
+    try {
+      const resp = await requestSettingsDeletion({
+        verification_method: deleteForm.verificationMethod,
+        mfa: deleteForm.mfa,
+        verified_device: deleteForm.verifiedDevice,
+        support_ticket_id: deleteForm.supportTicketId.trim()
+      });
+      setDeleteStatus(resp?.status || 'queued');
+    } catch (err: any) {
+      setDeleteStatus(err?.message || 'delete failed');
+    }
+  };
 
   React.useEffect(() => {
     try {
       localStorage.setItem('soko:voice_feedback', voiceFeedback ? 'true' : 'false');
-      localStorage.setItem('soko:alert_prefs', JSON.stringify(alertPrefs));
     } catch {}
-  }, [voiceFeedback, alertPrefs]);
+  }, [voiceFeedback]);
 
   const sections = [
     {
@@ -80,9 +219,6 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
       title: 'Preferences',
       items: [
         { icon: Bell, label: 'Notifications', color: 'text-amber-500' },
-        { icon: Eye, label: 'Privacy & Visibility', color: 'text-purple-500' },
-        { icon: Globe, label: 'Language & Region', color: 'text-cyan-500' },
-        { icon: Smartphone, label: 'App Appearance', color: 'text-zinc-500' },
       ]
     },
     {
@@ -108,6 +244,11 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
               {section.items.map((item, itemIdx) => (
                 <button 
                   key={itemIdx}
+                  onClick={() => {
+                    if (item.label === 'Notifications') {
+                      onOpenNotifications?.();
+                    }
+                  }}
                   className="w-full flex items-center justify-between p-4 hover:bg-zinc-50 transition-colors border-b last:border-b-0 border-zinc-50"
                 >
                   <div className="flex items-center gap-4">
@@ -128,43 +269,6 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
           Log Out
         </button>
 
-        {/* Offline Mode */}
-        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <WifiOff className="w-5 h-5 text-zinc-500" />
-              <div>
-                <p className="text-sm font-bold text-zinc-900">Offline Mode</p>
-                <p className="text-[10px] text-zinc-500">Cache recent searches and saved items.</p>
-              </div>
-            </div>
-            <button onClick={() => setOfflineMode(prev => !prev)} className="p-1 rounded-full">
-              {offlineMode ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
-            </button>
-          </div>
-          <div className="text-[10px] text-zinc-400">Status: {offlineMode ? 'Enabled' : 'Disabled'}</div>
-        </div>
-
-        {/* Language */}
-        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <Globe className="w-5 h-5 text-cyan-500" />
-            <div>
-              <p className="text-sm font-bold text-zinc-900">Language</p>
-              <p className="text-[10px] text-zinc-500">Choose your preferred language.</p>
-            </div>
-          </div>
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
-          >
-            <option>English</option>
-            <option>Swahili</option>
-            <option>Sheng</option>
-          </select>
-        </div>
-
         {/* Data Portability */}
         <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
           <div className="flex items-center gap-3 mb-3">
@@ -174,9 +278,39 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
               <p className="text-[10px] text-zinc-500">Export your activity and contributions.</p>
             </div>
           </div>
-          <button className="w-full py-3 bg-zinc-900 text-white rounded-xl text-xs font-bold">
-            Export Data
-          </button>
+          <div className="space-y-3">
+            <input
+              value={exportForm.exportType}
+              onChange={(e) => setExportForm((prev) => ({ ...prev, exportType: e.target.value }))}
+              placeholder="export_type (e.g., full)"
+              className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+            />
+            <select
+              value={exportForm.verificationMethod}
+              onChange={(e) => setExportForm((prev) => ({ ...prev, verificationMethod: e.target.value }))}
+              className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+            >
+              <option value="mfa">mfa</option>
+              <option value="recent_login">recent_login</option>
+            </select>
+            {exportForm.verificationMethod === 'recent_login' && (
+              <input
+                type="datetime-local"
+                value={exportForm.recentLoginAt}
+                onChange={(e) => setExportForm((prev) => ({ ...prev, recentLoginAt: e.target.value }))}
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+              />
+            )}
+            <button
+              onClick={handleExport}
+              className="w-full py-3 bg-zinc-900 text-white rounded-xl text-xs font-bold"
+            >
+              Export Data
+            </button>
+            {exportStatus && (
+              <div className="text-[10px] font-bold text-zinc-500">Status: {exportStatus}</div>
+            )}
+          </div>
         </div>
 
         {/* Data Dashboard */}
@@ -209,8 +343,8 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
               <p className="text-sm font-bold text-zinc-900">Favorite Shop Alerts</p>
               <p className="text-[10px] text-zinc-500">Notify me when favorite shops add new items.</p>
             </div>
-            <button onClick={() => setFavoriteAlerts(prev => !prev)} className="p-1 rounded-full">
-              {favoriteAlerts ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
+            <button onClick={() => handlePrefToggle('watched_items')} className="p-1 rounded-full">
+              {notificationPrefs.watched_items ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
             </button>
           </div>
         </div>
@@ -225,17 +359,17 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
             </div>
           </div>
           {[
-            { key: 'priceDrops', label: 'Price drop alerts' },
-            { key: 'backInStock', label: 'Back-in-stock alerts' },
+            { key: 'price_drops', label: 'Price drop alerts' },
+            { key: 'back_in_stock', label: 'Back-in-stock alerts' },
             { key: 'trending', label: 'Trending near you alerts' },
           ].map(item => (
             <div key={item.key} className="flex items-center justify-between py-2">
               <span className="text-[10px] font-bold text-zinc-600">{item.label}</span>
               <button
-                onClick={() => setAlertPrefs((prev: any) => ({ ...prev, [item.key]: !prev[item.key] }))}
+                onClick={() => handlePrefToggle(item.key as keyof typeof notificationPrefs)}
                 className="p-1 rounded-full"
               >
-                {alertPrefs[item.key as keyof typeof alertPrefs] ? (
+                {notificationPrefs[item.key as keyof typeof notificationPrefs] ? (
                   <ToggleRight className="w-6 h-6 text-emerald-600" />
                 ) : (
                   <ToggleLeft className="w-6 h-6 text-zinc-300" />
@@ -243,45 +377,6 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
               </button>
             </div>
           ))}
-        </div>
-
-        {/* Personalization Preferences */}
-        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <Sparkles className="w-5 h-5 text-amber-500" />
-            <div>
-              <p className="text-sm font-bold text-zinc-900">Personalization</p>
-              <p className="text-[10px] text-zinc-500">Preferred categories, budgets, and locations.</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {['Electronics', 'Groceries', 'Fashion', 'Home', 'Beauty'].map(cat => (
-              <button
-                key={cat}
-                onClick={() => setPreferredCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat])}
-                className={`px-3 py-1.5 rounded-full text-[10px] font-bold ${preferredCategories.includes(cat) ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-          <div className="mb-3">
-            <p className="text-[10px] font-bold text-zinc-500 mb-2">Default price range (KES)</p>
-            <input
-              type="range"
-              min="100"
-              max="100000"
-              step="100"
-              value={priceRange[1]}
-              onChange={(e) => setPriceRange([priceRange[0], parseInt(e.target.value)])}
-              className="w-full accent-indigo-600"
-            />
-            <div className="text-[10px] text-zinc-600 font-bold">KES {priceRange[0]} - {priceRange[1]}</div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-zinc-600">
-            <div className="p-2 bg-zinc-50 rounded-xl">Home: {savedLocations.home}</div>
-            <div className="p-2 bg-zinc-50 rounded-xl">Work: {savedLocations.work}</div>
-          </div>
         </div>
 
         {/* Consent & Privacy */}
@@ -302,7 +397,8 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
             <div key={item.key} className="flex items-center justify-between py-2">
               <span className="text-[10px] font-bold text-zinc-600">{item.label}</span>
               <button 
-                onClick={() => setConsents(prev => ({ ...prev, [item.key]: !prev[item.key as keyof typeof prev] }))}
+                onClick={() => handleConsentToggle(item.key as keyof typeof consents)}
+                disabled={Boolean(consentLoading[item.key])}
                 className="p-1 rounded-full"
               >
                 {consents[item.key as keyof typeof consents] ? (
@@ -314,6 +410,39 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
             </div>
           ))}
         </div>
+
+        {consentHistory.length > 0 && (
+          <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
+            <div className="flex items-center gap-3 mb-3">
+              <ShieldCheck className="w-5 h-5 text-emerald-500" />
+              <div>
+                <p className="text-sm font-bold text-zinc-900">Consent History</p>
+                <p className="text-[10px] text-zinc-500">Most recent consent changes.</p>
+              </div>
+              <div className="ml-auto">
+                <button
+                  onClick={() => setShowConsentHistory(true)}
+                  className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase bg-zinc-100 text-zinc-600"
+                >
+                  View All
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {consentHistory.slice(0, 5).map((item, idx) => (
+                <div key={`${item.consent_type}-${item.created_at || idx}`} className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
+                  <span className="uppercase">{item.consent_type}</span>
+                  <span className={item.consent_given ? 'text-emerald-600' : 'text-rose-500'}>
+                    {item.consent_given ? 'Granted' : 'Denied'}
+                  </span>
+                  <span className="text-zinc-400">
+                    {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Voice Feedback */}
         <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
@@ -340,9 +469,32 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
               <p className="text-[10px] text-zinc-500">Request permanent deletion of your data.</p>
             </div>
           </div>
-          <button className="w-full py-3 bg-red-600 text-white rounded-xl text-xs font-bold">
-            Request Data Deletion
-          </button>
+          <div className="space-y-3">
+            <input
+              value={deleteForm.supportTicketId}
+              onChange={(e) => setDeleteForm((prev) => ({ ...prev, supportTicketId: e.target.value }))}
+              placeholder="support_ticket_id"
+              className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+            />
+            <div className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
+              <span>MFA verified</span>
+              <button onClick={() => setDeleteForm((prev) => ({ ...prev, mfa: !prev.mfa }))} className="p-1 rounded-full">
+                {deleteForm.mfa ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
+              </button>
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
+              <span>Verified device</span>
+              <button onClick={() => setDeleteForm((prev) => ({ ...prev, verifiedDevice: !prev.verifiedDevice }))} className="p-1 rounded-full">
+                {deleteForm.verifiedDevice ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
+              </button>
+            </div>
+            <button onClick={handleDelete} className="w-full py-3 bg-red-600 text-white rounded-xl text-xs font-bold">
+              Request Data Deletion
+            </button>
+            {deleteStatus && (
+              <div className="text-[10px] font-bold text-zinc-500">Status: {deleteStatus}</div>
+            )}
+          </div>
         </div>
 
         <div className="text-center pb-10">
@@ -350,6 +502,43 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard }) => {
           <p className="text-[10px] text-zinc-300">Version 2.4.0 (Build 842)</p>
         </div>
       </div>
+      {showConsentHistory && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white rounded-2xl border border-zinc-100 shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-zinc-100 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-zinc-900">All Consent History</p>
+                <p className="text-[10px] text-zinc-500">Complete change log.</p>
+              </div>
+              <button
+                onClick={() => setShowConsentHistory(false)}
+                className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase bg-zinc-100 text-zinc-600"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto p-4 space-y-2">
+              {consentHistory.map((item, idx) => (
+                <div
+                  key={`full-${item.consent_type}-${item.created_at || idx}`}
+                  className="flex items-center justify-between text-[10px] font-bold text-zinc-700"
+                >
+                  <span className="uppercase">{item.consent_type}</span>
+                  <span className={item.consent_given ? 'text-emerald-600' : 'text-rose-500'}>
+                    {item.consent_given ? 'Granted' : 'Denied'}
+                  </span>
+                  <span className="text-zinc-400">
+                    {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
+                  </span>
+                </div>
+              ))}
+              {consentHistory.length === 0 && (
+                <div className="text-[10px] font-bold text-zinc-400">No history available.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

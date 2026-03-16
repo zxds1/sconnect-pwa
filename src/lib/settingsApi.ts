@@ -1,0 +1,64 @@
+import { apiFetch } from './apiClient';
+
+export type ConsentRecord = {
+  consent_type: string;
+  consent_given: boolean;
+  version?: number;
+  expiry_date?: string | null;
+  metadata?: Record<string, any>;
+  created_at?: string;
+};
+
+export type ConsentHistoryRecord = {
+  consent_type: string;
+  consent_given: boolean;
+  version?: number;
+  expiry_date?: string | null;
+  snapshot?: Record<string, any>;
+  created_at?: string;
+};
+
+export type ConsentsResponse = {
+  current?: ConsentRecord[];
+  history?: ConsentHistoryRecord[];
+};
+
+export type SettingsSummary = {
+  searches?: number;
+  receipts?: number;
+  purchases?: number;
+  reviews?: number;
+};
+
+export type SettingsExportResponse = Record<string, any>;
+export type SettingsDeleteResponse = Record<string, any>;
+
+export const getConsents = async (): Promise<ConsentsResponse> =>
+  apiFetch('/v1/settings/consents');
+
+export const updateConsentByType = async (consentType: string, payload: { consent_given: boolean; expiry_date?: string | null; metadata?: Record<string, any> }) =>
+  apiFetch(`/v1/settings/consents/${encodeURIComponent(consentType)}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const updateConsents = async (payload: { consents: Array<{ consent_type: string; consent_given: boolean; expiry_date?: string | null; metadata?: Record<string, any> }> }) =>
+  apiFetch('/v1/settings/consents', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const getSettingsSummary = async (): Promise<SettingsSummary> =>
+  apiFetch('/v1/settings/data-summary');
+
+export const requestSettingsExport = async (payload: { export_type: string; verification_method: string; recent_login_at?: string }) : Promise<SettingsExportResponse> =>
+  apiFetch('/v1/settings/export', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const requestSettingsDeletion = async (payload: { verification_method: string; mfa: boolean; verified_device: boolean; support_ticket_id: string }) : Promise<SettingsDeleteResponse> =>
+  apiFetch('/v1/settings/delete-account', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });

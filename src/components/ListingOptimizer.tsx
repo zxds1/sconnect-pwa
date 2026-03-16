@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Sparkles, Send, Bot, User, X, Loader2, ImageIcon, Video, Check, RefreshCw } from 'lucide-react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { createThread, streamThreadMessage } from '../lib/assistantApi';
+import { applyListingSession, createListingSession, sendListingMessage } from '../lib/listingAssistantApi';
 
 interface Message {
   role: 'user' | 'model';
@@ -36,13 +37,57 @@ export const ListingOptimizer: React.FC<ListingOptimizerProps> = ({ initialData,
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentSuggestion, setCurrentSuggestion] = useState<Message['suggestion'] | null>(null);
+  const [listingSessionId, setListingSessionId] = useState<string | null>(null);
+  const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    const bootstrap = async () => {
+      try {
+        const [session, thread] = await Promise.all([
+          createListingSession(),
+          createThread({ title: 'Listing Optimizer' })
+        ]);
+        if (!aliveRef.current) return;
+        if (session?.session_id) setListingSessionId(session.session_id);
+        if (thread?.id) setAssistantThreadId(thread.id);
+      } catch {
+        // If assistant services are unavailable, keep UI functional.
+      }
+    };
+    bootstrap();
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  const parseSuggestion = (payload: string) => {
+    const trimmed = payload.trim();
+    const jsonMatch = trimmed.match(/```json\\n([\\s\\S]*?)```/i);
+    const candidate = jsonMatch ? jsonMatch[1] : trimmed;
+    if (!candidate.startsWith('{')) return null;
+    try {
+      const data = JSON.parse(candidate);
+      if (data?.suggestion) return data.suggestion as Message['suggestion'];
+      if (data?.title && data?.description && data?.price && data?.category) {
+        return {
+          title: data.title,
+          description: data.description,
+          price: Number(data.price),
+          category: data.category
+        };
+      }
+    } catch {}
+    return null;
+  };
 
   const handleSend = async (text?: string, media?: Message['media']) => {
     const userMessage = text || input.trim();
@@ -55,80 +100,33 @@ export const ListingOptimizer: React.FC<ListingOptimizerProps> = ({ initialData,
     setIsLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-3-flash-preview";
-      
-      const systemInstruction = `You are an expert e-commerce listing optimizer. 
-      Your goal is to help sellers create high-converting product listings.
-      
-      When a user provides product info or asks for optimization:
-      1. Suggest an optimized Title, Description, Price, and Category.
-      2. Ask follow-up questions to understand the product better (e.g., "What is the material?", "Who is the target audience?").
-      3. Be conversational and encouraging.
-      4. If the user provides images/videos (simulated in text), use that context.
-      
-      Current Product Context:
-      - Name: ${initialData.name}
-      - Description: ${initialData.description}
-      - Price: $${initialData.price}
-      - Category: ${initialData.category}
-      
-      You MUST respond with a JSON object if you are making a suggestion, otherwise respond with text.
-      The JSON schema for suggestions:
-      {
-        "text": "Your conversational response here",
-        "suggestion": {
-          "title": "Optimized Title",
-          "description": "Optimized Description",
-          "price": 0.00,
-          "category": "Category Name"
-        }
+      let sessionId = listingSessionId;
+      if (!sessionId) {
+        const session = await createListingSession();
+        sessionId = session?.session_id || null;
+        if (sessionId) setListingSessionId(sessionId);
       }
-      If you are just asking a question or chatting, just return the text.`;
-
-      const chatHistory = messages.map(m => ({
-        role: m.role,
-        parts: [{ text: m.content }]
-      }));
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          ...chatHistory,
-          { role: 'user', parts: [{ text: userMessage }] }
-        ],
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              text: { type: Type.STRING },
-              suggestion: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  price: { type: Type.NUMBER },
-                  category: { type: Type.STRING }
-                }
-              }
-            },
-            required: ["text"]
+      if (sessionId) {
+        await sendListingMessage({ session_id: sessionId, role: 'user', content: userMessage });
+      }
+      let assistantReply = '';
+      if (assistantThreadId) {
+        assistantReply = await streamThreadMessage(assistantThreadId, {
+          content: userMessage,
+          metadata: {
+            mode: 'listing_optimizer',
+            product: initialData
           }
-        }
-      });
-
-      const aiResponse = response.text || "{}";
-      const data = JSON.parse(aiResponse);
+        });
+      }
+      const suggestion = assistantReply ? parseSuggestion(assistantReply) : null;
       setMessages(prev => [...prev, { 
         role: 'model', 
-        content: data.text, 
-        suggestion: data.suggestion 
+        content: assistantReply || 'Message sent. Assistant response pending.',
+        suggestion: suggestion || undefined
       }]);
-      
-      if (data.suggestion) {
-        setCurrentSuggestion(data.suggestion);
+      if (suggestion) {
+        setCurrentSuggestion(suggestion);
       }
     } catch (error) {
       console.error("AI Error:", error);
@@ -138,7 +136,7 @@ export const ListingOptimizer: React.FC<ListingOptimizerProps> = ({ initialData,
     }
   };
 
-  const handleApply = () => {
+  const handleApply = async () => {
     if (currentSuggestion) {
       onApply({
         name: currentSuggestion.title,
@@ -146,6 +144,11 @@ export const ListingOptimizer: React.FC<ListingOptimizerProps> = ({ initialData,
         price: currentSuggestion.price.toString(),
         category: currentSuggestion.category
       });
+      if (listingSessionId) {
+        try {
+          await applyListingSession({ session_id: listingSessionId });
+        } catch {}
+      }
     }
   };
 

@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Camera, ChevronRight, CheckCircle2, Info, Trophy, TrendingUp, Sparkles, X } from 'lucide-react';
+import { completeOnboarding, recordOnboardingEvent } from '../lib/onboardingApi';
 
 interface OnboardingProps {
   onFinish: () => void;
@@ -96,8 +97,15 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
   const slide = slides[index];
   const progressDots = useMemo(() => slides.map((_, i) => i <= index), [index]);
 
-  const handleNext = () => {
+  useEffect(() => {
+    recordOnboardingEvent({ step: index, action: 'view' }).catch(() => {});
+  }, [index]);
+
+  const handleNext = async () => {
     if (index === slides.length - 1) {
+      try {
+        await completeOnboarding();
+      } catch {}
       onFinish();
       return;
     }
@@ -108,15 +116,18 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
   const startDemo = () => {
     setShowDemo(true);
     setDemoStep('ready');
+    recordOnboardingEvent({ step: index, action: 'demo_start' }).catch(() => {});
   };
 
   const advanceDemo = () => {
     if (demoStep === 'ready') {
       setDemoStep('counted');
+      recordOnboardingEvent({ step: index, action: 'demo_counted' }).catch(() => {});
       return;
     }
     if (demoStep === 'counted') {
       setDemoStep('earned');
+      recordOnboardingEvent({ step: index, action: 'demo_earned' }).catch(() => {});
       return;
     }
     setShowDemo(false);
@@ -136,7 +147,10 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
             </div>
           </div>
           <button
-            onClick={onFinish}
+            onClick={() => {
+              recordOnboardingEvent({ step: index, action: 'exit' }).catch(() => {});
+              onFinish();
+            }}
             className="w-8 h-8 rounded-full bg-white shadow flex items-center justify-center text-slate-500 hover:text-slate-900"
             aria-label="Exit onboarding"
           >
@@ -295,6 +309,21 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
 
         <div className="flex items-center justify-between">
           <button
+            onClick={() => {
+              if (index === 0) {
+                recordOnboardingEvent({ step: index, action: 'back_disabled' }).catch(() => {});
+                return;
+              }
+              recordOnboardingEvent({ step: index, action: 'back' }).catch(() => {});
+              setShowTooltip(false);
+              setIndex(prev => Math.max(0, prev - 1));
+            }}
+            disabled={index === 0}
+            className="px-4 py-3 bg-white border border-blue-100 text-blue-600 rounded-xl text-[10px] font-black disabled:opacity-40"
+          >
+            Back
+          </button>
+          <button
             onClick={handleNext}
             className="px-5 py-3 bg-blue-600 text-white rounded-xl font-black text-sm flex items-center gap-2 active:scale-95 transition-transform"
           >
@@ -310,7 +339,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
           </button>
           {index === slides.length - 1 && (
             <button
-              onClick={onFinish}
+              onClick={handleNext}
               className="px-4 py-3 bg-white border border-blue-100 text-blue-600 rounded-xl text-[10px] font-black"
             >
               Basic KSh2k/mo

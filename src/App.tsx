@@ -8,6 +8,7 @@ import { Profile } from './components/Profile';
 import { Shops } from './components/Shops';
 import { Search as SearchView } from './components/Search';
 import { Settings } from './components/Settings';
+import { Notifications } from './components/Notifications';
 import { DataDashboard } from './components/DataDashboard';
 import { WhatsAppExperience } from './components/WhatsAppExperience';
 import { ProductDetail } from './components/ProductDetail';
@@ -22,16 +23,19 @@ import { Assistant } from './components/Assistant';
 import { PullToRefresh } from './components/PullToRefresh';
 import { PRODUCTS, SELLERS } from './mockData';
 import { Product } from './types';
+import { getOnboardingState } from './lib/onboardingApi';
+import { addCompareItem, getCompareList, removeCompareItem } from './lib/compareApi';
+import { getProduct } from './lib/catalogApi';
+import { addCartItem, checkoutCart } from './lib/cartApi';
 
 export default function App() {
-  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp'>('assistant');
+  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications'>('assistant');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [comparisonList, setComparisonList] = useState<Product[]>([]);
   const [products, setProducts] = useState<Product[]>(PRODUCTS);
-  const [bag, setBag] = useState<Product[]>([]);
   const [followedSellerIds, setFollowedSellerIds] = useState<string[]>([]);
   const [likedProductIds, setLikedProductIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -81,22 +85,79 @@ export default function App() {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('soko:onboarding_nudges') !== 'dismissed';
   });
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem('soko:onboarding_complete') !== 'true';
-  });
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
-  const handleAddToComparison = (product: Product) => {
-    if (comparisonList.find(p => p.id === product.id)) {
-      setComparisonList(prev => prev.filter(p => p.id !== product.id));
-      return;
-    }
-    setComparisonList(prev => [...prev, product]);
-    handleInteraction(product.id, 'add_to_comparison');
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const state = await getOnboardingState();
+        if (!alive) return;
+        const completed = state?.status === 'completed' || !!state?.completed_at;
+        setShowOnboarding(!completed);
+      } catch {
+        if (!alive) return;
+        setShowOnboarding(true);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const loadCompare = async () => {
+      try {
+        await syncCompareList();
+      } catch (err) {
+        if (!alive) return;
+        console.error(err);
+      }
+    };
+    loadCompare();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const syncCompareList = async () => {
+    const listResp = await getCompareList();
+    const items = Array.isArray(listResp?.items) ? listResp.items : [];
+    const productEntries = await Promise.all(
+      items.map(async (item) => {
+        try {
+          return await getProduct(item.product_id);
+        } catch {
+          return null;
+        }
+      })
+    );
+    setComparisonList(productEntries.filter(Boolean) as Product[]);
   };
 
-  const handleRemoveFromComparison = (id: string) => {
-    setComparisonList(prev => prev.filter(p => p.id !== id));
+  const handleAddToComparison = async (product: Product) => {
+    try {
+      if (comparisonList.find(p => p.id === product.id)) {
+        await removeCompareItem(product.id);
+      } else {
+        await addCompareItem({ product_id: product.id });
+      }
+      await syncCompareList();
+      handleInteraction(product.id, 'add_to_comparison');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRemoveFromComparison = async (id: string) => {
+    try {
+      await removeCompareItem(id);
+      await syncCompareList();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleInteraction = (productId: string, type: string) => {
@@ -120,14 +181,29 @@ export default function App() {
     setToast('Post created and added to your feed.');
   };
 
-  const handleAddToBag = (product: Product) => {
-    setBag(prev => (prev.find(p => p.id === product.id) ? prev : [...prev, product]));
-    setToast(`${product.name} added to bag.`);
+  const handleAddToBag = async (product: Product) => {
+    try {
+      const sellerId = product.sellerId || (product as any).seller_id;
+      const price = product.price;
+      if (!sellerId) {
+        setToast('Seller unavailable for this item.');
+        return;
+      }
+      await addCartItem({ product_id: product.id, seller_id: sellerId, quantity: 1, unit_price: price });
+      setToast(`${product.name} added to bag.`);
+    } catch (err: any) {
+      setToast(err?.message || 'Unable to add to bag.');
+    }
   };
 
-  const handleBuyNow = (product: Product) => {
-    handleAddToBag(product);
-    alert(`Proceeding to checkout for ${product.name}.`);
+  const handleBuyNow = async (product: Product) => {
+    try {
+      await handleAddToBag(product);
+      await checkoutCart();
+      setToast(`Checkout started for ${product.name}.`);
+    } catch (err: any) {
+      setToast(err?.message || 'Unable to checkout.');
+    }
   };
 
   const handleToggleFollow = (sellerId: string) => {
@@ -158,18 +234,9 @@ export default function App() {
               className="h-full w-full"
             >
               <Feed 
-                products={products} 
                 onChatOpen={handleChatOpen}
                 onProductOpen={handleProductOpen}
-                onInteraction={handleInteraction}
                 onSellerOpen={handleShopClick}
-                onToggleFollow={handleToggleFollow}
-                followedSellerIds={followedSellerIds}
-                onAddToBag={handleAddToBag}
-                onBuyNow={handleBuyNow}
-                onCreatePost={handleCreatePost}
-                likedProductIds={likedProductIds}
-                onToggleLike={handleToggleLike}
               />
             </motion.div>
           )}
@@ -195,7 +262,6 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <SearchView 
-                products={products}
                 onProductOpen={handleProductOpen} 
                 comparisonList={comparisonList}
                 onAddToComparison={handleAddToComparison}
@@ -268,9 +334,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <ComparisonView 
-                products={comparisonList} 
                 onClose={() => setView('search')}
-                onRemove={handleRemoveFromComparison}
                 onProductOpen={handleProductOpen}
               />
             </motion.div>
@@ -332,20 +396,8 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <Bag
-                items={bag}
-                allProducts={products}
                 onBack={() => setView('assistant')}
-                onRemove={(id) => setBag(prev => prev.filter(p => p.id !== id))}
                 onOpenProduct={handleProductOpen}
-                onSwap={(current, next) => {
-                  setBag(prev => prev.map(p => (p.id === current.id ? next : p)));
-                  setToast(`Switched to ${next.name}.`);
-                }}
-                onSwitchAll={(target) => {
-                  if (target.length === 0) return;
-                  setBag(target);
-                  setToast('Switched all bag items.');
-                }}
               />
             </motion.div>
           )}
@@ -424,7 +476,20 @@ export default function App() {
                 </button>
                 <h1 className="ml-4 text-xl font-bold">Settings</h1>
               </div>
-              <Settings onOpenDataDashboard={() => setView('data')} />
+              <Settings onOpenDataDashboard={() => setView('data')} onOpenNotifications={() => setView('notifications')} />
+            </motion.div>
+          )}
+
+          {view === 'notifications' && (
+            <motion.div
+              key="notifications"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="h-full w-full bg-white z-50"
+            >
+              <Notifications onBack={() => setView('settings')} />
             </motion.div>
           )}
 
@@ -493,7 +558,6 @@ export default function App() {
         {showOnboarding && (
           <Onboarding
             onFinish={() => {
-              localStorage.setItem('soko:onboarding_complete', 'true');
               setShowOnboarding(false);
               setToast('📸 Ali photo’d Sugar. Beat him? +2⭐');
             }}
@@ -549,31 +613,6 @@ export default function App() {
         <SupportChat
           mode={supportChatMode}
           onClose={() => setSupportChatMode(null)}
-          context={(() => {
-            const seller = SELLERS[0];
-            const sellerProducts = products.filter(p => p.sellerId === seller.id);
-            const topProduct = sellerProducts[0] || products[0];
-            const comp = topProduct?.competitorPrice || (topProduct?.price ?? 1) * 1.08;
-            const gapPct = comp ? Math.round(((comp - (topProduct?.price || 0)) / comp) * 100) : 0;
-            const ranked = [...SELLERS].sort((a, b) => b.sokoScore - a.sokoScore);
-            const rank = Math.max(1, ranked.findIndex(s => s.id === seller.id) + 1);
-            const topDukas = ranked.slice(0, 5).map((s, idx) => ({
-              name: s.name,
-              scans: 120 - idx * 9
-            }));
-            return {
-              sellerName: seller.name,
-              sellerRank: rank,
-              sellerScore: seller.sokoScore,
-              sellerBalance,
-              topProductName: topProduct?.name || 'Top product',
-              topProductPrice: topProduct?.price || 0,
-              topProductGapPct: gapPct,
-              topDukas,
-              demandSpike: 'Omo +47% Kibera',
-              avgPriceGapText: gapPct > 0 ? `You are ${gapPct}% above area average.` : 'You are priced at the area average.'
-            };
-          })()}
         />
       )}
     </div>

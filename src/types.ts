@@ -24,6 +24,7 @@ export type PricePoint = {
 export type Product = {
   id: string;
   sellerId: string;
+  productId?: string;
   name: string;
   description: string;
   price: number;

@@ -1,18 +1,33 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, ArrowRight, MapPin, AlertTriangle, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp } from 'lucide-react';
+import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, AlertTriangle, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp } from 'lucide-react';
 import { Product } from '../types';
-import { SELLERS } from '../mockData';
-import { 
-  ResponsiveContainer, AreaChart, Area, XAxis, Tooltip 
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, Tooltip
 } from 'recharts';
-
-const MOCK_SALES_TREND = [
-  { name: 'W1', sales: 45 },
-  { name: 'W2', sales: 52 },
-  { name: 'W3', sales: 48 },
-  { name: 'W4', sales: 70 },
-];
+import {
+  addProfileFavorite,
+  connectProfileSocial,
+  createProfilePost,
+  createProfileShare,
+  deleteProfilePost,
+  disconnectProfileSocial,
+  getProfile,
+  getProfileInsights,
+  getProfileInsightsEngagement,
+  getProfileInsightsHistory,
+  getProfileInsightsReach,
+  getProfileInsightsTrending,
+  getProfileShareLink,
+  listProfileFavorites,
+  listProfileLikes,
+  listProfilePosts,
+  listProfileReviews,
+  listProfileSocial,
+  removeProfileFavorite,
+  updateProfile
+} from '../lib/profileApi';
+import { getShopProfile, getShopStats } from '../lib/shopDirectoryApi';
 
 interface ProfileProps {
   onBack?: () => void;
@@ -24,102 +39,251 @@ interface ProfileProps {
   onToggleFollow?: (sellerId: string) => void;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProductOpen, sellerId, products, isFollowing, onToggleFollow }) => {
-  const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
-  const [shopReviews, setShopReviews] = useState<any[]>([]);
-  const [shopReviewForm, setShopReviewForm] = useState({ name: 'You', rating: 5, comment: '' });
+type ProfileData = {
+  id?: string;
+  display_name?: string;
+  name?: string;
+  avatar_url?: string;
+  avatar?: string;
+  bio?: string;
+  description?: string;
+  is_public?: boolean;
+};
 
-  const seller = sellerId ? SELLERS.find(s => s.id === sellerId) : null;
+export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProductOpen, sellerId, products, onToggleFollow }) => {
+  const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [shopProfile, setShopProfile] = useState<Record<string, any> | null>(null);
+  const [shopStats, setShopStats] = useState<Record<string, any> | null>(null);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [likes, setLikes] = useState<any[]>([]);
+  const [favorites, setFavorites] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [insights, setInsights] = useState<Record<string, any> | null>(null);
+  const [insightsHistory, setInsightsHistory] = useState<any[]>([]);
+  const [insightsTrending, setInsightsTrending] = useState<{ trending?: string; status?: string } | null>(null);
+  const [insightsReach, setInsightsReach] = useState<Record<string, any> | null>(null);
+  const [insightsEngagement, setInsightsEngagement] = useState<Record<string, any> | null>(null);
+  const [socialConnections, setSocialConnections] = useState<any[]>([]);
+  const [shareLink, setShareLink] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ display_name: '', bio: '', avatar_url: '', is_public: true });
+  const [newPost, setNewPost] = useState({ content: '', media_url: '' });
+
   const isOwnProfile = !sellerId;
 
-  const profileData = seller || {
-    name: 'B-Tech Group',
-    avatar: 'https://picsum.photos/seed/user/200/200',
-    description: 'Passionate about tech and sustainable commerce. Exploring the future of AI shopping. 🚀',
-    stats: {
-      following: '124',
-      followers: '45.2k',
-      likes: '1.2M'
+  const profileData = useMemo(() => {
+    if (!isOwnProfile && shopProfile) {
+      return {
+        name: shopProfile.name,
+        avatar: shopProfile.avatar || shopProfile.logo,
+        description: shopProfile.description,
+        is_verified: shopProfile.verified,
+      } as any;
     }
-  };
+    return {
+      name: profile?.display_name || profile?.name || 'Profile',
+      avatar: profile?.avatar_url || profile?.avatar || 'https://picsum.photos/seed/user/200/200',
+      description: profile?.bio || profile?.description || 'Your profile overview.',
+      is_verified: false,
+    } as any;
+  }, [isOwnProfile, profile, shopProfile]);
 
-  const handleShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${profileData.name} Profile`,
-          text: `Check out ${profileData.name} on Sconnect!`,
-          url: window.location.href,
-        });
-      } catch (err) {
-        console.log('Error sharing:', err);
-      }
-    } else {
-      alert('Profile link copied to clipboard!');
+  const stats = useMemo(() => {
+    if (!isOwnProfile && shopStats) {
+      return {
+        following: shopStats.following || 0,
+        followers: shopStats.followers || shopStats.follower_count || 0,
+        likes: shopStats.likes || 0,
+      };
     }
-  };
+    return {
+      following: favorites.length,
+      followers: insights?.followers || insights?.total_followers || 0,
+      likes: likes.length,
+    };
+  }, [isOwnProfile, shopStats, favorites.length, insights, likes.length]);
 
   const sellerProducts = sellerId ? products.filter(p => p.sellerId === sellerId) : [];
+  const likedProducts = useMemo(() => {
+    const likedIds = likes.map((item) => item.product_id || item.productId || item.id);
+    return products.filter(p => likedIds.includes(p.id));
+  }, [likes, products]);
+
+  const isFollowingSeller = useMemo(() => {
+    if (!sellerId) return false;
+    const favIds = favorites.map((f) => f.seller_id || f.sellerId || f.id);
+    return favIds.includes(sellerId);
+  }, [favorites, sellerId]);
 
   useEffect(() => {
-    if (!sellerId) return;
-    try {
-      const raw = localStorage.getItem('soko:shopReviews');
-      const data = raw ? JSON.parse(raw) : {};
-      const list = Array.isArray(data[sellerId]) ? data[sellerId] : [];
-      setShopReviews(list);
-    } catch {
-      setShopReviews([]);
-    }
+    let alive = true;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        if (sellerId) {
+          const [shop, statsResp] = await Promise.all([
+            getShopProfile(sellerId),
+            getShopStats(sellerId).catch(() => null),
+          ]);
+          if (!alive) return;
+          setShopProfile(shop || null);
+          setShopStats(statsResp || null);
+        } else {
+          const [profileResp, postsResp, likesResp, favResp, reviewsResp, insightsResp, insightsHistResp, trendResp, reachResp, engagementResp, socialResp, shareResp] = await Promise.all([
+            getProfile(),
+            listProfilePosts(),
+            listProfileLikes(),
+            listProfileFavorites(),
+            listProfileReviews(),
+            getProfileInsights(),
+            getProfileInsightsHistory(),
+            getProfileInsightsTrending(),
+            getProfileInsightsReach(),
+            getProfileInsightsEngagement(),
+            listProfileSocial(),
+            getProfileShareLink().catch(() => null),
+          ]);
+          if (!alive) return;
+          setProfile(profileResp || null);
+          setPosts(postsResp || []);
+          setLikes(likesResp || []);
+          setFavorites(favResp || []);
+          setReviews(reviewsResp || []);
+          setInsights(insightsResp || null);
+          setInsightsHistory(insightsHistResp || []);
+          setInsightsTrending(trendResp || null);
+          setInsightsReach(reachResp || null);
+          setInsightsEngagement(engagementResp || null);
+          setSocialConnections(socialResp || []);
+          setShareLink(shareResp?.share_token || '');
+          setEditForm({
+            display_name: profileResp?.display_name || '',
+            bio: profileResp?.bio || '',
+            avatar_url: profileResp?.avatar_url || '',
+            is_public: profileResp?.is_public ?? true,
+          });
+        }
+      } catch (err: any) {
+        if (!alive) return;
+        setError(err?.message || 'Unable to load profile.');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
   }, [sellerId]);
 
-  const handleSubmitShopReview = () => {
-    if (!sellerId || !shopReviewForm.comment.trim()) return;
-    const review = {
-      id: `sr_${Date.now()}`,
-      userName: shopReviewForm.name || 'You',
-      rating: shopReviewForm.rating,
-      comment: shopReviewForm.comment,
-      timestamp: Date.now(),
-      replies: []
-    };
+  const handleShare = async () => {
     try {
-      const raw = localStorage.getItem('soko:shopReviews');
-      const data = raw ? JSON.parse(raw) : {};
-      const list = Array.isArray(data[sellerId]) ? data[sellerId] : [];
-      data[sellerId] = [review, ...list];
-      localStorage.setItem('soko:shopReviews', JSON.stringify(data));
-      setShopReviews(prev => [review, ...prev]);
-      setShopReviewForm({ name: 'You', rating: 5, comment: '' });
-      alert('Shop review submitted.');
-    } catch {
-      alert('Could not save shop review.');
+      const created = isOwnProfile ? await createProfileShare() : null;
+      const shareToken = created?.share_token || shareLink || '';
+      const isUrl = /^https?:\/\//i.test(shareToken);
+      const url = isUrl ? shareToken : window.location.href;
+      const text = shareToken && !isUrl
+        ? `Share token: ${shareToken}`
+        : `Check out ${profileData.name} on Sconnect!`;
+      if (navigator.share) {
+        await navigator.share({
+          title: `${profileData.name} Profile`,
+          text,
+          url,
+        });
+      } else {
+        await navigator.clipboard.writeText(isUrl ? url : shareToken || url);
+        alert(isUrl ? 'Profile link copied to clipboard!' : 'Share token copied to clipboard!');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Unable to share profile.');
     }
   };
-  
-  const handleSocialShare = (platform: string) => {
-    const url = window.location.href;
-    const text = `Check out ${profileData.name} on Sconnect!`;
-    let shareUrl = '';
-    
-    switch (platform) {
-      case 'facebook':
+
+  const handleSocialAction = async (platform: string) => {
+    if (!isOwnProfile) {
+      const url = window.location.href;
+      const text = `Check out ${profileData.name} on Sconnect!`;
+      let shareUrl = '';
+      if (platform === 'facebook') {
         shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
-        break;
-      case 'twitter':
+      } else if (platform === 'twitter') {
         shareUrl = `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
-        break;
-      case 'instagram':
+      } else if (platform === 'instagram') {
         alert('Copy link to share on Instagram!');
         return;
+      }
+      if (shareUrl) window.open(shareUrl, '_blank');
+      return;
     }
-    
-    if (shareUrl) window.open(shareUrl, '_blank');
+
+    const connected = socialConnections.some((s) => s.platform === platform);
+    try {
+      if (connected) {
+        await disconnectProfileSocial({ platform });
+      } else {
+        const accountId = window.prompt(`Enter your ${platform} handle:`) || '';
+        await connectProfileSocial({ platform, account_id: accountId });
+      }
+      const updated = await listProfileSocial();
+      setSocialConnections(updated || []);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to update social connection.');
+    }
+  };
+
+  const handleFollow = async () => {
+    if (!sellerId) return;
+    try {
+      if (isFollowingSeller) {
+        await removeProfileFavorite(sellerId);
+      } else {
+        await addProfileFavorite({ seller_id: sellerId });
+      }
+      const updated = await listProfileFavorites();
+      setFavorites(updated || []);
+      onToggleFollow?.(sellerId);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to update follow status.');
+    }
+  };
+
+  const handleProfileUpdate = async () => {
+    try {
+      const updated = await updateProfile(editForm);
+      setProfile((prev) => ({ ...prev, ...(updated || editForm) }));
+      setShowEdit(false);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to update profile.');
+    }
+  };
+
+  const handleCreatePost = async () => {
+    if (!newPost.content.trim() && !newPost.media_url.trim()) return;
+    try {
+      const created = await createProfilePost({ content: newPost.content.trim(), media_url: newPost.media_url.trim() || undefined });
+      setPosts(prev => [created, ...prev]);
+      setNewPost({ content: '', media_url: '' });
+    } catch (err: any) {
+      setError(err?.message || 'Unable to create post.');
+    }
+  };
+
+  const handleDeletePost = async (id: string) => {
+    try {
+      await deleteProfilePost(id);
+      setPosts(prev => prev.filter(p => (p.id || p.post_id) !== id));
+    } catch (err: any) {
+      setError(err?.message || 'Unable to delete post.');
+    }
   };
 
   return (
     <div className="h-full bg-white flex flex-col overflow-y-auto no-scrollbar">
-      {/* Header */}
       <div className="p-4 flex items-center justify-between sticky top-0 bg-white z-20 border-b border-zinc-100">
         <div className="flex items-center gap-3">
           {onBack && (
@@ -128,8 +292,8 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
             </button>
           )}
           <div className="flex items-center gap-1">
-            <h2 className="font-bold text-lg">{profileData.name.toLowerCase().replace(/\s/g, '_')}</h2>
-            {seller?.isVerified && <BadgeCheck className="w-4 h-4 text-indigo-600 fill-indigo-50" />}
+            <h2 className="font-bold text-lg">{(profileData.name || '').toLowerCase().replace(/\s/g, '_')}</h2>
+            {profileData.is_verified && <BadgeCheck className="w-4 h-4 text-indigo-600 fill-indigo-50" />}
           </div>
         </div>
         <div className="flex gap-4">
@@ -144,23 +308,33 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
         </div>
       </div>
 
-      {/* Profile Info */}
+      {error && (
+        <div className="m-4 bg-red-50 border border-red-100 text-red-700 text-[11px] font-bold rounded-2xl px-4 py-3">
+          {error}
+        </div>
+      )}
+      {loading && (
+        <div className="m-4 bg-white rounded-2xl border border-zinc-100 p-5 text-[11px] font-bold text-zinc-500">
+          Loading profile...
+        </div>
+      )}
+
       <div className="p-6 flex flex-col items-center">
         <div className="relative mb-4">
-          <img 
-            src={profileData.avatar} 
+          <img
+            src={profileData.avatar}
             className="w-24 h-24 rounded-full border-2 border-zinc-100 p-1 object-cover shadow-xl"
             alt="profile"
           />
           {isOwnProfile && (
-            <button className="absolute bottom-0 right-0 bg-indigo-600 rounded-full p-1.5 border-2 border-white shadow-lg hover:bg-indigo-700 transition-colors">
+            <button onClick={() => setShowEdit(true)} className="absolute bottom-0 right-0 bg-indigo-600 rounded-full p-1.5 border-2 border-white shadow-lg hover:bg-indigo-700 transition-colors">
               <Edit2 className="w-3 h-3 text-white" />
             </button>
           )}
         </div>
         <div className="flex items-center gap-2 mb-1">
           <h1 className="text-xl font-black text-zinc-900">{profileData.name}</h1>
-          {seller?.isVerified && (
+          {profileData.is_verified && (
             <div className="group relative">
               <BadgeCheck className="w-5 h-5 text-indigo-600 fill-indigo-50" />
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-zinc-900 text-white text-[10px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
@@ -169,16 +343,16 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
             </div>
           )}
         </div>
-        
-        {!isOwnProfile && seller?.location && (
-          <a 
-            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(seller.location.address)}`}
+
+        {!isOwnProfile && shopProfile?.location && (
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shopProfile.location.address)}`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-indigo-600 hover:text-indigo-700 transition-colors mb-3 group"
           >
             <MapPin className="w-3.5 h-3.5" />
-            <span className="text-xs font-bold group-hover:underline">{seller.location.address}</span>
+            <span className="text-xs font-bold group-hover:underline">{shopProfile.location.address}</span>
           </a>
         )}
 
@@ -186,40 +360,37 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
           {profileData.description}
         </p>
 
-        {/* Social Sharing */}
         <div className="flex gap-4 mb-8">
-          <button onClick={() => handleSocialShare('facebook')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
+          <button onClick={() => handleSocialAction('facebook')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
             <Facebook className="w-5 h-5" />
           </button>
-          <button onClick={() => handleSocialShare('twitter')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
+          <button onClick={() => handleSocialAction('twitter')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
             <Twitter className="w-5 h-5" />
           </button>
-          <button onClick={() => handleSocialShare('instagram')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
+          <button onClick={() => handleSocialAction('instagram')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
             <Instagram className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Stats */}
         <div className="flex w-full justify-around mb-8 max-w-sm">
           <div className="flex flex-col items-center">
-            <span className="font-black text-lg">124</span>
+            <span className="font-black text-lg">{stats.following}</span>
             <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest">Following</span>
           </div>
           <div className="flex flex-col items-center">
-            <span className="font-black text-lg">45.2k</span>
+            <span className="font-black text-lg">{stats.followers}</span>
             <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest">Followers</span>
           </div>
           <div className="flex flex-col items-center">
-            <span className="font-black text-lg">1.2M</span>
+            <span className="font-black text-lg">{stats.likes}</span>
             <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest">Likes</span>
           </div>
         </div>
 
-        {/* Action Buttons */}
         <div className="flex w-full gap-3 px-4 max-w-sm">
           {isOwnProfile ? (
             <>
-              <button className="flex-1 py-2.5 bg-zinc-900 text-white rounded-xl font-bold text-sm shadow-lg shadow-zinc-900/20 active:scale-95 transition-transform">
+              <button onClick={() => setShowEdit(true)} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-xl font-bold text-sm shadow-lg shadow-zinc-900/20 active:scale-95 transition-transform">
                 Edit Profile
               </button>
               <button onClick={handleShare} className="flex-1 py-2.5 bg-zinc-100 text-zinc-900 rounded-xl font-bold text-sm active:scale-95 transition-transform">
@@ -228,18 +399,18 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
             </>
           ) : (
             <>
-              <button 
-                onClick={() => sellerId && onToggleFollow?.(sellerId)}
+              <button
+                onClick={handleFollow}
                 className={`flex-1 py-2.5 rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform ${
-                  isFollowing ? 'bg-zinc-900 text-white' : 'bg-indigo-600 text-white shadow-indigo-600/20'
+                  isFollowingSeller ? 'bg-zinc-900 text-white' : 'bg-indigo-600 text-white shadow-indigo-600/20'
                 }`}
               >
-                {isFollowing ? 'Following' : 'Follow'}
+                {isFollowingSeller ? 'Following' : 'Follow'}
               </button>
               <button className="flex-1 py-2.5 bg-zinc-100 text-zinc-900 rounded-xl font-bold text-sm active:scale-95 transition-transform">
                 Message
               </button>
-              <button 
+              <button
                 onClick={() => alert('Seller escalation initiated. Our trust & safety team will review this shop.')}
                 className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors"
                 title="Escalate Seller"
@@ -251,7 +422,6 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex border-b border-zinc-100 sticky top-[60px] bg-white z-10">
         {[
           { id: 'grid', icon: Grid, label: 'Posts' },
@@ -259,7 +429,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
           { id: 'likes', icon: Heart, label: 'Likes' },
           { id: 'shop', icon: ShoppingBag, label: 'Shop' }
         ].map(tab => (
-          <button 
+          <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`flex-1 flex flex-col items-center justify-center py-3 transition-colors relative ${activeTab === tab.id ? 'text-zinc-900' : 'text-zinc-300'}`}
@@ -267,7 +437,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
             <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'fill-zinc-900' : ''}`} />
             <span className="text-[8px] font-bold uppercase mt-1 tracking-tighter">{tab.label}</span>
             {activeTab === tab.id && (
-              <motion.div 
+              <motion.div
                 layoutId="profileTab"
                 className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900"
               />
@@ -276,7 +446,6 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
         ))}
       </div>
 
-      {/* Content Area */}
       <div className="flex-1">
         {activeTab === 'intelligence' || activeTab === 'stats' ? (
           <div className="p-6 space-y-6 bg-zinc-50 h-full">
@@ -290,7 +459,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                 </div>
               )}
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">
@@ -298,7 +467,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                 </p>
                 <div className="flex items-center gap-2">
                   <p className="text-xl font-black text-zinc-900">
-                    {activeTab === 'intelligence' ? '45.2k' : (seller?.rating || '4.8')}
+                    {activeTab === 'intelligence' ? (insightsReach?.total_reach || insights?.total_reach || 0) : (shopStats?.rating || shopProfile?.rating || '4.8')}
                   </p>
                   {activeTab === 'stats' && <Star className="w-4 h-4 text-amber-500 fill-amber-500" />}
                 </div>
@@ -311,7 +480,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                   {activeTab === 'intelligence' ? 'Engagement' : 'Active Items'}
                 </p>
                 <p className="text-xl font-black text-zinc-900">
-                  {activeTab === 'intelligence' ? '12.4%' : sellerProducts.length}
+                  {activeTab === 'intelligence' ? (insightsEngagement?.engagement_rate || insights?.engagement_rate || '0%') : sellerProducts.length}
                 </p>
                 <div className="mt-2 h-1 w-full bg-zinc-100 rounded-full overflow-hidden">
                   <div className="h-full bg-emerald-500 w-[62%]" />
@@ -324,7 +493,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-4">Recent Sales Trend</h4>
                 <div className="h-32 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={MOCK_SALES_TREND}>
+                    <AreaChart data={insightsHistory.length ? insightsHistory : []}>
                       <defs>
                         <linearGradient id="colorSalesStats" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
@@ -332,21 +501,21 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                         </linearGradient>
                       </defs>
                       <XAxis dataKey="name" hide />
-                      <Tooltip 
+                      <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '10px' }}
                       />
-                      <Area 
-                        type="monotone" 
-                        dataKey="sales" 
-                        stroke="#4f46e5" 
+                      <Area
+                        type="monotone"
+                        dataKey="sales"
+                        stroke="#4f46e5"
                         strokeWidth={2}
-                        fillOpacity={1} 
-                        fill="url(#colorSalesStats)" 
+                        fillOpacity={1}
+                        fill="url(#colorSalesStats)"
                       />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-                <p className="text-[10px] text-zinc-400 text-center mt-2 font-medium">Sales velocity increased by 14% this month</p>
+                <p className="text-[10px] text-zinc-400 text-center mt-2 font-medium">Sales velocity updated with live insights</p>
               </div>
             )}
 
@@ -357,26 +526,22 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                   <h4 className="text-xs font-bold uppercase tracking-wider">AI Growth Tip</h4>
                 </div>
                 <p className="text-[10px] text-zinc-400 italic leading-relaxed">
-                  "Your conversion rate is 15% higher on video posts than images. Consider shifting your content strategy to 80% video."
+                  {insights?.tip || 'Actionable insights will appear here based on your data.'}
                 </p>
               </div>
             )}
 
             <div className="bg-white p-5 rounded-2xl border border-zinc-100 shadow-sm">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">Trending Products</h4>
-              <div className="space-y-4">
-                {[1, 2].map(i => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-zinc-100 rounded-lg overflow-hidden">
-                      <img src={`https://picsum.photos/seed/trend-${i}/100/100`} className="w-full h-full object-cover" alt="prod" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold text-zinc-800">Premium Item {i}</p>
-                      <p className="text-[10px] text-zinc-400">Trending +15% this week</p>
-                    </div>
-                    <ArrowRight className="w-3 h-3 text-zinc-300" />
-                  </div>
-                ))}
+              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">Trending Status</h4>
+              <div className="space-y-2 text-[10px] font-bold text-zinc-600">
+                <div className="flex items-center justify-between">
+                  <span>Status</span>
+                  <span className="text-zinc-900">{insightsTrending?.status || insights?.status || 'unknown'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Trending</span>
+                  <span className="text-zinc-900">{insightsTrending?.trending || insights?.trending || 'none'}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -386,11 +551,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
               <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Seller Collection</h3>
               <span className="text-[10px] font-bold text-zinc-400">{sellerProducts.length} Items</span>
             </div>
-            
+
             <div className="grid grid-cols-1 gap-6">
               {sellerProducts.length > 0 ? (
                 sellerProducts.map((product) => (
-                  <motion.div 
+                  <motion.div
                     key={product.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -400,7 +565,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                     <div className="aspect-video relative">
                       <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
                       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg shadow-sm">
-                        <span className="text-xs font-black text-zinc-900">${product.price}</span>
+                        <span className="text-xs font-black text-zinc-900">KES {product.price}</span>
                       </div>
                       {product.stockLevel < 10 && (
                         <div className="absolute top-3 left-3 bg-red-500 text-white px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter">
@@ -416,13 +581,13 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                         </div>
                         <div className="flex items-center gap-1 text-amber-500">
                           <Star className="w-3 h-3 fill-amber-500" />
-                          <span className="text-xs font-bold">{seller?.rating}</span>
+                          <span className="text-xs font-bold">{shopProfile?.rating || '--'}</span>
                         </div>
                       </div>
                       <p className="text-xs text-zinc-500 line-clamp-2 mb-4 leading-relaxed">
                         {product.description}
                       </p>
-                      
+
                       {product.location && (
                         <div className="flex items-center gap-2 mb-4 p-2 bg-zinc-50 rounded-xl">
                           <MapPin className="w-3.5 h-3.5 text-indigo-600" />
@@ -435,7 +600,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
                           Buy Now
                         </button>
                         {product.location && (
-                          <button 
+                          <button
                             onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(product.location!.address)}`, '_blank')}
                             className="flex-1 py-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-transform"
                           >
@@ -455,109 +620,169 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
               )}
             </div>
 
-            {/* Shop Reviews */}
-            {sellerId && (
+            {isOwnProfile && (
               <div className="bg-white p-5 rounded-2xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-zinc-400">Shop Reviews</h4>
-                  {!isOwnProfile && (
-                    <button 
-                      onClick={handleSubmitShopReview}
-                      className="text-[10px] font-bold text-indigo-600 hover:underline"
-                    >
-                      Post Review
-                    </button>
-                  )}
-                </div>
-
-                {!isOwnProfile && (
-                  <div className="mb-4 p-3 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        className="w-full p-2.5 bg-white rounded-xl text-xs font-bold"
-                        value={shopReviewForm.name}
-                        onChange={(e) => setShopReviewForm(prev => ({ ...prev, name: e.target.value }))}
-                        placeholder="Your name"
-                      />
-                      <select
-                        className="w-full p-2.5 bg-white rounded-xl text-xs font-bold"
-                        value={shopReviewForm.rating}
-                        onChange={(e) => setShopReviewForm(prev => ({ ...prev, rating: Number(e.target.value) }))}
-                      >
-                        {[5,4,3,2,1].map(r => <option key={r} value={r}>{r} Stars</option>)}
-                      </select>
-                    </div>
-                    <textarea
-                      className="w-full p-3 bg-white rounded-xl text-xs font-bold"
-                      rows={3}
-                      value={shopReviewForm.comment}
-                      onChange={(e) => setShopReviewForm(prev => ({ ...prev, comment: e.target.value }))}
-                      placeholder="Write a shop review..."
-                    />
-                    <button onClick={handleSubmitShopReview} className="w-full py-2 bg-zinc-900 text-white rounded-xl text-xs font-bold">Submit Review</button>
-                  </div>
-                )}
-
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-400 mb-4">Your Reviews</h4>
                 <div className="space-y-3">
-                  {shopReviews.length === 0 && (
+                  {reviews.length === 0 && (
                     <div className="p-4 bg-zinc-50 rounded-2xl text-[10px] text-zinc-500 font-bold text-center">
-                      No shop reviews yet.
+                      No reviews yet.
                     </div>
                   )}
-                  {shopReviews.map((review) => (
+                  {reviews.map((review) => (
                     <div key={review.id} className="p-4 bg-zinc-50 rounded-2xl space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-zinc-900">{review.userName}</span>
-                        <span className="text-[10px] text-zinc-400">{new Date(review.timestamp).toLocaleDateString()}</span>
+                        <span className="text-xs font-bold text-zinc-900">{review.product_name || review.product_id || 'Product'}</span>
+                        <span className="text-[10px] text-zinc-400">{new Date(review.created_at || Date.now()).toLocaleDateString()}</span>
                       </div>
                       <div className="flex text-amber-500">
                         {[...Array(5)].map((_, i) => (
-                          <Star key={i} className={`w-3 h-3 ${i < review.rating ? 'fill-amber-500' : 'text-zinc-200'}`} />
+                          <Star key={i} className={`w-3 h-3 ${i < (review.rating || 0) ? 'fill-amber-500' : 'text-zinc-200'}`} />
                         ))}
                       </div>
-                      <p className="text-xs text-zinc-600 italic">"{review.comment}"</p>
-                      {review.replies && review.replies.length > 0 && (
-                        <div className="space-y-2">
-                          {review.replies.map((reply: any) => (
-                            <div key={reply.id} className="p-2 bg-white rounded-xl border border-zinc-100">
-                              <p className="text-[10px] font-bold text-zinc-900">{reply.sellerName}</p>
-                              <p className="text-[10px] text-zinc-600">{reply.comment}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <p className="text-xs text-zinc-600 italic">"{review.comment || 'Review submitted.'}"</p>
                     </div>
                   ))}
                 </div>
               </div>
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-0.5 p-0.5">
-            {[...Array(15)].map((_, i) => (
-              <motion.div 
-                key={i}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: i * 0.02 }}
-                className="aspect-[3/4] bg-zinc-100 relative group overflow-hidden cursor-pointer"
-              >
-                <img 
-                  src={`https://picsum.photos/seed/profile-${activeTab}-${i}/300/400`} 
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                  alt="post"
-                />
-                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <div className="flex items-center gap-1 text-white font-bold text-xs">
-                    <Heart className="w-4 h-4 fill-white" />
-                    <span>{Math.floor(Math.random() * 100)}k</span>
-                  </div>
+        ) : activeTab === 'likes' ? (
+          <div className="grid grid-cols-2 gap-3 p-4">
+            {likedProducts.length === 0 && (
+              <div className="col-span-2 p-6 bg-zinc-50 rounded-2xl text-center text-[10px] font-bold text-zinc-500">
+                No liked products yet.
+              </div>
+            )}
+            {likedProducts.map((product) => (
+              <div key={product.id} className="bg-white rounded-2xl border border-zinc-100 overflow-hidden shadow-sm" onClick={() => onProductOpen(product)}>
+                <div className="aspect-square">
+                  <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
                 </div>
-              </motion.div>
+                <div className="p-3">
+                  <p className="text-xs font-bold text-zinc-900 line-clamp-1">{product.name}</p>
+                  <p className="text-[10px] text-zinc-400">KES {product.price}</p>
+                </div>
+              </div>
             ))}
+          </div>
+        ) : (
+          <div className="p-4 space-y-4">
+            {isOwnProfile && (
+              <div className="bg-white rounded-2xl border border-zinc-100 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Create Post</p>
+                <input
+                  className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold mb-2"
+                  placeholder="What's new?"
+                  value={newPost.content}
+                  onChange={(e) => setNewPost(prev => ({ ...prev, content: e.target.value }))}
+                />
+                <input
+                  className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold mb-3"
+                  placeholder="Media URL (optional)"
+                  value={newPost.media_url}
+                  onChange={(e) => setNewPost(prev => ({ ...prev, media_url: e.target.value }))}
+                />
+                <button onClick={handleCreatePost} className="w-full py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
+                  Post
+                </button>
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-0.5">
+              {posts.length === 0 && (
+                <div className="col-span-3 p-6 bg-zinc-50 rounded-2xl text-center text-[10px] font-bold text-zinc-500">
+                  No posts yet.
+                </div>
+              )}
+              {posts.map((post, i) => (
+                <motion.div
+                  key={post.id || post.post_id || i}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: i * 0.02 }}
+                  className="aspect-[3/4] bg-zinc-100 relative group overflow-hidden cursor-pointer"
+                >
+                  {post.media_url ? (
+                    <img
+                      src={post.media_url}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                      alt="post"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center p-3 text-[10px] font-bold text-zinc-600">
+                      {post.content || 'Post'}
+                    </div>
+                  )}
+                  {isOwnProfile && (
+                    <button
+                      onClick={() => handleDeletePost(post.id || post.post_id)}
+                      className="absolute top-2 right-2 bg-white/80 text-zinc-600 text-[9px] font-bold px-2 py-1 rounded"
+                    >
+                      Delete
+                    </button>
+                  )}
+                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <div className="flex items-center gap-1 text-white font-bold text-xs">
+                      <Heart className="w-4 h-4 fill-white" />
+                      <span>{post.likes || 0}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </div>
         )}
       </div>
+
+      {showEdit && (
+        <div className="fixed inset-0 z-[60]">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEdit(false)} />
+          <div className="absolute left-1/2 top-1/2 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl border border-zinc-100 shadow-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-black">Edit Profile</p>
+              <button onClick={() => setShowEdit(false)} className="text-[10px] font-black text-zinc-400">Close</button>
+            </div>
+            <div className="space-y-3">
+              <input
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+                placeholder="Display name"
+                value={editForm.display_name}
+                onChange={(e) => setEditForm(prev => ({ ...prev, display_name: e.target.value }))}
+              />
+              <textarea
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+                rows={3}
+                placeholder="Bio"
+                value={editForm.bio}
+                onChange={(e) => setEditForm(prev => ({ ...prev, bio: e.target.value }))}
+              />
+              <input
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+                placeholder="Avatar URL"
+                value={editForm.avatar_url}
+                onChange={(e) => setEditForm(prev => ({ ...prev, avatar_url: e.target.value }))}
+              />
+              <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                <input
+                  type="checkbox"
+                  checked={editForm.is_public}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, is_public: e.target.checked }))}
+                  className="accent-zinc-900"
+                />
+                Public profile
+              </label>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button onClick={handleProfileUpdate} className="flex-1 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
+                Save
+              </button>
+              <button onClick={() => setShowEdit(false)} className="flex-1 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,23 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Camera, Users, Upload, Crown, Trophy, ArrowRight, Star, MessageCircle, Sparkles, QrCode, ShieldCheck, MapPin, Wallet, Camera as CameraIcon, Receipt, Gift, ClipboardCheck, BadgeCheck, Share2, CalendarDays } from 'lucide-react';
-import { PRODUCTS, SELLERS } from '../mockData';
+import {
+  createReferral,
+  getRewardsBalance,
+  getRewardsLedger,
+  getRewardStreaks,
+  listFraudAlerts,
+  listReceipts,
+  listReferrals,
+  queueReceipts,
+  redeemRewards,
+  resetRewardStreaks,
+  submitReceipt,
+  verifyRewardsGps,
+  RewardsFraudAlert,
+  RewardsLedgerEntry,
+  RewardsReceipt,
+  RewardsStreak
+} from '../lib/rewardsApi';
 
 const MILESTONES = [
   { stars: 50, label: 'Free Pro Month' },
@@ -45,7 +62,17 @@ export const Rewards: React.FC<RewardsProps> = ({
   const [gpsStatus, setGpsStatus] = useState<'idle' | 'checking' | 'verified' | 'failed'>('idle');
   const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
   const [fraudWarning, setFraudWarning] = useState<string | null>(null);
-  const [receiptUploads, setReceiptUploads] = useState<Array<{ id: string; amount: number; items: string[]; paid: number }>>([]);
+  const [receiptUploads, setReceiptUploads] = useState<Array<{ id: string; merchantName: string; totalAmount: number; rewardIssued: number; status: string }>>([]);
+  const [receiptForm, setReceiptForm] = useState({
+    s3_key: '',
+    merchant_name: '',
+    merchant_id: '',
+    total_amount: '',
+    receipt_date: '',
+    ocr_text: '',
+    ocr_confidence: '',
+    line_items: ''
+  });
   const [receiptStreak, setReceiptStreak] = useState(5);
   const [dailyCheckIn, setDailyCheckIn] = useState(false);
   const [searchStreak] = useState(3);
@@ -55,8 +82,15 @@ export const Rewards: React.FC<RewardsProps> = ({
   const [referralsCount, setReferralsCount] = useState(1);
   const [purchaseConfirmation, setPurchaseConfirmation] = useState<'idle' | 'confirmed'>('idle');
   const [showReceiptQueue, setShowReceiptQueue] = useState(false);
+  const [receiptQueueMessage, setReceiptQueueMessage] = useState<string | null>(null);
+  const [receiptQueueCount, setReceiptQueueCount] = useState<number | null>(null);
+  const [receiptQueueLoading, setReceiptQueueLoading] = useState(false);
+  const [fraudAlerts, setFraudAlerts] = useState<RewardsFraudAlert[]>([]);
+  const [receiptFieldErrors, setReceiptFieldErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     try {
       const flag = localStorage.getItem('soko:open_qr');
       if (flag === 'true') {
@@ -68,12 +102,141 @@ export const Rewards: React.FC<RewardsProps> = ({
     } catch {}
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setBuyerCoins(buyerBalance || 0);
   }, [buyerBalance]);
 
-  const detectedSeller = detectedSellerId ? SELLERS.find(s => s.id === detectedSellerId) : SELLERS[0];
-  const detectedProducts = PRODUCTS.filter(p => p.sellerId === (detectedSeller?.id || PRODUCTS[0]?.sellerId)).slice(0, 6);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [balanceResp, ledgerResp, receiptsResp, streaksResp, referralsResp, fraudResp] = await Promise.all([
+          getRewardsBalance(),
+          getRewardsLedger(),
+          listReceipts(),
+          getRewardStreaks(),
+          listReferrals(),
+          listFraudAlerts()
+        ]);
+        if (!alive) return;
+        const coins = Number(balanceResp?.balance ?? 0);
+        setBuyerCoins(Number.isFinite(coins) ? coins : 0);
+        onBuyerBalanceChange(Number.isFinite(coins) ? coins : 0);
+        onBuyerPayoutsChange((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
+          id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
+          amount: Number(entry.amount || 0),
+          reason: entry.type || entry.reason || 'Reward',
+          timestamp: new Date(entry.created_at || Date.now()).getTime()
+        })));
+        setReceiptUploads((receiptsResp || []).map((rec: RewardsReceipt) => ({
+          id: rec.id || `r_${Math.random().toString(16).slice(2)}`,
+          merchantName: rec.merchant_name || rec.merchant || 'Receipt',
+          totalAmount: Number(rec.total_amount || 0),
+          rewardIssued: Number(rec.reward_issued || 0),
+          status: rec.status || 'pending'
+        })));
+        const receiptStreakEntry = (streaksResp || []).find((s: RewardsStreak) => s.type === 'receipt');
+        setReceiptStreak(Number(receiptStreakEntry?.count || 0));
+        setReferralsCount((referralsResp || []).length);
+        const alerts = Array.isArray(fraudResp) ? fraudResp : [];
+        setFraudAlerts(alerts as RewardsFraudAlert[]);
+        if (alerts.length) {
+          setFraudWarning(alerts[0]?.message || 'Potential fraud detected.');
+        }
+      } catch (err: any) {
+        if (!alive) return;
+        setError(err?.message || 'Unable to load rewards data.');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [onBuyerBalanceChange, onBuyerPayoutsChange]);
+
+  const applyBalanceFromResponse = (balanceResp: any) => {
+    const coins = Number(balanceResp?.balance ?? 0);
+    if (Number.isFinite(coins)) {
+      setBuyerCoins(coins);
+      onBuyerBalanceChange(coins);
+    }
+  };
+
+  const applyLedgerFromResponse = (ledgerResp: RewardsLedgerEntry[]) => {
+    onBuyerPayoutsChange((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
+      id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
+      amount: Number(entry.amount || 0),
+      reason: entry.reason || entry.type || 'Reward',
+      timestamp: new Date(entry.created_at || Date.now()).getTime()
+    })));
+  };
+
+  const refreshBalanceAndLedger = async () => {
+    const [balanceResp, ledgerResp] = await Promise.all([
+      getRewardsBalance(),
+      getRewardsLedger()
+    ]);
+    applyBalanceFromResponse(balanceResp);
+    applyLedgerFromResponse(ledgerResp || []);
+  };
+
+  const refreshReceiptsAndStreaks = async () => {
+    const [receiptsResp, streaksResp] = await Promise.all([
+      listReceipts(),
+      getRewardStreaks()
+    ]);
+    setReceiptUploads((receiptsResp || []).map((rec: RewardsReceipt) => ({
+      id: rec.id || `r_${Math.random().toString(16).slice(2)}`,
+      merchantName: rec.merchant_name || rec.merchant || 'Receipt',
+      totalAmount: Number(rec.total_amount || 0),
+      rewardIssued: Number(rec.reward_issued || 0),
+      status: rec.status || 'pending'
+    })));
+    const receiptStreakEntry = (streaksResp || []).find((s: RewardsStreak) => s.type === 'receipt');
+    setReceiptStreak(Number(receiptStreakEntry?.count || 0));
+  };
+
+  const isReceiptUploadDisabled = () => {
+    if (!receiptForm.s3_key.trim()) return true;
+    if (Object.keys(receiptFieldErrors).length > 0) return true;
+    return false;
+  };
+
+  const validateReceiptForm = () => {
+    const fieldErrors: Record<string, string> = {};
+    if (!receiptForm.s3_key.trim()) {
+      fieldErrors.s3_key = 'Required';
+    }
+    if (receiptForm.total_amount && Number(receiptForm.total_amount) <= 0) {
+      fieldErrors.total_amount = 'Must be positive';
+    }
+    if (receiptForm.receipt_date && !/^\d{4}-\d{2}-\d{2}$/.test(receiptForm.receipt_date.trim())) {
+      fieldErrors.receipt_date = 'Use YYYY-MM-DD';
+    }
+    if (receiptForm.ocr_confidence && (Number(receiptForm.ocr_confidence) < 0 || Number(receiptForm.ocr_confidence) > 1)) {
+      fieldErrors.ocr_confidence = 'Must be 0-1';
+    }
+    setReceiptFieldErrors(fieldErrors);
+    return Object.keys(fieldErrors).length ? 'Fix the highlighted receipt fields.' : null;
+  };
+
+  const validateReceiptField = (field: string, value: string) => {
+    if (field === 's3_key' && !value.trim()) return 'Required';
+    if (field === 'total_amount' && value && Number(value) <= 0) return 'Must be positive';
+    if (field === 'receipt_date' && value && !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return 'Use YYYY-MM-DD';
+    if (field === 'ocr_confidence' && value) {
+      const numeric = Number(value);
+      if (Number.isNaN(numeric) || numeric < 0 || numeric > 1) return 'Must be 0-1';
+    }
+    return '';
+  };
+
+  const detectedSeller = detectedSellerId ? { id: detectedSellerId, name: 'Detected Seller' } : null;
+  const detectedProducts: Array<{ id: string; name: string }> = [];
 
   const distanceMetersBetween = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
     const R = 6371e3;
@@ -99,35 +262,124 @@ export const Rewards: React.FC<RewardsProps> = ({
     )));
   };
 
-  const handleReceiptUpload = () => {
-    const id = `r_${Date.now()}`;
-    const items = ['Unga 2kg', 'Sukari 1kg', 'Maziwa 500ml'];
-    const paid = 15;
-    const amount = 390;
-    setReceiptUploads(prev => [{ id, amount, items, paid }, ...prev].slice(0, 6));
-    setBuyerCoins(prev => prev + paid);
-    onBuyerBalanceChange(buyerBalance + paid);
-    onBuyerPayoutsChange([{ id: `bp_${Date.now()}`, amount: paid, reason: 'Receipt upload reward', timestamp: Date.now() }, ...buyerPayouts]);
-    setReceiptStreak(prev => prev + 1);
-    bumpLeaderboard(2);
+  const handleReceiptUpload = async () => {
+    try {
+      const validationError = validateReceiptForm();
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+      await submitReceipt({
+        s3_key: receiptForm.s3_key.trim(),
+        merchant_name: receiptForm.merchant_name.trim() || undefined,
+        merchant_id: receiptForm.merchant_id.trim() || undefined,
+        total_amount: receiptForm.total_amount ? Number(receiptForm.total_amount) : undefined,
+        receipt_date: receiptForm.receipt_date.trim() || undefined,
+        ocr_text: receiptForm.ocr_text.trim() || undefined,
+        ocr_confidence: receiptForm.ocr_confidence ? Number(receiptForm.ocr_confidence) : undefined,
+        line_items: receiptForm.line_items
+          ? receiptForm.line_items.split(',').map(item => item.trim()).filter(Boolean)
+          : undefined
+      });
+      await Promise.all([
+        refreshBalanceAndLedger(),
+        refreshReceiptsAndStreaks()
+      ]);
+      bumpLeaderboard(2);
+      setReceiptForm({
+        s3_key: '',
+        merchant_name: '',
+        merchant_id: '',
+        total_amount: '',
+        receipt_date: '',
+        ocr_text: '',
+        ocr_confidence: '',
+        line_items: ''
+      });
+      setReceiptFieldErrors({});
+    } catch (err: any) {
+      setError(err?.message || 'Unable to upload receipt.');
+    }
   };
 
-  const handleReferral = () => {
+  const handleReferral = async () => {
     if (!referralPhone.trim()) return;
-    setReferralsCount(prev => prev + 1);
-    setBuyerCoins(prev => prev + 15);
-    onBuyerBalanceChange(buyerBalance + 15);
-    onBuyerPayoutsChange([{ id: `bp_${Date.now()}`, amount: 15, reason: 'Referral reward', timestamp: Date.now() }, ...buyerPayouts]);
-    setReferralPhone('');
-    bumpLeaderboard(5);
+    try {
+      await createReferral({ invitee_phone: referralPhone.trim() });
+      const [balanceResp, referralsResp, ledgerResp] = await Promise.all([
+        getRewardsBalance(),
+        listReferrals(),
+        getRewardsLedger()
+      ]);
+      const coins = Number(balanceResp?.coins ?? balanceResp?.wallet ?? balanceResp?.balance ?? 0);
+      setBuyerCoins(Number.isFinite(coins) ? coins : buyerCoins);
+      onBuyerBalanceChange(Number.isFinite(coins) ? coins : buyerCoins);
+      setReferralsCount((referralsResp || []).length);
+      onBuyerPayoutsChange((ledgerResp || []).map((entry: any) => ({
+        id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
+        amount: Number(entry.amount || 0),
+        reason: entry.reason || entry.type || 'Reward',
+        timestamp: new Date(entry.created_at || Date.now()).getTime()
+      })));
+      setReferralPhone('');
+      bumpLeaderboard(5);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to create referral.');
+    }
   };
 
-  const handlePurchaseConfirmation = () => {
-    setPurchaseConfirmation('confirmed');
-    setBuyerCoins(prev => prev + 5);
-    onBuyerBalanceChange(buyerBalance + 5);
-    onBuyerPayoutsChange([{ id: `bp_${Date.now()}`, amount: 5, reason: 'Purchase confirmation reward', timestamp: Date.now() }, ...buyerPayouts]);
-    bumpLeaderboard(1);
+  const handlePurchaseConfirmation = async () => {
+    try {
+      setPurchaseConfirmation('confirmed');
+      bumpLeaderboard(1);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to confirm purchase.');
+    }
+  };
+
+  const handleReceiptQueueSync = async () => {
+    setReceiptQueueLoading(true);
+    setReceiptQueueMessage(null);
+    try {
+      const pending = receiptUploads.filter((rec) => rec.status === 'pending');
+      if (pending.length === 0) {
+        setReceiptQueueCount(0);
+        setReceiptQueueMessage('No pending receipts to queue.');
+        return;
+      }
+      setReceiptUploads(prev => prev.map((rec) => (
+        rec.status === 'pending' ? { ...rec, status: 'queued' } : rec
+      )));
+      for (const rec of pending) {
+        await queueReceipts({ receipt_id: rec.id });
+      }
+      setReceiptQueueCount(pending.length);
+      setReceiptQueueMessage('Queued pending receipts for processing.');
+      await refreshReceiptsAndStreaks();
+    } catch (err: any) {
+      await refreshReceiptsAndStreaks();
+      setReceiptQueueMessage(err?.message || 'Unable to sync receipt queue.');
+    } finally {
+      setReceiptQueueLoading(false);
+    }
+  };
+
+  const handleResetReceiptStreak = async () => {
+    try {
+      await resetRewardStreaks({ type: 'receipt' });
+      await refreshReceiptsAndStreaks();
+    } catch (err: any) {
+      setError(err?.message || 'Unable to reset receipt streak.');
+    }
+  };
+
+  const handleRedeemWallet = async (reward: { label: string; cost: number }) => {
+    try {
+      await redeemRewards({ amount: reward.cost });
+      await refreshBalanceAndLedger();
+    } catch (err: any) {
+      setError(err?.message || `Unable to redeem ${reward.label}.`);
+    }
   };
 
   return (
@@ -169,6 +421,16 @@ export const Rewards: React.FC<RewardsProps> = ({
       </div>
 
       <div className="p-6 space-y-8">
+        {error && (
+          <div className="bg-red-50 border border-red-100 text-red-700 text-[11px] font-bold rounded-2xl px-4 py-3">
+            {error}
+          </div>
+        )}
+        {loading && (
+          <div className="bg-white rounded-2xl border border-blue-100 p-5 text-[11px] font-bold text-zinc-500">
+            Loading rewards...
+          </div>
+        )}
         {activeTab === 'receipts' && (
           <>
             <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
@@ -176,11 +438,146 @@ export const Rewards: React.FC<RewardsProps> = ({
                 <Receipt className="w-4 h-4 text-emerald-600" />
                 <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Receipt Upload Rewards</h3>
               </div>
+              <div className="text-[9px] font-bold text-slate-400">Fields marked * are required.</div>
               <p className="text-[10px] text-slate-500 font-bold">Upload any receipt. Instant M-PESA rewards + price intelligence.</p>
-              <div className="mt-4 grid grid-cols-1 gap-3">
+              <div className="mt-4 grid grid-cols-1 gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    className={`w-full p-2 rounded-lg text-[10px] font-bold ${receiptFieldErrors.s3_key ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700'}`}
+                    placeholder="S3 key *"
+                    value={receiptForm.s3_key}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setReceiptForm(prev => ({ ...prev, s3_key: value }));
+                      if (receiptFieldErrors.s3_key && value.trim()) {
+                        setReceiptFieldErrors(prev => {
+                          const next = { ...prev };
+                          delete next.s3_key;
+                          return next;
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const message = validateReceiptField('s3_key', e.target.value);
+                      if (message) {
+                        setReceiptFieldErrors(prev => ({ ...prev, s3_key: message }));
+                      }
+                    }}
+                  />
+                  <input
+                    className="w-full p-2 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-700"
+                    placeholder="Merchant"
+                    value={receiptForm.merchant_name}
+                    onChange={(e) => setReceiptForm(prev => ({ ...prev, merchant_name: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    className="w-full p-2 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-700"
+                    placeholder="Merchant ID"
+                    value={receiptForm.merchant_id}
+                    onChange={(e) => setReceiptForm(prev => ({ ...prev, merchant_id: e.target.value }))}
+                  />
+                  <input
+                    className={`w-full p-2 rounded-lg text-[10px] font-bold ${receiptFieldErrors.total_amount ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700'}`}
+                    placeholder="Amount"
+                    type="number"
+                    value={receiptForm.total_amount}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setReceiptForm(prev => ({ ...prev, total_amount: value }));
+                      if (receiptFieldErrors.total_amount && Number(value) > 0) {
+                        setReceiptFieldErrors(prev => {
+                          const next = { ...prev };
+                          delete next.total_amount;
+                          return next;
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const message = validateReceiptField('total_amount', e.target.value);
+                      if (message) {
+                        setReceiptFieldErrors(prev => ({ ...prev, total_amount: message }));
+                      }
+                    }}
+                  />
+                  <input
+                    className={`w-full p-2 rounded-lg text-[10px] font-bold ${receiptFieldErrors.receipt_date ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700'}`}
+                    placeholder="Date (YYYY-MM-DD)"
+                    value={receiptForm.receipt_date}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setReceiptForm(prev => ({ ...prev, receipt_date: value }));
+                      if (receiptFieldErrors.receipt_date && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+                        setReceiptFieldErrors(prev => {
+                          const next = { ...prev };
+                          delete next.receipt_date;
+                          return next;
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const message = validateReceiptField('receipt_date', e.target.value);
+                      if (message) {
+                        setReceiptFieldErrors(prev => ({ ...prev, receipt_date: message }));
+                      }
+                    }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    className="w-full p-2 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-700"
+                    placeholder="OCR text"
+                    value={receiptForm.ocr_text}
+                    onChange={(e) => setReceiptForm(prev => ({ ...prev, ocr_text: e.target.value }))}
+                  />
+                  <input
+                    className="w-full p-2 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-700"
+                    placeholder="Line items (CSV)"
+                    value={receiptForm.line_items}
+                    onChange={(e) => setReceiptForm(prev => ({ ...prev, line_items: e.target.value }))}
+                  />
+                </div>
+                  <input
+                    className={`w-full p-2 rounded-lg text-[10px] font-bold ${receiptFieldErrors.ocr_confidence ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700'}`}
+                    placeholder="OCR confidence"
+                    type="number"
+                    step="0.01"
+                    value={receiptForm.ocr_confidence}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setReceiptForm(prev => ({ ...prev, ocr_confidence: value }));
+                      const numeric = Number(value);
+                      if (receiptFieldErrors.ocr_confidence && numeric >= 0 && numeric <= 1) {
+                        setReceiptFieldErrors(prev => {
+                          const next = { ...prev };
+                          delete next.ocr_confidence;
+                          return next;
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const message = validateReceiptField('ocr_confidence', e.target.value);
+                      if (message) {
+                        setReceiptFieldErrors(prev => ({ ...prev, ocr_confidence: message }));
+                      }
+                    }}
+                  />
+                {Object.keys(receiptFieldErrors).length > 0 && (
+                  <div className="text-[9px] font-bold text-red-600">
+                    {Object.entries(receiptFieldErrors).map(([field, message]) => (
+                      <div key={field}>{field.replace('_', ' ')}: {message}</div>
+                    ))}
+                  </div>
+                )}
                 <button
                   onClick={handleReceiptUpload}
-                  className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                  disabled={isReceiptUploadDisabled()}
+                  className={`w-full py-3 rounded-xl text-[10px] font-black flex items-center justify-center gap-2 ${
+                    isReceiptUploadDisabled()
+                      ? 'bg-emerald-200 text-emerald-700'
+                      : 'bg-emerald-600 text-white'
+                  }`}
                 >
                   <Upload className="w-4 h-4" /> Upload Receipt Photo (KES 5-20)
                 </button>
@@ -188,22 +585,59 @@ export const Rewards: React.FC<RewardsProps> = ({
                   Streak: {receiptStreak} days • Bonus at 7 days (KES 50) and 30 days (KES 200)
                 </div>
                 <button
-                  onClick={() => setShowReceiptQueue(prev => !prev)}
+                  onClick={async () => {
+                    const next = !showReceiptQueue;
+                    setShowReceiptQueue(next);
+                    if (next) {
+                      await handleReceiptQueueSync();
+                    }
+                  }}
                   className="w-full py-3 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black"
                 >
                   {showReceiptQueue ? 'Hide' : 'Show'} Offline Receipt Queue
                 </button>
                 {showReceiptQueue && (
                   <div className="p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-600">
-                    2 receipts queued. Will upload automatically when online.
+                    {receiptQueueLoading
+                      ? 'Syncing offline receipts...'
+                      : receiptQueueMessage || `${receiptQueueCount ?? 0} receipts queued. Will upload automatically when online.`}
                   </div>
                 )}
+                <button
+                  onClick={handleResetReceiptStreak}
+                  className="w-full py-2 bg-slate-50 text-slate-600 rounded-xl text-[10px] font-black"
+                >
+                  Reset Receipt Streak
+                </button>
               </div>
               {receiptUploads.length > 0 && (
                 <div className="mt-4 space-y-2">
                   {receiptUploads.map(upload => (
                     <div key={upload.id} className="p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-700">
-                      OCR: {upload.items.join(', ')} • Total KES {upload.amount} • Reward KES {upload.paid}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          {upload.merchantName} • KES {upload.totalAmount} • Reward KES {upload.rewardIssued}
+                        </div>
+                        <button
+                          onClick={async () => {
+                            setReceiptUploads(prev => prev.map((rec) => (
+                              rec.id === upload.id ? { ...rec, status: 'queued' } : rec
+                            )));
+                            try {
+                              await queueReceipts({ receipt_id: upload.id });
+                              await refreshReceiptsAndStreaks();
+                            } catch (err: any) {
+                              await refreshReceiptsAndStreaks();
+                              setError(err?.message || 'Unable to queue receipt.');
+                            }
+                          }}
+                          disabled={upload.status === 'queued'}
+                          className={`px-2 py-1 rounded-lg text-[9px] font-black ${upload.status === 'queued' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}
+                        >
+                          {upload.status === 'queued' ? 'Queued' : 'Queue'}
+                        </button>
+                      </div>
+                      <div className="text-[9px] text-slate-500 mt-1">Status: {upload.status}</div>
                     </div>
                   ))}
                 </div>
@@ -225,7 +659,9 @@ export const Rewards: React.FC<RewardsProps> = ({
                 >
                   Confirm Purchase
                 </button>
-                <button className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black">
+                <button
+                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black"
+                >
                   Upload Product Photo (+KES 10)
                 </button>
               </div>
@@ -265,10 +701,8 @@ export const Rewards: React.FC<RewardsProps> = ({
               </div>
               <div className="grid grid-cols-2 gap-3 text-[10px] font-bold">
                 <button
-                  onClick={() => {
-                    setDailyCheckIn(true);
-                    setBuyerCoins(prev => prev + 5);
-                  }}
+                  onClick={() => setDailyCheckIn(true)}
+                  disabled={dailyCheckIn}
                   className={`p-3 rounded-2xl ${dailyCheckIn ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'}`}
                 >
                   <CalendarDays className="w-3 h-3 inline-block mr-1" /> Daily Check-in
@@ -327,14 +761,9 @@ export const Rewards: React.FC<RewardsProps> = ({
                 ].map(reward => (
                   <button
                     key={reward.label}
-                      onClick={() => {
-                        const next = Math.max(0, buyerCoins - reward.cost);
-                        setBuyerCoins(next);
-                        onBuyerBalanceChange(next);
-                        onBuyerPayoutsChange([{ id: `bp_${Date.now()}`, amount: -reward.cost, reason: `Redeem: ${reward.label}`, timestamp: Date.now() }, ...buyerPayouts]);
-                      }}
-                      className="p-3 bg-blue-50 rounded-2xl text-blue-700 hover:bg-blue-100"
-                    >
+                    onClick={() => handleRedeemWallet(reward)}
+                    className="p-3 bg-blue-50 rounded-2xl text-blue-700 hover:bg-blue-100"
+                  >
                       {reward.label}
                     </button>
                 ))}
@@ -372,9 +801,17 @@ export const Rewards: React.FC<RewardsProps> = ({
                   <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Anti-Fraud Checks</h3>
                 </div>
                 <div className="space-y-2 text-[10px] font-bold text-slate-600">
-                  <div className="p-3 bg-amber-50 rounded-2xl">Same QR scanned 5 minutes ago. Wait 2 hours.</div>
-                  <div className="p-3 bg-amber-50 rounded-2xl">No GPS movement detected. Walk 50m to confirm.</div>
-                  <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-700">New location verified. +5 SC approved.</div>
+                  {fraudAlerts.length === 0 && (
+                    <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-700">No active fraud alerts.</div>
+                  )}
+                  {fraudAlerts.map((alert, idx) => (
+                    <div
+                      key={alert.id || `fraud_${idx}`}
+                      className="p-3 rounded-2xl bg-amber-50"
+                    >
+                      {alert?.details || alert?.type || 'Fraud alert'}
+                    </div>
+                  ))}
                 </div>
               </section>
 
@@ -624,20 +1061,41 @@ export const Rewards: React.FC<RewardsProps> = ({
                       const shop = SELLERS[encoded]?.location || SELLERS[0]?.location;
                       if (navigator.geolocation && shop) {
                         navigator.geolocation.getCurrentPosition(
-                          (pos) => {
+                          async (pos) => {
                             const buyer = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                            const meters = distanceMetersBetween(buyer, shop);
-                            setDistanceMeters(meters);
-                            if (meters <= 10) {
-                              setGpsStatus('verified');
-                            } else {
+                            const fallbackMeters = distanceMetersBetween(buyer, shop);
+                            try {
+                              const distanceM = Number.isFinite(fallbackMeters) ? fallbackMeters : 0;
+                              const verified = distanceM <= 10;
+                              const resp = await verifyRewardsGps({
+                                lat_enc: buyer.lat.toFixed(6),
+                                lng_enc: buyer.lng.toFixed(6),
+                                distance_m: distanceM,
+                                verified
+                              });
+                              const apiMeters = Number(resp?.distance_m ?? resp?.distance ?? resp?.meters);
+                              const meters = Number.isFinite(apiMeters) ? apiMeters : fallbackMeters;
+                              setDistanceMeters(Number.isFinite(meters) ? meters : null);
+                              const verifiedResp = typeof resp?.verified === 'boolean'
+                                ? resp.verified
+                                : Number.isFinite(meters)
+                                  ? meters <= 10
+                                  : false;
+                              if (verifiedResp) {
+                                setGpsStatus('verified');
+                              } else {
+                                setGpsStatus('failed');
+                                setFraudWarning(resp?.message || 'Location mismatch detected (over 10m). Rewards locked. Repeat attempts lead to bans.');
+                              }
+                            } catch (err: any) {
+                              setDistanceMeters(Number.isFinite(fallbackMeters) ? fallbackMeters : null);
                               setGpsStatus('failed');
-                              setFraudWarning('Location mismatch detected (over 10m). Rewards locked. Repeat attempts lead to bans.');
+                              setFraudWarning(err?.message || 'GPS verification failed. Rewards locked. Repeat attempts lead to bans.');
                             }
                           },
-                          () => {
+                          (geoErr) => {
                             setGpsStatus('failed');
-                            setFraudWarning('GPS verification failed. Rewards locked. Repeat attempts lead to bans.');
+                            setFraudWarning(geoErr?.message || 'GPS verification failed. Rewards locked. Repeat attempts lead to bans.');
                           },
                           { enableHighAccuracy: true, timeout: 8000 }
                         );
@@ -809,11 +1267,6 @@ export const Rewards: React.FC<RewardsProps> = ({
                         setFraudWarning('GPS verification failed. No rewards will be paid out. Repeat attempts may result in a ban.');
                         return;
                       }
-                      const coinGain = qrMode === 'manual' && verificationMethod === 'product_select' ? 3 : 5;
-                      const next = buyerCoins + coinGain;
-                      setBuyerCoins(next);
-                      onBuyerBalanceChange(next);
-                      onBuyerPayoutsChange([{ id: `bp_${Date.now()}`, amount: coinGain, reason: 'QR scan reward', timestamp: Date.now() }, ...buyerPayouts]);
                       setQrStep('reward');
                     }}
                     className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black"

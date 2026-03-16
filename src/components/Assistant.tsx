@@ -2,6 +2,36 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Camera, Video, Star, Plus, BadgeCheck, TrendingUp, ChevronRight } from 'lucide-react';
 import { Product } from '../types';
 import { SELLERS } from '../mockData';
+import {
+  createAttachment,
+  createMemory,
+  createMessage,
+  createThread,
+  createUpload,
+  deleteMemory,
+  deleteThread,
+  executeTool,
+  getAssistantMetrics,
+  getOCRStatus,
+  listAttachments,
+  listMemory,
+  listMessages,
+  listSuggestions,
+  listThreads,
+  listToolHistory,
+  postAssistantEvent,
+  postModeration,
+  postReport,
+  runOCR,
+  runVisionSearch,
+  streamThreadMessage,
+  transcribeAudio,
+  updateMemory,
+  updateThread,
+  AssistantMemory,
+  AssistantToolHistory,
+  AssistantAttachment
+} from '../lib/assistantApi';
 
 type AssistantAction = {
   label: string;
@@ -9,8 +39,10 @@ type AssistantAction = {
 };
 
 type AssistantMessage = {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
+  metadata?: Record<string, any>;
   actions?: AssistantAction[];
 };
 
@@ -64,37 +96,28 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenWhatsApp,
   onOpenFeed
 }) => {
-  const [chats, setChats] = useState<AssistantChat[]>(() => {
-    try {
-      const rawChats = localStorage.getItem('soko:assistant_chats');
-      if (rawChats) return JSON.parse(rawChats);
-      const rawMessages = localStorage.getItem('soko:assistant');
-      if (rawMessages) {
-        const legacy = JSON.parse(rawMessages);
-        return [{
-          id: `chat_${Date.now()}`,
-          title: 'Recent chat',
-          messages: legacy,
-          updatedAt: Date.now()
-        }];
-      }
-    } catch {}
-    return [{
-      id: `chat_${Date.now()}`,
-      title: 'New chat',
-      messages: [
-        {
-          role: 'assistant',
-          content: 'Hi! I’m your Sconnect assistant. Ask me to search, compare, add to bag, open a shop, or start an RFQ.',
-        }
-      ],
-      updatedAt: Date.now()
-    }];
-  });
-  const [activeChatId, setActiveChatId] = useState(() => chats[0]?.id || '');
+  const [chats, setChats] = useState<AssistantChat[]>([]);
+  const [activeChatId, setActiveChatId] = useState('');
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [showMediaTray, setShowMediaTray] = useState(false);
+  const [showOpsPanel, setShowOpsPanel] = useState(false);
+  const [attachments, setAttachments] = useState<AssistantAttachment[]>([]);
+  const [memoryItems, setMemoryItems] = useState<AssistantMemory[]>([]);
+  const [toolHistory, setToolHistory] = useState<AssistantToolHistory[]>([]);
+  const [metricsPayload, setMetricsPayload] = useState<string>('');
+  const [opsStatus, setOpsStatus] = useState<string | null>(null);
+  const [uploadForm, setUploadForm] = useState({ file_url: '', mime_type: '', expires_at: '' });
+  const [attachmentForm, setAttachmentForm] = useState({ message_id: '', file_url: '', mime_type: '', type: 'image', expires_at: '' });
+  const [asrForm, setAsrForm] = useState({ audio_url: '', job_id: '' });
+  const [ocrForm, setOcrForm] = useState({ image_url: '', job_id: '' });
+  const [visionForm, setVisionForm] = useState({ image_url: '', query: '' });
+  const [toolForm, setToolForm] = useState({ tool: '', params: '{}' });
+  const [memoryForm, setMemoryForm] = useState({ key: '', value: '', source: 'manual', confidence: '0.8', consent_given: true });
+  const [memoryUpdateForm, setMemoryUpdateForm] = useState({ id: '', value: '', consent_given: true });
+  const [moderationText, setModerationText] = useState('');
+  const [reportText, setReportText] = useState('');
+  const [eventPayload, setEventPayload] = useState('{"event":"assistant_action"}');
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     try {
       const raw = localStorage.getItem('soko:assistant_sidebar');
@@ -128,15 +151,299 @@ export const Assistant: React.FC<AssistantProps> = ({
     { label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio() },
     { label: 'Scan QR', icon: Camera, onClick: () => onOpenQrScan() }
   ];
-  const suggestionChips = [
-    { label: 'Search for rice deals', value: '/search rice deals' },
-    { label: 'Take a photo of shelf', value: '/photo shelf photo' },
-    { label: 'Compare Omo vs Sunlight', value: '/compare Omo vs Sunlight' },
-    { label: 'Start RFQ for sugar', value: '/rfq sugar 50kg' },
-    { label: 'Open rewards', value: '/rewards' }
-  ];
+  const [suggestionChips, setSuggestionChips] = useState<Array<{ label: string; value: string }>>([]);
+
+  const mapThreadToChat = (thread: any): AssistantChat => ({
+    id: thread.id,
+    title: thread.title || 'New chat',
+    messages: [],
+    updatedAt: thread.updated_at ? new Date(thread.updated_at).getTime() : Date.now(),
+    pinned: !!thread.pinned
+  });
+
+  const toAssistantMessages = (items: any[]): AssistantMessage[] =>
+    (items || []).map((msg) => ({
+      id: msg.id,
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      content: msg.content || '',
+      metadata: msg.metadata || {}
+    }));
+
+  const syncMessages = async (threadId: string) => {
+    try {
+      const items = await listMessages(threadId);
+      setChats((prev) => prev.map((chat) => (
+        chat.id === threadId
+          ? { ...chat, messages: toAssistantMessages(items), updatedAt: Date.now() }
+          : chat
+      )));
+    } catch {}
+  };
+
+  const sendStreamMessage = async (threadId: string, content: string) => {
+    try {
+      await streamThreadMessage(threadId, { content });
+      await syncMessages(threadId);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const sendUserMessage = async (threadId: string, content: string) => {
+    try {
+      await createMessage(threadId, { role: 'user', content });
+      await syncMessages(threadId);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const refreshOps = async () => {
+    if (!activeChatId) return;
+    const [mem, history, att] = await Promise.all([
+      listMemory(),
+      listToolHistory(),
+      listAttachments(activeChatId)
+    ]);
+    setMemoryItems(mem);
+    setToolHistory(history);
+    setAttachments(att);
+  };
+
+  const handleUpload = async () => {
+    setOpsStatus(null);
+    try {
+      const resp = await createUpload({
+        file_url: uploadForm.file_url,
+        mime_type: uploadForm.mime_type,
+        expires_at: uploadForm.expires_at || undefined
+      });
+      setOpsStatus(`Upload created: ${resp.upload_id}`);
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Upload failed.');
+    }
+  };
+
+  const handleCreateAttachment = async () => {
+    if (!activeChatId) return;
+    setOpsStatus(null);
+    try {
+      await createAttachment(activeChatId, {
+        message_id: attachmentForm.message_id,
+        file_url: attachmentForm.file_url,
+        mime_type: attachmentForm.mime_type,
+        type: attachmentForm.type,
+        expires_at: attachmentForm.expires_at || undefined
+      });
+      await refreshOps();
+      setOpsStatus('Attachment created.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Attachment failed.');
+    }
+  };
+
+  const handleTranscribe = async () => {
+    setOpsStatus(null);
+    try {
+      const job = await transcribeAudio({ audio_url: asrForm.audio_url });
+      setAsrForm(prev => ({ ...prev, job_id: job.id || '' }));
+      setOpsStatus(`ASR job queued: ${job.id}`);
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Transcription failed.');
+    }
+  };
+
+  const handleOCR = async () => {
+    setOpsStatus(null);
+    try {
+      const job = await runOCR({ image_url: ocrForm.image_url });
+      setOcrForm(prev => ({ ...prev, job_id: job.id || '' }));
+      setOpsStatus(`OCR job queued: ${job.id}`);
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'OCR failed.');
+    }
+  };
+
+  const handleOCRStatus = async () => {
+    setOpsStatus(null);
+    try {
+      const job = await getOCRStatus(ocrForm.job_id);
+      setOpsStatus(`OCR status: ${job.status || 'unknown'}`);
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'OCR status failed.');
+    }
+  };
+
+  const handleVision = async () => {
+    setOpsStatus(null);
+    try {
+      const job = await runVisionSearch({ image_url: visionForm.image_url, query: visionForm.query || undefined });
+      setOpsStatus(`Vision job queued: ${job.id}`);
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Vision failed.');
+    }
+  };
+
+  const handleToolExecute = async () => {
+    setOpsStatus(null);
+    try {
+      const params = toolForm.params ? JSON.parse(toolForm.params) : {};
+      await executeTool({ tool: toolForm.tool, params, thread_id: activeChatId });
+      await refreshOps();
+      setOpsStatus('Tool executed.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Tool execution failed.');
+    }
+  };
+
+  const handleCreateMemory = async () => {
+    setOpsStatus(null);
+    try {
+      await createMemory({
+        key: memoryForm.key,
+        value: memoryForm.value,
+        source: memoryForm.source,
+        confidence: Number(memoryForm.confidence || 0),
+        consent_given: memoryForm.consent_given
+      });
+      await refreshOps();
+      setOpsStatus('Memory saved.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Memory save failed.');
+    }
+  };
+
+  const handleUpdateMemory = async () => {
+    setOpsStatus(null);
+    try {
+      await updateMemory(memoryUpdateForm.id, {
+        value: memoryUpdateForm.value,
+        consent_given: memoryUpdateForm.consent_given
+      });
+      await refreshOps();
+      setOpsStatus('Memory updated.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Memory update failed.');
+    }
+  };
+
+  const handleDeleteMemory = async (id: string) => {
+    setOpsStatus(null);
+    try {
+      await deleteMemory(id);
+      await refreshOps();
+      setOpsStatus('Memory deleted.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Memory delete failed.');
+    }
+  };
+
+  const handleModerate = async () => {
+    setOpsStatus(null);
+    try {
+      await postModeration({ content: moderationText });
+      setOpsStatus('Moderation queued.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Moderation failed.');
+    }
+  };
+
+  const handleReport = async () => {
+    setOpsStatus(null);
+    try {
+      await postReport({ content: reportText });
+      setOpsStatus('Report queued.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Report failed.');
+    }
+  };
+
+  const handlePostEvent = async () => {
+    setOpsStatus(null);
+    try {
+      const payload = eventPayload ? JSON.parse(eventPayload) : {};
+      await postAssistantEvent(payload);
+      setOpsStatus('Event accepted.');
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Event failed.');
+    }
+  };
+
+  const handleMetrics = async () => {
+    setOpsStatus(null);
+    try {
+      const payload = await getAssistantMetrics();
+      setMetricsPayload(JSON.stringify(payload, null, 2));
+    } catch (err: any) {
+      setOpsStatus(err?.message || 'Metrics failed.');
+    }
+  };
+
+
+    useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const [threads, suggestions] = await Promise.all([
+          listThreads(),
+          listSuggestions()
+        ]);
+        if (!alive) return;
+        if (threads && threads.length) {
+          const mapped = threads.map(mapThreadToChat);
+          setChats(mapped);
+          setActiveChatId(mapped[0]?.id || '');
+        } else {
+          try {
+            const created = await createThread({ title: 'New chat' });
+            const mapped = mapThreadToChat(created);
+            setChats([mapped]);
+            setActiveChatId(mapped.id);
+          } catch {
+            onToast('Unable to start assistant chat.');
+          }
+        }
+        if (suggestions && suggestions.length) {
+          setSuggestionChips(suggestions.map((s: any) => ({
+            label: s.label || s.title || s.name || 'Suggestion',
+            value: s.payload || s.value || s.label || ''
+          })));
+        }
+      } catch {}
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
+    if (!activeChatId) return;
+    syncMessages(activeChatId);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!showOpsPanel || !activeChatId) return;
+    const loadOps = async () => {
+      try {
+        const [mem, history, att] = await Promise.all([
+          listMemory(),
+          listToolHistory(),
+          listAttachments(activeChatId)
+        ]);
+        setMemoryItems(mem);
+        setToolHistory(history);
+        setAttachments(att);
+      } catch (err: any) {
+        setOpsStatus(err?.message || 'Unable to load assistant ops.');
+      }
+    };
+    loadOps();
+  }, [showOpsPanel, activeChatId]);
+
+useEffect(() => {
     if (!activeChatId && chats[0]) {
       setActiveChatId(chats[0].id);
     }
@@ -144,10 +451,6 @@ export const Assistant: React.FC<AssistantProps> = ({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-    try {
-      localStorage.setItem('soko:assistant_chats', JSON.stringify(chats));
-      localStorage.removeItem('soko:assistant');
-    } catch {}
   }, [chats, isStreaming]);
 
   useEffect(() => {
@@ -287,39 +590,6 @@ export const Assistant: React.FC<AssistantProps> = ({
     return actions.slice(0, 4);
   };
 
-  const streamAssistantReply = (text: string, actions: AssistantAction[]) => {
-    const intent = parseIntent(text);
-    const response = `Got it. I can understand your intent and run multimodal search (text, voice, photo, video, or hybrid). ${intent.wantsNearMe ? 'I will prioritize near you results.' : ''} ${intent.wantsDeal ? 'I will prioritize best price and good-deal options.' : ''}`.trim() + ' Here’s the best next step:';
-    let idx = 0;
-    setIsStreaming(true);
-    setChats(prev => prev.map(chat => {
-      if (chat.id !== activeChatId) return chat;
-      return {
-        ...chat,
-        messages: [...chat.messages, { role: 'assistant', content: '' }],
-        updatedAt: Date.now()
-      };
-    }));
-    const interval = setInterval(() => {
-      idx += 1;
-      setChats(prev => prev.map(chat => {
-        if (chat.id !== activeChatId) return chat;
-        const updated = [...chat.messages];
-        const last = updated[updated.length - 1];
-        if (last && last.role === 'assistant') {
-          last.content = response.slice(0, idx);
-          if (idx >= response.length) {
-            last.actions = actions;
-          }
-        }
-        return { ...chat, messages: updated, updatedAt: Date.now() };
-      }));
-      if (idx >= response.length) {
-        clearInterval(interval);
-        setIsStreaming(false);
-      }
-    }, 15);
-  };
 
   const handleCommand = (text: string) => {
     const parts = text.trim().split(' ');
@@ -413,7 +683,7 @@ export const Assistant: React.FC<AssistantProps> = ({
     return '';
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
     const text = input.trim();
     setChats(prev => prev.map(chat => {
@@ -427,6 +697,7 @@ export const Assistant: React.FC<AssistantProps> = ({
       };
     }));
     setInput('');
+
     if (text.startsWith('/')) {
       const response = handleCommand(text);
       setChats(prev => prev.map(chat => {
@@ -437,15 +708,21 @@ export const Assistant: React.FC<AssistantProps> = ({
           updatedAt: Date.now()
         };
       }));
+      await sendUserMessage(activeChatId, text);
       return;
     }
-    const actions = buildActions(text);
-    streamAssistantReply(text, actions);
+
+    setIsStreaming(true);
+    const apiOk = await sendStreamMessage(activeChatId, text);
+    if (!apiOk) {
+      onToast('Assistant is unavailable right now. Please try again.');
+    }
+    setIsStreaming(false);
   };
 
   return (
     <div className="h-full bg-slate-950 text-white flex">
-      {/* Sidebar (desktop) */}
+            {/* Sidebar (desktop) */}
       <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:block`}>
         <div className={`flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} mb-4`}>
           {isSidebarOpen && (
@@ -495,19 +772,28 @@ export const Assistant: React.FC<AssistantProps> = ({
                     </button>
                     <div className="flex items-center gap-1 ml-2">
                       <button
-                        onClick={() => setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: !c.pinned } : c))}
+                        onClick={async () => {
+                          const nextPinned = !chat.pinned;
+                          setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: nextPinned } : c));
+                          try {
+                            await updateThread(chat.id, { pinned: nextPinned });
+                          } catch {}
+                        }}
                         className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
                         title="Pin chat"
                       >
                         {chat.pinned ? 'Unpin' : 'Pin'}
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           setChats(prev => prev.filter(c => c.id !== chat.id));
                           if (activeChatId === chat.id) {
                             const next = chats.find(c => c.id !== chat.id);
                             setActiveChatId(next?.id || '');
                           }
+                          try {
+                            await deleteThread(chat.id);
+                          } catch {}
                         }}
                         className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
                         title="Delete chat"
@@ -521,17 +807,16 @@ export const Assistant: React.FC<AssistantProps> = ({
 
             <div className="mt-4 space-y-2">
               <button
-                onClick={() => setChats(prev => [{
-                  id: `chat_${Date.now()}`,
-                  title: 'New chat',
-                  messages: [
-                    {
-                      role: 'assistant',
-                      content: 'Hi! I’m your Sconnect assistant. Ask me to search, compare, add to bag, open a shop, or start an RFQ.',
-                    }
-                  ],
-                  updatedAt: Date.now()
-                }, ...prev])}
+                onClick={async () => {
+                  try {
+                    const created = await createThread({ title: 'New chat' });
+                    const newChat = mapThreadToChat(created);
+                    setChats(prev => [newChat, ...prev]);
+                    setActiveChatId(newChat.id);
+                  } catch {
+                    onToast('Unable to start assistant chat.');
+                  }
+                }}
                 className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" /> New chat
@@ -576,8 +861,7 @@ export const Assistant: React.FC<AssistantProps> = ({
           </>
         )}
       </div>
-
-      {/* Sidebar (mobile drawer) */}
+{/* Sidebar (mobile drawer) */}
       {isSidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-40">
           <div
@@ -627,7 +911,13 @@ export const Assistant: React.FC<AssistantProps> = ({
                     </button>
                     <div className="flex items-center gap-1 ml-2">
                       <button
-                        onClick={() => setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: !c.pinned } : c))}
+                        onClick={async () => {
+                          const nextPinned = !chat.pinned;
+                          setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: nextPinned } : c));
+                          try {
+                            await updateThread(chat.id, { pinned: nextPinned });
+                          } catch {}
+                        }}
                         className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
                         title="Pin chat"
                       >
@@ -640,22 +930,16 @@ export const Assistant: React.FC<AssistantProps> = ({
 
             <div className="mt-4 space-y-2">
               <button
-                onClick={() => {
-                  const id = `chat_${Date.now()}`;
-                  const newChat: AssistantChat = {
-                    id,
-                    title: 'New chat',
-                    messages: [
-                      {
-                        role: 'assistant',
-                        content: 'Hi! I’m your Sconnect assistant. Ask me to search, compare, add to bag, open a shop, or start an RFQ.',
-                      }
-                    ],
-                    updatedAt: Date.now()
-                  };
-                  setChats(prev => [newChat, ...prev]);
-                  setActiveChatId(id);
-                  setIsSidebarOpen(false);
+                onClick={async () => {
+                  try {
+                    const created = await createThread({ title: 'New chat' });
+                    const newChat = mapThreadToChat(created);
+                    setChats(prev => [newChat, ...prev]);
+                    setActiveChatId(newChat.id);
+                    setIsSidebarOpen(false);
+                  } catch {
+                    onToast('Unable to start assistant chat.');
+                  }
                 }}
                 className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
               >
@@ -710,8 +994,8 @@ export const Assistant: React.FC<AssistantProps> = ({
           </div>
         </div>
       )}
-
       <div className="flex-1 flex flex-col relative">
+
         {/* Header */}
         <div className="fixed top-0 left-0 right-0 px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between z-40 bg-slate-950/95 backdrop-blur">
           <div className="flex items-center gap-3">
@@ -728,13 +1012,22 @@ export const Assistant: React.FC<AssistantProps> = ({
               <p className="text-[10px] text-white/60">Kenya's duka demand engine</p>
             </div>
           </div>
-          <button
-            onClick={onOpenProfile}
-            className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-            aria-label="Open profile"
-          >
-            <User className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowOpsPanel(true)}
+              className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+              aria-label="Open assistant ops"
+            >
+              <Plug className="w-5 h-5" />
+            </button>
+            <button
+              onClick={onOpenProfile}
+              className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+              aria-label="Open profile"
+            >
+              <User className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -829,7 +1122,7 @@ export const Assistant: React.FC<AssistantProps> = ({
 
           <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
             {activeMessages.map((msg, i) => (
-              <div key={i} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
+              <div key={msg.id || `msg_${i}`} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
                 <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
                   {msg.content}
                 </div>
@@ -854,17 +1147,19 @@ export const Assistant: React.FC<AssistantProps> = ({
 
         {/* Sticky Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-4 sm:pb-5 z-40">
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
-            {suggestionChips.map(chip => (
-              <button
-                key={chip.label}
-                onClick={() => setInput(chip.value)}
-                className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold whitespace-nowrap"
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
+          {suggestionChips.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+              {suggestionChips.map(chip => (
+                <button
+                  key={chip.label}
+                  onClick={() => setInput(chip.value)}
+                  className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold whitespace-nowrap"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {showMediaTray && (
             <div className="flex gap-2 mb-3">
@@ -921,6 +1216,331 @@ export const Assistant: React.FC<AssistantProps> = ({
           </div>
         </div>
       </div>
+
+      {showOpsPanel && (
+        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl bg-slate-950 text-white border border-white/10 rounded-3xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-white/10 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-black">Assistant Ops</p>
+                <p className="text-[10px] text-white/60">Live tools, memory, uploads, and moderation</p>
+              </div>
+              <button
+                onClick={() => setShowOpsPanel(false)}
+                className="h-10 w-10 rounded-full bg-white/10 flex items-center justify-center"
+                aria-label="Close assistant ops"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {opsStatus && (
+                <div className="text-[10px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
+                  {opsStatus}
+                </div>
+              )}
+
+              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Uploads</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="File URL"
+                    value={uploadForm.file_url}
+                    onChange={(e) => setUploadForm(prev => ({ ...prev, file_url: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="MIME type"
+                    value={uploadForm.mime_type}
+                    onChange={(e) => setUploadForm(prev => ({ ...prev, mime_type: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Expires at (RFC3339)"
+                    value={uploadForm.expires_at}
+                    onChange={(e) => setUploadForm(prev => ({ ...prev, expires_at: e.target.value }))}
+                  />
+                </div>
+                <button onClick={handleUpload} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
+                  Create Upload
+                </button>
+              </section>
+
+              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Attachments</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    value={attachmentForm.message_id}
+                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, message_id: e.target.value }))}
+                  >
+                    <option value="">Select message</option>
+                    {activeMessages.filter(m => m.id).map((msg) => (
+                      <option key={msg.id} value={msg.id}>
+                        {msg.role}: {msg.content.slice(0, 24)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    value={attachmentForm.type}
+                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, type: e.target.value }))}
+                  >
+                    <option value="image">image</option>
+                    <option value="audio">audio</option>
+                    <option value="video">video</option>
+                    <option value="file">file</option>
+                  </select>
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="File URL"
+                    value={attachmentForm.file_url}
+                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, file_url: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="MIME type"
+                    value={attachmentForm.mime_type}
+                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, mime_type: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Expires at (RFC3339)"
+                    value={attachmentForm.expires_at}
+                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, expires_at: e.target.value }))}
+                  />
+                </div>
+                <button onClick={handleCreateAttachment} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
+                  Attach to Message
+                </button>
+                {attachments.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {attachments.map(att => (
+                      <div key={att.id} className="p-3 bg-white/10 rounded-xl text-[10px] font-bold">
+                        {att.type || 'file'} • {att.mime_type || 'mime'} • {att.file_url || 'url'}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Audio + OCR + Vision</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Audio URL"
+                    value={asrForm.audio_url}
+                    onChange={(e) => setAsrForm(prev => ({ ...prev, audio_url: e.target.value }))}
+                  />
+                  <button onClick={handleTranscribe} className="px-3 py-2 bg-emerald-600 rounded-xl text-[10px] font-black">
+                    Transcribe
+                  </button>
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="ASR job id"
+                    value={asrForm.job_id}
+                    onChange={(e) => setAsrForm(prev => ({ ...prev, job_id: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Image URL (OCR)"
+                    value={ocrForm.image_url}
+                    onChange={(e) => setOcrForm(prev => ({ ...prev, image_url: e.target.value }))}
+                  />
+                  <button onClick={handleOCR} className="px-3 py-2 bg-emerald-600 rounded-xl text-[10px] font-black">
+                    OCR
+                  </button>
+                  <div className="flex gap-2">
+                    <input
+                      className="h-10 flex-1 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                      placeholder="OCR job id"
+                      value={ocrForm.job_id}
+                      onChange={(e) => setOcrForm(prev => ({ ...prev, job_id: e.target.value }))}
+                    />
+                    <button onClick={handleOCRStatus} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
+                      Status
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Image URL (Vision)"
+                    value={visionForm.image_url}
+                    onChange={(e) => setVisionForm(prev => ({ ...prev, image_url: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Query"
+                    value={visionForm.query}
+                    onChange={(e) => setVisionForm(prev => ({ ...prev, query: e.target.value }))}
+                  />
+                  <button onClick={handleVision} className="px-3 py-2 bg-emerald-600 rounded-xl text-[10px] font-black">
+                    Vision Search
+                  </button>
+                </div>
+              </section>
+
+              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Tool Calls</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Tool name"
+                    value={toolForm.tool}
+                    onChange={(e) => setToolForm(prev => ({ ...prev, tool: e.target.value }))}
+                  />
+                  <textarea
+                    className="min-h-[40px] rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold"
+                    placeholder='Params JSON'
+                    value={toolForm.params}
+                    onChange={(e) => setToolForm(prev => ({ ...prev, params: e.target.value }))}
+                  />
+                </div>
+                <button onClick={handleToolExecute} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
+                  Execute Tool
+                </button>
+                {toolHistory.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {toolHistory.map(item => (
+                      <div key={item.id} className="p-3 bg-white/10 rounded-xl text-[10px] font-bold">
+                        {item.tool || 'tool'} • {item.created_at || ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Memory</p>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Key"
+                    value={memoryForm.key}
+                    onChange={(e) => setMemoryForm(prev => ({ ...prev, key: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Value"
+                    value={memoryForm.value}
+                    onChange={(e) => setMemoryForm(prev => ({ ...prev, value: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Source"
+                    value={memoryForm.source}
+                    onChange={(e) => setMemoryForm(prev => ({ ...prev, source: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Confidence"
+                    value={memoryForm.confidence}
+                    onChange={(e) => setMemoryForm(prev => ({ ...prev, confidence: e.target.value }))}
+                  />
+                </div>
+                <label className="text-[10px] font-bold text-white/70 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={memoryForm.consent_given}
+                    onChange={(e) => setMemoryForm(prev => ({ ...prev, consent_given: e.target.checked }))}
+                  />
+                  Consent given
+                </label>
+                <button onClick={handleCreateMemory} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
+                  Save Memory
+                </button>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Memory ID"
+                    value={memoryUpdateForm.id}
+                    onChange={(e) => setMemoryUpdateForm(prev => ({ ...prev, id: e.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="New value"
+                    value={memoryUpdateForm.value}
+                    onChange={(e) => setMemoryUpdateForm(prev => ({ ...prev, value: e.target.value }))}
+                  />
+                  <label className="text-[10px] font-bold text-white/70 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={memoryUpdateForm.consent_given}
+                      onChange={(e) => setMemoryUpdateForm(prev => ({ ...prev, consent_given: e.target.checked }))}
+                    />
+                    Consent
+                  </label>
+                </div>
+                <button onClick={handleUpdateMemory} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
+                  Update Memory
+                </button>
+
+                {memoryItems.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {memoryItems.map(mem => (
+                      <div key={mem.id} className="p-3 bg-white/10 rounded-xl text-[10px] font-bold flex items-center justify-between gap-2">
+                        <div>
+                          {mem.key}: {mem.value}
+                        </div>
+                        <button onClick={() => handleDeleteMemory(mem.id)} className="px-2 py-1 bg-red-500/20 rounded-lg text-[9px] font-black">
+                          Delete
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Safety + Events + Metrics</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Moderation text"
+                    value={moderationText}
+                    onChange={(e) => setModerationText(e.target.value)}
+                  />
+                  <button onClick={handleModerate} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
+                    Moderate
+                  </button>
+                  <input
+                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
+                    placeholder="Report text"
+                    value={reportText}
+                    onChange={(e) => setReportText(e.target.value)}
+                  />
+                  <button onClick={handleReport} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
+                    Report
+                  </button>
+                </div>
+                <textarea
+                  className="min-h-[60px] rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold"
+                  placeholder='Event payload JSON'
+                  value={eventPayload}
+                  onChange={(e) => setEventPayload(e.target.value)}
+                />
+                <div className="flex items-center gap-2">
+                  <button onClick={handlePostEvent} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
+                    Send Event
+                  </button>
+                  <button onClick={handleMetrics} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
+                    Fetch Metrics
+                  </button>
+                </div>
+                {metricsPayload && (
+                  <pre className="text-[10px] bg-black/40 rounded-xl p-3 overflow-x-auto">{metricsPayload}</pre>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

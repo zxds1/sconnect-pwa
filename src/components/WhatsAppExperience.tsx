@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MessageCircle, Sparkles, Zap, Gift, Bell, Share2, ShieldCheck, Database, WifiOff, Mic, CheckCircle2 } from 'lucide-react';
+import {
+  createWhatsAppEvent,
+  getWhatsAppConsent,
+  getWhatsAppStatus,
+  listWhatsAppEvents,
+  optInWhatsApp,
+  optOutWhatsApp,
+  sendWhatsAppMessage,
+  type WhatsAppConsent,
+  type WhatsAppEvent
+} from '../lib/whatsappApi';
 
 type ChatLine = {
   role: 'user' | 'bot' | 'system';
@@ -34,15 +45,124 @@ const ChatCard: React.FC<{ title: string; lines: ChatLine[] }> = ({ title, lines
 );
 
 export const WhatsAppExperience: React.FC = () => {
-  const [demoLog, setDemoLog] = useState<Array<{ id: string; text: string }>>([]);
-  const [demoReward, setDemoReward] = useState<string | null>(null);
+  const [events, setEvents] = useState<WhatsAppEvent[]>([]);
+  const [consent, setConsent] = useState<WhatsAppConsent | null>(null);
+  const [phone, setPhone] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
 
-  const pushDemo = (text: string, reward?: string) => {
-    setDemoLog(prev => [{ id: `d_${Date.now()}`, text }, ...prev].slice(0, 6));
-    if (reward) {
-      setDemoReward(reward);
-      window.setTimeout(() => setDemoReward(null), 2000);
+  useEffect(() => {
+    let ignore = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [consentResp, eventItems] = await Promise.all([
+          getWhatsAppConsent(),
+          listWhatsAppEvents(12),
+        ]);
+        if (ignore) return;
+        setConsent(consentResp);
+        setEvents(eventItems);
+      } catch (err: any) {
+        if (!ignore) {
+          setStatusMessage(err?.message || 'Unable to load WhatsApp state.');
+        }
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const refreshEvents = async () => {
+    try {
+      const eventItems = await listWhatsAppEvents(12);
+      setEvents(eventItems);
+    } catch {}
+  };
+
+  const handleOptIn = async () => {
+    setStatusMessage(null);
+    try {
+      const next = await optInWhatsApp({ consent_version: 'v1' });
+      setConsent(next);
+      setStatusMessage('WhatsApp opt-in saved.');
+    } catch (err: any) {
+      setStatusMessage(err?.message || 'Unable to opt in.');
     }
+  };
+
+  const handleOptOut = async () => {
+    setStatusMessage(null);
+    try {
+      const next = await optOutWhatsApp({ consent_version: 'v1' });
+      setConsent(next);
+      setStatusMessage('WhatsApp opt-out saved.');
+    } catch (err: any) {
+      setStatusMessage(err?.message || 'Unable to opt out.');
+    }
+  };
+
+  const handleAction = async (payload: {
+    type: string;
+    content: string;
+    reward: string;
+    metadata?: Record<string, string>;
+  }) => {
+    if (!phone.trim()) {
+      setStatusMessage('Phone number is required.');
+      return;
+    }
+    if (consent?.status !== 'opted_in') {
+      setStatusMessage('Please opt in to WhatsApp first.');
+      return;
+    }
+    setSending(true);
+    setStatusMessage(null);
+    try {
+      await createWhatsAppEvent({
+        type: payload.type,
+        payload: {
+          summary: payload.reward,
+          ...payload.metadata,
+        },
+      });
+      const msg = await sendWhatsAppMessage({
+        phone: phone.trim(),
+        content: payload.content,
+        type: payload.type,
+        event_type: payload.type,
+        channel: 'whatsapp',
+        metadata: payload.metadata ?? {},
+      });
+      setLastMessageId(msg?.id || null);
+      setStatusMessage(msg?.status ? `${payload.reward} • ${msg.status}` : payload.reward);
+      if (msg?.id) {
+        window.setTimeout(async () => {
+          try {
+            const status = await getWhatsAppStatus(msg.id);
+            if (status?.status) {
+              setStatusMessage(`${payload.reward} • ${status.status}`);
+            }
+          } catch {}
+        }, 1200);
+      }
+      refreshEvents();
+    } catch (err: any) {
+      setStatusMessage(err?.message || 'Action failed.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const formatEvent = (event: WhatsAppEvent) => {
+    const summary = event.payload?.summary || event.payload?.message || event.payload?.action;
+    return `${event.type || 'event'}${summary ? ` • ${summary}` : ''}`;
   };
 
   return (
@@ -69,45 +189,169 @@ export const WhatsAppExperience: React.FC = () => {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
-            <button onClick={() => pushDemo('Multi-modal search triggered (text + voice + photo).', 'Search complete')} className="p-3 bg-zinc-100 rounded-2xl text-zinc-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'search',
+                  content: 'Multi-modal search triggered (text + voice + photo).',
+                  reward: 'Search complete',
+                  metadata: { action: 'search' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-zinc-100 rounded-2xl text-zinc-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <Zap className="w-3 h-3" /> Search
             </button>
-            <button onClick={() => pushDemo('Receipt OCR processed. KES 15 M-PESA sent.', 'KES 15 sent')} className="p-3 bg-emerald-50 rounded-2xl text-emerald-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'reward',
+                  content: 'Receipt OCR processed. KES 15 M-PESA sent.',
+                  reward: 'KES 15 sent',
+                  metadata: { action: 'receipt_reward' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-emerald-50 rounded-2xl text-emerald-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <Gift className="w-3 h-3" /> Receipt Reward
             </button>
-            <button onClick={() => pushDemo('Price drop alert fired for watched item.', 'Alert delivered')} className="p-3 bg-indigo-50 rounded-2xl text-indigo-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'price_alert',
+                  content: 'Price drop alert fired for watched item.',
+                  reward: 'Alert delivered',
+                  metadata: { action: 'price_alert' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-indigo-50 rounded-2xl text-indigo-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <Bell className="w-3 h-3" /> Price Alert
             </button>
-            <button onClick={() => pushDemo('Referral confirmed. Both users earned KES 15.', 'KES 15 + KES 15')} className="p-3 bg-amber-50 rounded-2xl text-amber-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'referral',
+                  content: 'Referral confirmed. Both users earned KES 15.',
+                  reward: 'KES 15 + KES 15',
+                  metadata: { action: 'referral' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-amber-50 rounded-2xl text-amber-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <Share2 className="w-3 h-3" /> Referral
             </button>
-            <button onClick={() => pushDemo('Verified seller badge viewed. Trust score updated.', 'Trust verified')} className="p-3 bg-blue-50 rounded-2xl text-blue-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'verification',
+                  content: 'Verified seller badge viewed. Trust score updated.',
+                  reward: 'Trust verified',
+                  metadata: { action: 'trust_check' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-blue-50 rounded-2xl text-blue-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <ShieldCheck className="w-3 h-3" /> Trust Check
             </button>
-            <button onClick={() => pushDemo('Data dashboard opened. Export + delete ready.', 'Data control')} className="p-3 bg-slate-100 rounded-2xl text-slate-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'data_control',
+                  content: 'Data dashboard opened. Export + delete ready.',
+                  reward: 'Data control',
+                  metadata: { action: 'data_control' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-slate-100 rounded-2xl text-slate-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <Database className="w-3 h-3" /> Data Control
             </button>
-            <button onClick={() => pushDemo('Offline queue synced. 2 receipts uploaded.', 'Synced')} className="p-3 bg-zinc-100 rounded-2xl text-zinc-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'offline_sync',
+                  content: 'Offline queue synced. 2 receipts uploaded.',
+                  reward: 'Synced',
+                  metadata: { action: 'offline_sync' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-zinc-100 rounded-2xl text-zinc-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <WifiOff className="w-3 h-3" /> Offline Sync
             </button>
-            <button onClick={() => pushDemo('Voice search detected Swahili + transcript chips.', 'Voice captured')} className="p-3 bg-zinc-100 rounded-2xl text-zinc-700 flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleAction({
+                  type: 'voice_search',
+                  content: 'Voice search detected Swahili + transcript chips.',
+                  reward: 'Voice captured',
+                  metadata: { action: 'voice_search' }
+                })
+              }
+              disabled={sending}
+              className="p-3 bg-zinc-100 rounded-2xl text-zinc-700 flex items-center gap-2 disabled:opacity-50"
+            >
               <Mic className="w-3 h-3" /> Voice Search
             </button>
           </div>
-          {demoReward && (
-            <div className="mt-3 p-3 bg-emerald-600 text-white rounded-2xl text-[10px] font-black">
-              {demoReward}
-            </div>
-          )}
-          {demoLog.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {demoLog.map(item => (
-                <div key={item.id} className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
-                  {item.text}
+          <div className="mt-3 space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr] gap-2">
+              <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
+                <div className="mb-2 text-[9px] uppercase tracking-widest text-zinc-400">WhatsApp Settings</div>
+                <div className="flex flex-col gap-2">
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Recipient phone (e.g. +2547...)"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-zinc-200 text-[11px] font-bold text-zinc-700"
+                  />
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-zinc-500">
+                      Consent: {consent?.status || (loading ? 'loading' : 'unknown')}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleOptIn}
+                        className="px-2 py-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold"
+                      >
+                        Opt In
+                      </button>
+                      <button
+                        onClick={handleOptOut}
+                        className="px-2 py-1 rounded-full bg-zinc-200 text-zinc-700 text-[10px] font-bold"
+                      >
+                        Opt Out
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ))}
+              </div>
+              <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700 flex items-center justify-between">
+                <span>
+                  {statusMessage || (sending ? 'Sending…' : 'Ready')}
+                  {lastMessageId ? ` • ${lastMessageId.slice(0, 8)}` : ''}
+                </span>
+                <span className="text-[9px] uppercase tracking-widest text-emerald-600">Status</span>
+              </div>
             </div>
-          )}
+            {events.length > 0 && (
+              <div className="space-y-2">
+                {events.map((item) => (
+                  <div key={item.id} className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
+                    {formatEvent(item)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">

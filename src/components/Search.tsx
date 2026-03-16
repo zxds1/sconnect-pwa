@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
+import {
   Search as SearchIcon, 
   SlidersHorizontal, 
   X, 
@@ -21,10 +21,45 @@ import {
   Clock
 } from 'lucide-react';
 import { Product } from '../types';
-import { SELLERS } from '../mockData';
+import { getProduct } from '../lib/catalogApi';
+import {
+  listRecentSearches,
+  listSavedSearches,
+  listSearchAlerts,
+  listWatchlist,
+  addWatchlistItem,
+  updateWatchlistItem,
+  deleteWatchlistItem,
+  queueHybridSearch,
+  queuePhotoSearch,
+  queueVideoSearch,
+  queueVoiceSearch,
+  createSearchAlert,
+  updateSearchAlert,
+  deleteSearchAlert,
+  recordSearchEvent,
+  saveSearch,
+  deleteSavedSearch,
+  search,
+  searchMap,
+  searchRecommendations,
+  searchTrending,
+  type SearchAlert,
+  type SearchResult,
+  type WatchlistItem,
+  type SavedSearch,
+  type RecentSearch
+} from '../lib/searchApi';
+import {
+  addShopFavorite,
+  getShopProfile,
+  listShopFavorites,
+  removeShopFavorite,
+  searchShops,
+  type ShopDirectoryEntry
+} from '../lib/shopDirectoryApi';
 
 interface SearchProps {
-  products: Product[];
   onProductOpen: (product: Product) => void;
   comparisonList: Product[];
   onAddToComparison: (product: Product) => void;
@@ -35,7 +70,7 @@ interface SearchProps {
   initialAction?: 'voice' | 'photo' | 'video' | 'hybrid';
 }
 
-export const Search: React.FC<SearchProps> = ({ products, onProductOpen, comparisonList, onAddToComparison, onOpenComparison, onAddToBag, onShopOpen, initialQuery, initialAction }) => {
+export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, onAddToComparison, onOpenComparison, onAddToBag, onShopOpen, initialQuery, initialAction }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [locationQuery, setLocationQuery] = useState('');
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -60,12 +95,29 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
   const [detectedLanguage, setDetectedLanguage] = useState<'English' | 'Swahili' | 'Sheng'>('English');
   const [transcriptChips, setTranscriptChips] = useState<string[]>([]);
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(false);
-  const [savedSearches, setSavedSearches] = useState<string[]>([]);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [watchlist, setWatchlist] = useState<string[]>([]);
-  const [watchPrefs, setWatchPrefs] = useState<Record<string, { targetPrice: number; createdAt: number }>>({});
-  const [alertPrefs, setAlertPrefs] = useState({ priceDrops: true, backInStock: true, trending: true });
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
+  const [watchlistProducts, setWatchlistProducts] = useState<Product[]>([]);
+  const [searchAlerts, setSearchAlerts] = useState<SearchAlert[]>([]);
   const [favoriteShopIds, setFavoriteShopIds] = useState<string[]>([]);
+  const [shopResults, setShopResults] = useState<ShopDirectoryEntry[]>([]);
+  const [searchProducts, setSearchProducts] = useState<Product[]>([]);
+  const [mapProducts, setMapProducts] = useState<Product[]>([]);
+  const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);
+  const [trendingQueries, setTrendingQueries] = useState<string[]>([]);
+  const [searchQueryId, setSearchQueryId] = useState<string | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [sellerMeta, setSellerMeta] = useState<Record<string, { rating?: number; verified?: boolean; location?: { lat?: number; lng?: number; address?: string } }>>({});
+  const [alertFrequency, setAlertFrequency] = useState<Record<string, string>>({});
+  const [watchlistTargets, setWatchlistTargets] = useState<Record<string, string>>({});
+  const sellerMetaRef = React.useRef(sellerMeta);
+  const searchRunRef = React.useRef(0);
+
+  useEffect(() => {
+    sellerMetaRef.current = sellerMeta;
+  }, [sellerMeta]);
 
   useEffect(() => {
     if (initialQuery !== undefined) {
@@ -98,32 +150,6 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      const rawSaved = localStorage.getItem('soko:saved_searches');
-      const rawRecent = localStorage.getItem('soko:recent_searches');
-      const rawWatch = localStorage.getItem('soko:watchlist');
-      const rawFav = localStorage.getItem('soko:fav_shops');
-      const rawWatchPrefs = localStorage.getItem('soko:watchlist_prefs');
-      const rawAlertPrefs = localStorage.getItem('soko:alert_prefs');
-      setSavedSearches(rawSaved ? JSON.parse(rawSaved) : []);
-      setRecentSearches(rawRecent ? JSON.parse(rawRecent) : []);
-      setWatchlist(rawWatch ? JSON.parse(rawWatch) : []);
-      setFavoriteShopIds(rawFav ? JSON.parse(rawFav) : []);
-      setWatchPrefs(rawWatchPrefs ? JSON.parse(rawWatchPrefs) : {});
-      setAlertPrefs(rawAlertPrefs ? JSON.parse(rawAlertPrefs) : { priceDrops: true, backInStock: true, trending: true });
-    } catch {
-      setSavedSearches([]);
-      setRecentSearches([]);
-      setWatchlist([]);
-      setFavoriteShopIds([]);
-      setWatchPrefs({});
-      setAlertPrefs({ priceDrops: true, backInStock: true, trending: true });
-    }
-  }, []);
-
-  const categories = useMemo(() => Array.from(new Set(products.map(p => p.category))), [products]);
-
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; // Radius of the earth in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -135,6 +161,149 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   };
+
+  const numberOrZero = (value: any) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const normalizeLocation = (raw: any) => {
+    if (!raw) return undefined;
+    if (typeof raw === 'string') return { address: raw };
+    const address = raw.address || raw.label || raw.name || raw.city || '';
+    const latRaw = raw.lat ?? raw.latitude ?? raw.location?.lat ?? raw.location?.latitude ?? raw.geo?.lat;
+    const lngRaw = raw.lng ?? raw.longitude ?? raw.location?.lng ?? raw.location?.longitude ?? raw.geo?.lng;
+    const lat = Number.isFinite(Number(latRaw)) ? Number(latRaw) : undefined;
+    const lng = Number.isFinite(Number(lngRaw)) ? Number(lngRaw) : undefined;
+    return { address, lat, lng };
+  };
+
+  const resolveMediaUrl = (detail: any) => {
+    if (!detail) return '';
+    const direct = detail.media_url || detail.image_url || detail.cover_url || detail.thumbnail_url || detail.mediaUrl;
+    if (direct) return direct;
+    const media = detail.media || detail.media_items || detail.mediaItems || detail.images || detail.media_urls || detail.mediaUrls;
+    if (Array.isArray(media) && media.length > 0) {
+      const item = media[0];
+      if (typeof item === 'string') return item;
+      return item?.url || item?.media_url || item?.src || item?.path || '';
+    }
+    return '';
+  };
+
+  const buildProductFromSearch = (result: SearchResult, detail?: any): Product => {
+    const sellerId = result.seller_id || detail?.seller_id || detail?.sellerId || '';
+    const locationAddress = sellerMetaRef.current[sellerId]?.location?.address || '';
+    const location = (result.lat !== undefined || result.lng !== undefined)
+      ? {
+          lat: numberOrZero(result.lat),
+          lng: numberOrZero(result.lng),
+          address: locationAddress
+        }
+      : undefined;
+    const mediaUrl = resolveMediaUrl(detail);
+    return {
+      id: result.canonical_id || detail?.id || '',
+      sellerId,
+      name: detail?.name || result.name || 'Product',
+      description: detail?.description || detail?.summary || '',
+      price: numberOrZero(detail?.current_price ?? detail?.price ?? result.price),
+      category: detail?.category || detail?.category_id || 'general',
+      mediaUrl,
+      mediaType: (detail?.media_type as 'video' | 'image') || (detail?.media?.[0]?.media_type as 'video' | 'image') || 'image',
+      tags: Array.isArray(detail?.tags) ? detail.tags : [],
+      stockLevel: numberOrZero(detail?.stock_level ?? detail?.stockLevel),
+      stockStatus: detail?.stock_status || detail?.stockStatus,
+      location,
+      discountPrice: detail?.discount_price ?? detail?.discountPrice,
+      competitorPrice: detail?.competitor_price ?? detail?.competitorPrice,
+      isGoodDeal: detail?.is_good_deal ?? detail?.good_deal
+    };
+  };
+
+  const loadSellerProfiles = React.useCallback(async (sellerIds: string[]) => {
+    const uniqueIds = Array.from(new Set(sellerIds.filter(Boolean)));
+    const missing = uniqueIds.filter((id) => !sellerMetaRef.current[id]);
+    if (missing.length === 0) return;
+    const results = await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const profile = await getShopProfile(id);
+          return { id, profile };
+        } catch {
+          return { id, profile: null };
+        }
+      })
+    );
+    setSellerMeta((prev) => {
+      const next = { ...prev };
+      results.forEach(({ id, profile }) => {
+        if (!profile) return;
+        next[id] = {
+          rating: numberOrZero(profile.rating ?? profile.stars ?? profile.score ?? profile.trust_score),
+          verified: Boolean(profile.verified ?? profile.is_verified ?? profile.isVerified ?? profile.verification?.status === 'verified'),
+          location: normalizeLocation(profile.location ?? profile.address ?? profile.shop_location)
+        };
+      });
+      return next;
+    });
+  }, []);
+
+  const hydrateProductsFromResults = React.useCallback(async (results: SearchResult[]) => {
+    const sellerIds = results.map((item) => item.seller_id || '').filter(Boolean);
+    await loadSellerProfiles(sellerIds);
+    const products = await Promise.all(
+      results.map(async (item) => {
+        try {
+          const detail = await getProduct(item.canonical_id);
+          return buildProductFromSearch(item, detail);
+        } catch {
+          return buildProductFromSearch(item);
+        }
+      })
+    );
+    return products.filter((p) => p.id);
+  }, [loadSellerProfiles]);
+
+  useEffect(() => {
+    let ignore = false;
+    const load = async () => {
+      try {
+        const [saved, recent, watchlist, alerts, favorites, trending, recs] = await Promise.all([
+          listSavedSearches(),
+          listRecentSearches(),
+          listWatchlist(),
+          listSearchAlerts(),
+          listShopFavorites(),
+          searchTrending(),
+          searchRecommendations()
+        ]);
+        if (ignore) return;
+        setSavedSearches(saved);
+        setRecentSearches(recent);
+        setWatchlistItems(watchlist);
+        setSearchAlerts(alerts);
+        setFavoriteShopIds(favorites.map((item: any) => item.seller_id || item.id).filter(Boolean));
+        setTrendingQueries(trending);
+        const recProducts = await hydrateProductsFromResults(recs);
+        if (!ignore) setRecommendedProducts(recProducts);
+      } catch (err) {
+        if (!ignore) {
+          setSavedSearches([]);
+          setRecentSearches([]);
+          setWatchlistItems([]);
+          setSearchAlerts([]);
+          setFavoriteShopIds([]);
+          setTrendingQueries([]);
+          setRecommendedProducts([]);
+        }
+      }
+    };
+    load();
+    return () => {
+      ignore = true;
+    };
+  }, [hydrateProductsFromResults]);
 
   const handleUseMyLocation = () => {
     if (navigator.geolocation) {
@@ -191,7 +360,13 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
     const sampleTags = ['electronics', 'fashion', 'food', 'home', 'beauty', 'sports', 'office', 'kids', 'outdoors', 'accessories'];
     const hint = sampleTags[Math.floor(Math.random() * sampleTags.length)];
     setSearchQuery(hint);
-    setIsHybridActive(pendingHybrid || false);
+    const hybrid = pendingHybrid || false;
+    setIsHybridActive(hybrid);
+    if (hybrid) {
+      queueHybridSearch().catch(() => {});
+    } else {
+      queuePhotoSearch().catch(() => {});
+    }
     setPendingHybrid(false);
     handleCloseCamera();
   };
@@ -202,6 +377,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
     setVideoPreview(url);
     setSearchQuery('video match');
     setIsHybridActive(false);
+    queueVideoSearch().catch(() => {});
   };
 
   const handleReadResults = () => {
@@ -236,6 +412,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
       alert('Speech recognition not supported on this browser.');
       return;
     }
+    queueVoiceSearch().catch(() => {});
     const recognition = new SpeechRecognition();
     recognition.lang = detectedLanguage === 'Swahili' ? 'sw-KE' : 'en-US';
     recognition.interimResults = false;
@@ -252,133 +429,363 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
     recognition.start();
   };
 
-  const persistSavedSearches = (next: string[]) => {
-    setSavedSearches(next);
+  const runSearch = React.useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchProducts([]);
+      setSearchQueryId(null);
+      setSearchError(null);
+      return;
+    }
+    const runId = ++searchRunRef.current;
+    setSearchLoading(true);
+    setSearchError(null);
+    const lat = isNearMeActive ? userCoords?.lat : undefined;
+    const lng = isNearMeActive ? userCoords?.lng : undefined;
+    const radius = isNearMeActive ? maxDistance ?? undefined : undefined;
     try {
-      localStorage.setItem('soko:saved_searches', JSON.stringify(next));
+      const response = await search({
+        q: query,
+        lat,
+        lng,
+        radius,
+        locationConsent: Boolean(isNearMeActive && userCoords)
+      });
+      if (runId !== searchRunRef.current) return;
+      setSearchQueryId(response.query_id || null);
+      const results = response.results || [];
+      const hydrated = await hydrateProductsFromResults(results);
+      if (runId !== searchRunRef.current) return;
+      setSearchProducts(hydrated);
+      const recent = await listRecentSearches();
+      if (runId === searchRunRef.current) setRecentSearches(recent);
+    } catch (err: any) {
+      if (runId === searchRunRef.current) {
+        setSearchError(err?.message || 'Search failed');
+        setSearchProducts([]);
+      }
+    } finally {
+      if (runId === searchRunRef.current) setSearchLoading(false);
+    }
+  }, [hydrateProductsFromResults, isNearMeActive, maxDistance, userCoords]);
+
+  const trackSearchEvent = React.useCallback((eventType: string, productId?: string) => {
+    if (!searchQueryId || !productId) return;
+    recordSearchEvent({
+      query_id: searchQueryId,
+      event_type: eventType,
+      canonical_id: productId
+    }).catch(() => {});
+  }, [searchQueryId]);
+
+  const refreshAlerts = React.useCallback(async () => {
+    try {
+      const alerts = await listSearchAlerts();
+      setSearchAlerts(alerts);
+    } catch {}
+  }, []);
+
+  const refreshWatchlist = React.useCallback(async () => {
+    try {
+      const items = await listWatchlist();
+      setWatchlistItems(items);
+    } catch {}
+  }, []);
+
+  const handleCreateAlert = async (saved: SavedSearch) => {
+    if (!saved.query_hash) return;
+    const frequency = alertFrequency[saved.id] || 'daily';
+    try {
+      await createSearchAlert({ query_hash: saved.query_hash, frequency });
+      refreshAlerts();
     } catch {}
   };
 
-  const persistRecentSearches = (next: string[]) => {
-    setRecentSearches(next);
+  const handleRemoveSavedSearch = async (saved: SavedSearch) => {
     try {
-      localStorage.setItem('soko:recent_searches', JSON.stringify(next));
+      await deleteSavedSearch(saved.id);
+      const nextSaved = savedSearches.filter((item) => item.id !== saved.id);
+      setSavedSearches(nextSaved);
+      refreshAlerts();
     } catch {}
   };
 
-  const handleSaveSearch = () => {
+  const handleToggleAlert = async (alert: SearchAlert) => {
+    const nextStatus = alert.status === 'paused' ? 'active' : 'paused';
+    try {
+      await updateSearchAlert(alert.id, { status: nextStatus });
+      refreshAlerts();
+    } catch {}
+  };
+
+  const handleAddWatchlist = async (product: Product) => {
+    const raw = window.prompt('Target price (KES)', String(product.price));
+    if (!raw) return;
+    const target = Number(raw);
+    if (!Number.isFinite(target) || target <= 0) {
+      alert('Enter a valid target price.');
+      return;
+    }
+    try {
+      await addWatchlistItem({ canonical_id: product.id, target_price: target });
+      refreshWatchlist();
+    } catch {}
+  };
+
+  const handleUpdateWatchlist = async (item: WatchlistItem) => {
+    const raw = watchlistTargets[item.id] ?? String(item.target_price);
+    const target = Number(raw);
+    if (!Number.isFinite(target) || target <= 0) {
+      alert('Enter a valid target price.');
+      return;
+    }
+    try {
+      await updateWatchlistItem(item.id, { target_price: target });
+      refreshWatchlist();
+    } catch {}
+  };
+
+  const handleRemoveWatchlist = async (item: WatchlistItem) => {
+    try {
+      await deleteWatchlistItem(item.id);
+      refreshWatchlist();
+    } catch {}
+  };
+
+  const handleRemoveAlert = async (alert: SearchAlert) => {
+    try {
+      await deleteSearchAlert(alert.id);
+      refreshAlerts();
+    } catch {}
+  };
+
+  const handleSaveSearch = async () => {
     const query = searchQuery.trim();
     if (!query) return;
-    if (savedSearches.includes(query)) return;
-    const next = [query, ...savedSearches].slice(0, 8);
-    persistSavedSearches(next);
+    try {
+      const saved = await saveSearch(query);
+      setSavedSearches((prev) => [saved, ...prev.filter((item) => item.query !== saved.query)].slice(0, 8));
+    } catch {}
   };
 
   const recordSearch = () => {
-    const query = searchQuery.trim();
-    if (!query) return;
-    const next = [query, ...recentSearches.filter(q => q !== query)].slice(0, 8);
-    persistRecentSearches(next);
+    runSearch(searchQuery);
   };
 
-  const toggleFavoriteShop = (shopId: string) => {
-    const next = favoriteShopIds.includes(shopId)
-      ? favoriteShopIds.filter(id => id !== shopId)
-      : [shopId, ...favoriteShopIds];
-    setFavoriteShopIds(next);
+  const toggleFavoriteShop = async (shopId: string) => {
     try {
-      localStorage.setItem('soko:fav_shops', JSON.stringify(next));
+      if (favoriteShopIds.includes(shopId)) {
+        await removeShopFavorite(shopId);
+        setFavoriteShopIds((prev) => prev.filter((id) => id !== shopId));
+      } else {
+        await addShopFavorite(shopId);
+        setFavoriteShopIds((prev) => [shopId, ...prev]);
+      }
     } catch {}
   };
 
-  const filteredProducts = useMemo(() => {
-    let results = products.filter(p => {
-      const seller = SELLERS.find(s => s.id === p.sellerId);
-      const matchesQuery = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           p.description.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = !selectedCategory || p.category === selectedCategory;
-      const matchesPrice = p.price >= priceRange[0] && p.price <= priceRange[1];
-      const matchesRating = (seller?.rating || 0) >= minRating;
-      
-      let matchesLocation = true;
-      if (isNearMeActive && userCoords) {
-        if (seller?.location) {
-          const dist = calculateDistance(userCoords.lat, userCoords.lng, seller.location.lat, seller.location.lng);
-          matchesLocation = dist <= (maxDistance || 10);
-        } else {
-          matchesLocation = false;
-        }
-      } else if (locationQuery && locationQuery !== 'My Location') {
-        matchesLocation = seller?.location?.address.toLowerCase().includes(locationQuery.toLowerCase()) || false;
-      }
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchProducts([]);
+      setSearchQueryId(null);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      runSearch(searchQuery);
+    }, 350);
+    return () => clearTimeout(timeout);
+  }, [runSearch, searchQuery]);
 
-      return matchesQuery && matchesCategory && matchesPrice && matchesRating && matchesLocation;
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    if (!searchQuery.trim()) {
+      setMapProducts([]);
+      return;
+    }
+    let ignore = false;
+    const run = async () => {
+      const lat = isNearMeActive ? userCoords?.lat : undefined;
+      const lng = isNearMeActive ? userCoords?.lng : undefined;
+      const radius = isNearMeActive ? maxDistance ?? undefined : undefined;
+      try {
+        const items = await searchMap({
+          q: searchQuery,
+          lat,
+          lng,
+          radius,
+          locationConsent: Boolean(isNearMeActive && userCoords)
+        });
+        const hydrated = await hydrateProductsFromResults(items);
+        if (!ignore) setMapProducts(hydrated);
+      } catch {
+        if (!ignore) setMapProducts([]);
+      }
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
+  }, [viewMode, searchQuery, isNearMeActive, userCoords, maxDistance, hydrateProductsFromResults]);
+
+  useEffect(() => {
+    let ignore = false;
+    const run = async () => {
+      try {
+        const shops = await searchShops({
+          query: searchQuery || undefined,
+          category: selectedCategory || undefined,
+          minRating: minRating || undefined,
+          lat: isNearMeActive ? userCoords?.lat : undefined,
+          lng: isNearMeActive ? userCoords?.lng : undefined,
+          radiusKm: isNearMeActive ? maxDistance ?? undefined : undefined
+        });
+        if (!ignore) setShopResults(shops);
+      } catch {
+        if (!ignore) setShopResults([]);
+      }
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
+  }, [searchQuery, selectedCategory, minRating, isNearMeActive, userCoords, maxDistance]);
+
+  useEffect(() => {
+    if (watchlistItems.length === 0) {
+      setWatchlistProducts([]);
+      return;
+    }
+    let ignore = false;
+    const run = async () => {
+      const results: SearchResult[] = watchlistItems.map((item) => ({
+        canonical_id: item.canonical_id
+      }));
+      try {
+        const hydrated = await hydrateProductsFromResults(results);
+        if (!ignore) setWatchlistProducts(hydrated);
+      } catch {
+        if (!ignore) setWatchlistProducts([]);
+      }
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
+  }, [watchlistItems, hydrateProductsFromResults]);
+
+  useEffect(() => {
+    if (Object.keys(sellerMeta).length === 0) return;
+    const applyMeta = (items: Product[]) =>
+      items.map((item) => {
+        const meta = sellerMeta[item.sellerId];
+        if (!meta?.location) return item;
+        return {
+          ...item,
+          location: {
+            lat: item.location?.lat ?? meta.location.lat ?? 0,
+            lng: item.location?.lng ?? meta.location.lng ?? 0,
+            address: meta.location.address || item.location?.address || ''
+          }
+        };
+      });
+    setSearchProducts((prev) => applyMeta(prev));
+    setMapProducts((prev) => applyMeta(prev));
+    setRecommendedProducts((prev) => applyMeta(prev));
+    setWatchlistProducts((prev) => applyMeta(prev));
+  }, [sellerMeta]);
+
+  const categories = useMemo(() => {
+    const pool = [...searchProducts, ...recommendedProducts, ...watchlistProducts];
+    return Array.from(new Set(pool.map((p) => p.category).filter(Boolean)));
+  }, [searchProducts, recommendedProducts, watchlistProducts]);
+
+  const watchlistById = useMemo(() => {
+    const map = new Map<string, WatchlistItem>();
+    watchlistItems.forEach((item) => map.set(item.canonical_id, item));
+    return map;
+  }, [watchlistItems]);
+
+  const alertSummary = useMemo(() => {
+    return searchAlerts.map((alert) => {
+      const match = savedSearches.find((item) => item.query_hash === alert.query_hash);
+      return {
+        id: alert.id,
+        query: match?.query || alert.query_hash || 'Alert',
+        frequency: alert.frequency || 'daily',
+        status: alert.status || 'active'
+      };
     });
+  }, [searchAlerts, savedSearches]);
+
+  const alertByHash = useMemo(() => {
+    const map = new Map<string, SearchAlert>();
+    searchAlerts.forEach((alert) => {
+      if (alert.query_hash) map.set(alert.query_hash, alert);
+    });
+    return map;
+  }, [searchAlerts]);
+
+  const filteredProducts = useMemo(() => {
+    let results = [...searchProducts];
+    if (selectedCategory) {
+      results = results.filter((p) => p.category === selectedCategory);
+    }
+    results = results.filter((p) => p.price >= priceRange[0] && p.price <= priceRange[1]);
+    if (minRating > 0) {
+      results = results.filter((p) => (sellerMeta[p.sellerId]?.rating || 0) >= minRating);
+    }
+
+    if (isNearMeActive && userCoords) {
+      results = results.filter((p) => {
+        if (!p.location) return false;
+        const dist = calculateDistance(userCoords.lat, userCoords.lng, p.location.lat, p.location.lng);
+        return dist <= (maxDistance || 10);
+      });
+    } else if (locationQuery && locationQuery !== 'My Location') {
+      const query = locationQuery.toLowerCase();
+      results = results.filter((p) => {
+        const address = p.location?.address || sellerMeta[p.sellerId]?.location?.address || '';
+        return address.toLowerCase().includes(query);
+      });
+    }
 
     if (sortBy === 'price_asc') results.sort((a, b) => a.price - b.price);
     if (sortBy === 'price_desc') results.sort((a, b) => b.price - a.price);
     if (sortBy === 'rating') {
       results.sort((a, b) => {
-        const sA = SELLERS.find(s => s.id === a.sellerId);
-        const sB = SELLERS.find(s => s.id === b.sellerId);
-        const rA = (sA?.rating || 0) + (sA?.isVerified ? 0.3 : 0);
-        const rB = (sB?.rating || 0) + (sB?.isVerified ? 0.3 : 0);
+        const rA = (sellerMeta[a.sellerId]?.rating || 0) + (sellerMeta[a.sellerId]?.verified ? 0.3 : 0);
+        const rB = (sellerMeta[b.sellerId]?.rating || 0) + (sellerMeta[b.sellerId]?.verified ? 0.3 : 0);
         return rB - rA;
       });
     }
 
     return results;
-  }, [products, searchQuery, selectedCategory, priceRange, minRating, sortBy, userCoords, maxDistance, locationQuery, isNearMeActive]);
+  }, [searchProducts, selectedCategory, priceRange, minRating, sortBy, userCoords, maxDistance, locationQuery, isNearMeActive, sellerMeta]);
 
   const filteredShops = useMemo(() => {
-    const shops = SELLERS.filter(s => {
-      const matchesQuery = s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.description.toLowerCase().includes(searchQuery.toLowerCase());
-      if (!matchesQuery && searchQuery.length > 0) return false;
-      const matchesCategory = !selectedCategory || products.some(p => p.sellerId === s.id && p.category === selectedCategory);
-      const matchesPrice = products.some(p => p.sellerId === s.id && p.price >= priceRange[0] && p.price <= priceRange[1]);
-      const matchesRating = s.rating >= minRating;
-
-      let matchesLocation = true;
-      if (isNearMeActive && userCoords && s.location) {
-        const dist = calculateDistance(userCoords.lat, userCoords.lng, s.location.lat, s.location.lng);
-        matchesLocation = dist <= (maxDistance || 10);
-      } else if (locationQuery && locationQuery !== 'My Location') {
-        matchesLocation = s.location?.address.toLowerCase().includes(locationQuery.toLowerCase()) || false;
-      }
-
-      return matchesCategory && matchesPrice && matchesRating && matchesLocation;
+    const query = locationQuery && locationQuery !== 'My Location' ? locationQuery.toLowerCase() : '';
+    const shops = shopResults.filter((shop) => {
+      if (!query) return true;
+      const loc = normalizeLocation(shop.location);
+      return (loc?.address || '').toLowerCase().includes(query);
     });
-    return shops.sort((a, b) => {
-      const scoreA = (a.rating || 0) + (a.isVerified ? 0.5 : 0);
-      const scoreB = (b.rating || 0) + (b.isVerified ? 0.5 : 0);
-      return scoreB - scoreA;
+    return shops.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  }, [shopResults, locationQuery]);
+
+  const recentSearchSummary = useMemo(() => {
+    return recentSearches.slice(0, 5).map((item) => {
+      const ts = item.created_at ? new Date(item.created_at).getTime() : Date.now();
+      const mins = Math.max(1, Math.round((Date.now() - ts) / 60000));
+      return {
+        id: item.id,
+        name: item.query,
+        time: mins >= 60 ? `${Math.round(mins / 60)} hrs ago` : `${mins} mins ago`
+      };
     });
-  }, [products, searchQuery, selectedCategory, priceRange, minRating, isNearMeActive, userCoords, maxDistance, locationQuery]);
+  }, [recentSearches]);
 
-  const trendingQueries = useMemo(() => {
-    const pool = ['solar lantern', 'wireless earphones', 'organic honey', 'gas cooker', 'power bank', 'school shoes', 'cooking oil'];
-    return pool.slice(0, 5);
-  }, []);
-
-  const recommendedProducts = useMemo(() => {
-    if (recentSearches.length === 0) return products.slice(0, 4);
-    const query = recentSearches[0].toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(query) || p.category.toLowerCase().includes(query)).slice(0, 4);
-  }, [recentSearches, products]);
-
-  const watchlistProducts = useMemo(() => {
-    return products.filter(p => watchlist.includes(p.id)).slice(0, 4);
-  }, [products, watchlist]);
-
-  const recentPurchases = useMemo(() => {
-    return products.slice(0, 5).map((p, idx) => ({
-      id: p.id,
-      name: p.name,
-      shop: SELLERS.find(s => s.id === p.sellerId)?.name || 'Local Shop',
-      time: `${12 - idx} mins ago`
-    }));
-  }, [products]);
+  const mapItems = viewMode === 'map'
+    ? (mapProducts.length > 0 ? mapProducts : filteredProducts)
+    : filteredProducts;
 
   return (
     <div className="h-full bg-zinc-50 flex flex-col overflow-hidden">
@@ -531,7 +938,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
         {/* View Toggle */}
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">
-            {filteredProducts.length} Results Found
+            {searchLoading ? 'Searching...' : `${filteredProducts.length} Results Found`}
           </h3>
           <div className="flex bg-zinc-200/50 p-1 rounded-xl">
             <button 
@@ -548,6 +955,11 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
             </button>
           </div>
         </div>
+        {searchError && (
+          <div className="mb-4 text-[10px] font-bold text-rose-500">
+            {searchError}
+          </div>
+        )}
 
         {viewMode === 'map' ? (
           <div className="h-[320px] sm:h-[500px] w-full bg-zinc-100 rounded-3xl overflow-hidden relative border-2 border-zinc-200">
@@ -557,14 +969,14 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
             </div>
             
             {/* Map Markers */}
-            {filteredProducts.map((product, i) => {
+            {mapItems.map((product, i) => {
               if (!product.location) return null;
               const top = ((product.location.lat - 34) * 15) % 80 + 10;
               const left = ((product.location.lng + 120) * 15) % 80 + 10;
               
               return (
                 <motion.div 
-                  key={product.id}
+                  key={product.id || `${product.name}-${i}`}
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   transition={{ delay: i * 0.1 }}
@@ -594,7 +1006,10 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                               <p className="text-[10px] font-bold text-indigo-600">${product.price}</p>
                             </div>
                             <button 
-                              onClick={() => onProductOpen(product)}
+                              onClick={() => {
+                                trackSearchEvent('view', product.id);
+                                onProductOpen(product);
+                              }}
                               className="w-full py-2 bg-zinc-900 text-white rounded-lg text-[10px] font-bold"
                             >
                               View Product
@@ -624,7 +1039,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                 </div>
                 <div>
                   <p className="text-xs font-black text-zinc-900">Nearby Market View</p>
-                  <p className="text-[10px] text-zinc-500">Showing {filteredProducts.length} items within your area</p>
+                  <p className="text-[10px] text-zinc-500">Showing {mapItems.length} items within your area</p>
                 </div>
               </div>
             </div>
@@ -638,22 +1053,94 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Searches</h3>
                   <span className="text-[10px] text-zinc-400 font-bold">{savedSearches.length} saved</span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {savedSearches.map(term => (
-                    <button
-                      key={term}
-                      onClick={() => setSearchQuery(term)}
-                      className="px-3 py-1.5 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-600 hover:bg-indigo-50 hover:text-indigo-600"
-                    >
-                      {term}
-                    </button>
+                <div className="flex flex-col gap-2">
+                  {savedSearches.map((item) => {
+                    const existingAlert = item.query_hash ? alertByHash.get(item.query_hash) : undefined;
+                    const frequency = alertFrequency[item.id] || 'daily';
+                    return (
+                      <div key={item.id || item.query} className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => setSearchQuery(item.query)}
+                          className="px-3 py-1.5 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-600 hover:bg-indigo-50 hover:text-indigo-600"
+                        >
+                          {item.query}
+                        </button>
+                        <select
+                          value={frequency}
+                          onChange={(e) => setAlertFrequency((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          className="px-2 py-1 rounded-full text-[9px] font-bold bg-zinc-50 border border-zinc-100 text-zinc-600"
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                        <button
+                          onClick={() => handleCreateAlert(item)}
+                          disabled={Boolean(existingAlert)}
+                          className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${existingAlert ? 'bg-zinc-200 text-zinc-500' : 'bg-amber-500 text-white'}`}
+                        >
+                          {existingAlert ? 'Alerted' : 'Create Alert'}
+                        </button>
+                        <button
+                          onClick={() => handleRemoveSavedSearch(item)}
+                          className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-200 text-zinc-700"
+                        >
+                          Remove
+                        </button>
+                        {existingAlert?.status && (
+                          <span className="text-[9px] font-bold text-zinc-400 uppercase">
+                            {existingAlert.status}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {alertSummary.length > 0 && (
+              <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-amber-500" />
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Search Alerts</h3>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-bold">{alertSummary.length} active</span>
+                </div>
+                <div className="space-y-2">
+                  {alertSummary.slice(0, 5).map((alert) => (
+                    <div key={alert.id} className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
+                      <span className="truncate">{alert.query}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-400">{alert.frequency}</span>
+                        <button
+                          onClick={() => {
+                            const full = searchAlerts.find((item) => item.id === alert.id);
+                            if (full) handleToggleAlert(full);
+                          }}
+                          className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-zinc-100 text-zinc-600"
+                        >
+                          {alert.status === 'paused' ? 'Resume' : 'Pause'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            const full = searchAlerts.find((item) => item.id === alert.id);
+                            if (full) handleRemoveAlert(full);
+                          }}
+                          className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-zinc-200 text-zinc-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
 
             {/* Price Drop Alerts */}
-            {watchlistProducts.length > 0 && alertPrefs.priceDrops && (
+            {watchlistProducts.length > 0 && (
               <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -663,30 +1150,68 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                   <span className="text-[10px] text-indigo-600 font-bold">Watchlist</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {watchlistProducts.map(product => (
-                    <button
+                  {watchlistProducts.slice(0, 4).map((product) => {
+                    const watchItem = watchlistById.get(product.id);
+                    const targetPrice = watchItem?.target_price ?? product.price;
+                    const targetValue = watchItem ? (watchlistTargets[watchItem.id] ?? String(watchItem.target_price)) : '';
+                    return (
+                    <div
                       key={product.id}
-                      onClick={() => onProductOpen(product)}
-                      className="p-3 bg-zinc-50 rounded-xl flex items-center gap-3 text-left"
+                      onClick={() => {
+                        trackSearchEvent('view', product.id);
+                        onProductOpen(product);
+                      }}
+                      role="button"
+                      className="p-3 bg-zinc-50 rounded-xl flex items-center gap-3 text-left cursor-pointer"
                     >
                       <img src={product.mediaUrl} className="w-10 h-10 rounded-lg object-cover" alt={product.name} />
                       <div>
                         <p className="text-xs font-bold text-zinc-900 line-clamp-1">{product.name}</p>
                         <p className="text-[10px] text-emerald-600 font-bold">
-                          Target: KES {watchPrefs[product.id]?.targetPrice ?? product.price}
+                          Target: KES {targetPrice}
                         </p>
-                        {product.price <= (watchPrefs[product.id]?.targetPrice ?? product.price) && (
+                        {product.price <= targetPrice && (
                           <p className="text-[10px] text-amber-600 font-bold">Alert ready</p>
                         )}
+                        {watchItem && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={targetValue}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => setWatchlistTargets((prev) => ({ ...prev, [watchItem.id]: e.target.value }))}
+                              className="w-20 px-2 py-1 text-[9px] font-bold rounded-lg bg-white border border-zinc-200"
+                            />
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUpdateWatchlist(watchItem);
+                              }}
+                              className="px-2 py-1 rounded-full text-[9px] font-black uppercase bg-indigo-600 text-white"
+                            >
+                              Update
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveWatchlist(watchItem);
+                              }}
+                              className="px-2 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-200 text-zinc-700"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    </button>
-                  ))}
+                    </div>
+                  );
+                  })}
                 </div>
               </div>
             )}
 
             {/* Trending Near You */}
-            {alertPrefs.trending && (
+            {trendingQueries.length > 0 && (
               <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -719,10 +1244,13 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                 <span className="text-[10px] text-zinc-400 font-bold">Based on searches</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {recommendedProducts.map(product => (
+                {recommendedProducts.slice(0, 4).map(product => (
                   <button
                     key={product.id}
-                    onClick={() => onProductOpen(product)}
+                    onClick={() => {
+                      trackSearchEvent('view', product.id);
+                      onProductOpen(product);
+                    }}
                     className="p-3 bg-zinc-50 rounded-xl flex items-center gap-3 text-left"
                   >
                     <img src={product.mediaUrl} className="w-10 h-10 rounded-lg object-cover" alt={product.name} />
@@ -735,19 +1263,22 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
               </div>
             </div>
 
-            {/* Just Bought Here */}
+            {/* Recent Searches */}
             <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <Clock className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Just Bought Here</h3>
+                <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Recent Searches</h3>
               </div>
               <div className="space-y-2">
-                {recentPurchases.map(item => (
+                {recentSearchSummary.map((item) => (
                   <div key={item.id} className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
-                    <span>{item.name} • {item.shop}</span>
+                    <span>{item.name}</span>
                     <span className="text-zinc-400">{item.time}</span>
                   </div>
                 ))}
+                {recentSearchSummary.length === 0 && (
+                  <div className="text-[10px] font-bold text-zinc-400">No recent searches yet.</div>
+                )}
               </div>
             </div>
             <AnimatePresence>
@@ -860,43 +1391,56 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                 <span className="text-[10px] font-bold text-zinc-400">{filteredShops.length} Shops</span>
               </div>
               <div className="grid grid-cols-1 gap-3">
-                {filteredShops.slice(0, 6).map(shop => (
+                {filteredShops.slice(0, 6).map((shop) => {
+                  const shopId = shop.id || shop.seller_id || '';
+                  const shopLocation = normalizeLocation(shop.location);
+                  const shopName = shop.name || 'Shop';
+                  const shopDescription = shop.category || shopLocation?.address || 'Local shop';
+                  const shopAvatar = (shop as any).avatar || (shop as any).logo_url || (shop as any).image_url || '';
+                  return (
                   <div
-                    key={shop.id}
+                    key={shopId || shopName}
                     role="button"
                     tabIndex={0}
-                    onClick={() => onShopOpen(shop.id)}
+                    onClick={() => shopId && onShopOpen(shopId)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') onShopOpen(shop.id);
+                      if (e.key === 'Enter' && shopId) onShopOpen(shopId);
                     }}
                     className="p-4 bg-white rounded-2xl border border-zinc-100 shadow-sm flex items-center justify-between text-left hover:border-indigo-200 transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-3">
-                      <img src={shop.avatar} className="w-12 h-12 rounded-full object-cover" alt={shop.name} />
+                      {shopAvatar ? (
+                        <img src={shopAvatar} className="w-12 h-12 rounded-full object-cover" alt={shopName} />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-zinc-200 text-zinc-600 flex items-center justify-center text-xs font-black">
+                          {shopName.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
                       <div>
-                        <p className="text-sm font-bold text-zinc-900">{shop.name}</p>
-                        <p className="text-[10px] text-zinc-500">{shop.description}</p>
-                        {shop.location && (
+                        <p className="text-sm font-bold text-zinc-900">{shopName}</p>
+                        <p className="text-[10px] text-zinc-500">{shopDescription}</p>
+                        {shopLocation?.address && (
                           <div className="flex items-center gap-1 text-[10px] text-indigo-600 font-bold mt-1">
-                            <MapPin className="w-3 h-3" /> {shop.location.address}
+                            <MapPin className="w-3 h-3" /> {shopLocation.address}
                           </div>
                         )}
                       </div>
                     </div>
                     <div className="text-[10px] font-black text-amber-500 flex items-center gap-1">
-                      ★ {shop.rating}
+                      ★ {shop.rating || 0}
                     </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleFavoriteShop(shop.id);
+                        if (shopId) toggleFavoriteShop(shopId);
                       }}
-                      className={`ml-3 px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${favoriteShopIds.includes(shop.id) ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      className={`ml-3 px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${favoriteShopIds.includes(shopId) ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
                     >
-                      {favoriteShopIds.includes(shop.id) ? 'Favorited' : 'Favorite'}
+                      {favoriteShopIds.includes(shopId) ? 'Favorited' : 'Favorite'}
                     </button>
                   </div>
-                ))}
+                );
+                })}
                 {filteredShops.length === 0 && (
                   <div className="p-4 bg-zinc-50 rounded-2xl text-[10px] text-zinc-500 font-bold text-center">
                     No shops found for this search.
@@ -914,7 +1458,10 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
                   className="bg-white rounded-2xl border border-zinc-100 overflow-hidden flex flex-col shadow-sm cursor-pointer group"
-                  onClick={() => onProductOpen(product)}
+                  onClick={() => {
+                    trackSearchEvent('view', product.id);
+                    onProductOpen(product);
+                  }}
                 >
                   <div className="aspect-square relative overflow-hidden">
                     <img src={product.mediaUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={product.name} />
@@ -937,18 +1484,28 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          trackSearchEvent('compare_add', product.id);
                           onAddToComparison(product);
                         }}
                         className={`p-2 rounded-full backdrop-blur-md transition-colors ${comparisonList.find(p => p.id === product.id) ? 'bg-indigo-600 text-white' : 'bg-white/80 text-zinc-600'}`}
                       >
                         <ArrowRightLeft className="w-4 h-4" />
                       </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddWatchlist(product);
+                        }}
+                        className="p-2 rounded-full backdrop-blur-md bg-white/80 text-amber-600 hover:bg-amber-100 transition-colors"
+                      >
+                        <Bell className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                   <div className="p-3 flex-1 flex flex-col relative">
                     <div className="flex items-center gap-1.5 mb-1">
                       <h4 className="font-bold text-zinc-900 text-sm line-clamp-1">{product.name}</h4>
-                      {SELLERS.find(s => s.id === product.sellerId)?.isVerified && (
+                      {sellerMeta[product.sellerId]?.verified && (
                         <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                       )}
                     </div>
@@ -963,6 +1520,7 @@ export const Search: React.FC<SearchProps> = ({ products, onProductOpen, compari
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          trackSearchEvent('add_to_bag', product.id);
                           onAddToBag(product);
                         }}
                         className="p-1.5 bg-zinc-100 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors"
