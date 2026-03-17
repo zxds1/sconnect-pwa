@@ -306,6 +306,12 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   }, [hydrateProductsFromResults]);
 
   const handleUseMyLocation = () => {
+    if (isNearMeActive) {
+      setIsNearMeActive(false);
+      setLocationQuery('');
+      setMaxDistance(null);
+      return;
+    }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
