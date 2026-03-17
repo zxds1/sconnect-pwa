@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Bell, CheckCircle2, Filter, Mail, MessageCircle, Phone, RefreshCcw, Settings2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { ArrowLeft, Bell, Filter, Mail, MessageCircle, Phone, RefreshCcw, Settings2, ToggleLeft, ToggleRight } from 'lucide-react';
 import {
   createNotificationFilter,
   deleteNotificationFilter,

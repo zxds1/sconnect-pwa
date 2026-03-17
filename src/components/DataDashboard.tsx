@@ -148,25 +148,29 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
             {consents.length === 0 ? (
               <div className="p-3 bg-zinc-50 rounded-2xl text-zinc-500">No consent records found.</div>
             ) : (
-              consents.map((consent) => (
-                <label key={consent.consent_type} className="p-3 bg-zinc-50 rounded-2xl flex items-center justify-between gap-3">
-                  <span>{consent.consent_type}</span>
-                  <input
-                    type="checkbox"
-                    checked={!!consent.consent_given}
-                    onChange={async (e) => {
-                      try {
-                        const updated = await updateConsentByType(consent.consent_type, { consent_given: e.target.checked });
-                        setConsents((prev) =>
-                          prev.map((item) => (item.consent_type === consent.consent_type ? { ...item, consent_given: updated.consent_given } : item))
-                        );
-                      } catch (err: any) {
-                        setError(err?.message || 'Unable to update consent.');
-                      }
-                    }}
-                  />
-                </label>
-              ))
+              consents.map((consent) => {
+                const consentType = consent.consent_type || consent.type;
+                if (!consentType) return null;
+                return (
+                  <label key={consentType} className="p-3 bg-zinc-50 rounded-2xl flex items-center justify-between gap-3">
+                    <span>{consentType}</span>
+                    <input
+                      type="checkbox"
+                      checked={!!consent.consent_given}
+                      onChange={async (e) => {
+                        try {
+                          const updated = await updateConsentByType(consentType, { consent_given: e.target.checked });
+                          setConsents((prev) =>
+                            prev.map((item) => (item.consent_type === consentType ? { ...item, consent_given: updated.consent_given } : item))
+                          );
+                        } catch (err: any) {
+                          setError(err?.message || 'Unable to update consent.');
+                        }
+                      }}
+                    />
+                  </label>
+                );
+              })
             )}
           </div>
         </section>

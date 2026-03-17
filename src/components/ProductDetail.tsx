@@ -149,7 +149,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
   const [sellerProfile, setSellerProfile] = React.useState<SellerProfile | null>(null);
   const [sellerReputation, setSellerReputation] = React.useState<SellerReputation | null>(null);
   const [counterfeitSummary, setCounterfeitSummary] = React.useState<SummaryStat | null>(null);
-  const [disputeSummary, setDisputeSummary] = React.useState<SummaryStat | null>(null);
+  const [, setDisputeSummary] = React.useState<SummaryStat | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [showCounterfeitModal, setShowCounterfeitModal] = React.useState(false);
@@ -402,7 +402,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
 
   const handleShareReward = async () => {
     try {
-      await shareProduct(productId, { channel: navigator.share ? 'native' : 'link' });
+      const channel = typeof navigator !== 'undefined' && 'share' in navigator ? 'native' : 'link';
+      await shareProduct(productId, { channel });
       void createAuditEvent({ action: 'share_product', entity_type: 'product', entity_id: productId }).catch(() => {});
     } catch (err: any) {
       setError(err?.message || 'Unable to register share reward.');

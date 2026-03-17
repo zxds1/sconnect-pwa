@@ -142,10 +142,11 @@ export const WhatsAppExperience: React.FC = () => {
       });
       setLastMessageId(msg?.id || null);
       setStatusMessage(msg?.status ? `${payload.reward} • ${msg.status}` : payload.reward);
-      if (msg?.id) {
+      const messageId = msg?.id;
+      if (messageId) {
         window.setTimeout(async () => {
           try {
-            const status = await getWhatsAppStatus(msg.id);
+            const status = await getWhatsAppStatus(messageId);
             if (status?.status) {
               setStatusMessage(`${payload.reward} • ${status.status}`);
             }

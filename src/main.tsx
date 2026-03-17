@@ -15,7 +15,9 @@ const storedTheme = (() => {
     return null;
   }
 })();
-const prefersDarkQuery = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)');
+const prefersDarkQuery = typeof window !== 'undefined'
+  ? window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
+  : null;
 const resolveTheme = (mode: string | null) => {
   if (mode === 'light' || mode === 'dark') return mode;
   return prefersDarkQuery?.matches ? 'dark' : 'light';

@@ -25,7 +25,7 @@ import { Rewards } from './components/Rewards';
 import { Onboarding } from './components/Onboarding';
 import { Assistant } from './components/Assistant';
 import { PullToRefresh } from './components/PullToRefresh';
-import { PRODUCTS, SELLERS } from './mockData';
+import { PRODUCTS } from './mockData';
 import { Product } from './types';
 import { getOnboardingState } from './lib/onboardingApi';
 import { addCompareItem, getCompareList, removeCompareItem } from './lib/compareApi';
@@ -51,7 +51,6 @@ export default function App() {
   const [comparisonList, setComparisonList] = useState<Product[]>([]);
   const [products, setProducts] = useState<Product[]>(PRODUCTS);
   const [followedSellerIds, setFollowedSellerIds] = useState<string[]>([]);
-  const [likedProductIds, setLikedProductIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAction, setSearchAction] = useState<null | 'voice' | 'photo' | 'video' | 'hybrid'>(null);
@@ -236,15 +235,6 @@ export default function App() {
     }
   };
 
-  const handleRemoveFromComparison = async (id: string) => {
-    try {
-      await removeCompareItem(id);
-      await syncCompareList();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleInteraction = (productId: string, type: string) => {
     console.log('Mined Interaction:', { productId, type, timestamp: Date.now() });
   };
@@ -259,11 +249,6 @@ export default function App() {
     setSelectedProduct(product);
     setIsProductDetailOpen(true);
     handleInteraction(product.id, 'view_detail');
-  };
-
-  const handleCreatePost = (product: Product) => {
-    setProducts(prev => [product, ...prev]);
-    setToast('Post created and added to your feed.');
   };
 
   const handleAddToBag = async (product: Product) => {
@@ -293,10 +278,6 @@ export default function App() {
 
   const handleToggleFollow = (sellerId: string) => {
     setFollowedSellerIds(prev => prev.includes(sellerId) ? prev.filter(id => id !== sellerId) : [...prev, sellerId]);
-  };
-
-  const handleToggleLike = (productId: string) => {
-    setLikedProductIds(prev => prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]);
   };
 
   const handleShopClick = (sellerId: string) => {

@@ -82,7 +82,7 @@ const parseError = async (res: Response): Promise<ApiError> => {
   return error;
 };
 
-export const apiFetch = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+export const apiFetch = async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
     throw new Error('Missing VITE_API_BASE_URL');

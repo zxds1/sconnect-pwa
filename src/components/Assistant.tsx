@@ -129,7 +129,8 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenSubscriptions,
   onOpenPartnerships,
   onOpenWhatsApp,
-  onOpenFeed
+  onOpenFeed,
+  onToast
 }) => {
   const [chats, setChats] = useState<AssistantChat[]>([]);
   const [activeChatId, setActiveChatId] = useState('');
@@ -177,17 +178,17 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [profileReviews, setProfileReviews] = useState<any[]>([]);
   const [rfqThreads, setRfqThreads] = useState<RFQThread[]>([]);
   const [rfqResponses, setRfqResponses] = useState<RFQResponse[]>([]);
-  const [recentSearches, setRecentSearches] = useState<Array<{ id?: string; query?: string }>>([]);
+  const [, setRecentSearches] = useState<Array<{ id?: string; query?: string }>>([]);
   const [savedSearches, setSavedSearches] = useState<Array<{ id?: string; query?: string }>>([]);
-  const [searchAlerts, setSearchAlerts] = useState<Array<{ id?: string }>>([]);
-  const [watchlist, setWatchlist] = useState<Array<{ id?: string }>>([]);
+  const [, setSearchAlerts] = useState<Array<{ id?: string }>>([]);
+  const [, setWatchlist] = useState<Array<{ id?: string }>>([]);
   const [trendingSearches, setTrendingSearches] = useState<string[]>([]);
-  const [searchRecs, setSearchRecs] = useState<any[]>([]);
-  const [cartInsights, setCartInsights] = useState<{ items?: number; seller_count?: number; total?: number } | null>(null);
-  const [cartSummary, setCartSummary] = useState<{ total?: number; currency?: string } | null>(null);
-  const [cartRecs, setCartRecs] = useState<any[]>([]);
-  const [cartAlerts, setCartAlerts] = useState<any[]>([]);
-  const [compareList, setCompareList] = useState<{ items?: any[] } | null>(null);
+  const [, setSearchRecs] = useState<any[]>([]);
+  const [, setCartInsights] = useState<{ items?: number; seller_count?: number; total?: number } | null>(null);
+  const [, setCartSummary] = useState<{ total?: number; currency?: string } | null>(null);
+  const [, setCartRecs] = useState<any[]>([]);
+  const [, setCartAlerts] = useState<any[]>([]);
+  const [, setCompareList] = useState<{ items?: any[] } | null>(null);
   const [rewardsBalance, setRewardsBalance] = useState<RewardsBalance | null>(null);
   const [rewardStreaks, setRewardStreaks] = useState<RewardsStreak[]>([]);
   const [notificationSummary, setNotificationSummary] = useState<NotificationListResponse | null>(null);
@@ -950,127 +951,6 @@ useEffect(() => {
     const lower = text.toLowerCase();
     return SELLERS.find(s => s.name.toLowerCase().includes(lower));
   };
-
-  const parseIntent = (text: string) => {
-    const lower = text.toLowerCase();
-    const intent = {
-      wantsCompare: lower.includes('compare') || lower.includes('vs'),
-      wantsDeal: lower.includes('cheap') || lower.includes('cheaper') || lower.includes('bei nafuu') || lower.includes('deal'),
-      wantsAlerts: lower.includes('alert') || lower.includes('price drop') || lower.includes('watch'),
-      wantsNearMe: lower.includes('near me') || lower.includes('karibu'),
-      wantsVoice: lower.includes('voice') || lower.includes('sikiliza') || lower.includes('mic'),
-      wantsPhoto: lower.includes('photo') || lower.includes('picha'),
-      wantsVideo: lower.includes('video'),
-      wantsHybrid: lower.includes('hybrid') || (lower.includes('photo') && lower.includes('text')),
-      wantsReceipt: lower.includes('receipt') || lower.includes('risiti'),
-      wantsSupport: lower.includes('help') || lower.includes('msaada') || lower.includes('support'),
-      wantsSeller: lower.includes('seller') || lower.includes('duka'),
-      wantsBudget: lower.match(/(?:under|below|chini ya|ksh|kes)\s?(\d+)/),
-      wantsCategory: lower.match(/tv|unga|sukari|maziwa|charger|viatu|headphones|mouse/),
-    };
-    return intent;
-  };
-
-  const buildActions = (text: string): AssistantAction[] => {
-    const actions: AssistantAction[] = [];
-    const product = matchedProduct(text);
-    const seller = matchedSeller(text);
-    const intent = parseIntent(text);
-
-    if (text.toLowerCase().includes('search')) {
-      const query = text.replace(/search for|search/i, '').trim();
-      actions.push({
-        label: `Search: ${query || text}`,
-        onClick: () => onOpenSearch(query || text)
-      });
-    }
-    if (intent.wantsVoice) {
-      actions.push({ label: 'Voice Search', onClick: () => onOpenSearchAction(text, 'voice') });
-    }
-    if (intent.wantsPhoto) {
-      actions.push({ label: 'Photo Search', onClick: () => onOpenSearchAction(text, 'photo') });
-    }
-    if (intent.wantsVideo) {
-      actions.push({ label: 'Video Search', onClick: () => onOpenSearchAction(text, 'video') });
-    }
-    if (intent.wantsHybrid) {
-      actions.push({ label: 'Hybrid Search', onClick: () => onOpenSearchAction(text, 'hybrid') });
-    }
-    if (intent.wantsNearMe) {
-      actions.push({ label: 'Search Near Me', onClick: () => onOpenSearch(`${text} near me`) });
-    }
-    if (intent.wantsAlerts) {
-      actions.push({ label: 'Price Drop Alerts', onClick: () => onOpenSearch(`watch ${text}`) });
-    }
-
-    if (product) {
-      actions.push({ label: `Open ${product.name}`, onClick: () => onOpenProduct(product) });
-      actions.push({ label: 'Add to Bag', onClick: () => onAddToBag(product) });
-      actions.push({ label: 'Compare', onClick: () => onAddToComparison(product) });
-    }
-
-    if (seller) {
-      actions.push({ label: `Open ${seller.name}`, onClick: () => onOpenSeller(seller.id) });
-    }
-
-    if (text.toLowerCase().includes('reward')) {
-      actions.push({ label: 'Open Rewards', onClick: onOpenRewards });
-    }
-    if (text.toLowerCase().includes('receipt') || text.toLowerCase().includes('risiti')) {
-      actions.push({ label: 'Open Receipt Rewards', onClick: onOpenRewards });
-    }
-    if (text.toLowerCase().includes('price drop') || text.toLowerCase().includes('alert')) {
-      actions.push({ label: 'Open Search Alerts', onClick: () => onOpenSearch(text) });
-    }
-    if (intent.wantsSupport) {
-      actions.push({ label: 'Open WhatsApp Flows', onClick: onOpenWhatsApp });
-    }
-
-    if (text.toLowerCase().includes('profile')) {
-      actions.push({ label: 'Open Profile', onClick: onOpenProfile });
-    }
-
-    if (text.toLowerCase().includes('bag') || text.toLowerCase().includes('cart')) {
-      actions.push({ label: 'Open Bag', onClick: onOpenBag });
-    }
-
-    if (text.toLowerCase().includes('scan') || text.toLowerCase().includes('qr')) {
-      actions.push({ label: 'Scan QR', onClick: onOpenQrScan });
-    }
-
-    if (text.toLowerCase().includes('subscribe') || text.toLowerCase().includes('upgrade')) {
-      actions.push({ label: 'Open Subscriptions', onClick: onOpenSubscriptions });
-    }
-
-    if (text.toLowerCase().includes('partner') || text.toLowerCase().includes('integration')) {
-      actions.push({ label: 'Open Partnerships', onClick: onOpenPartnerships });
-    }
-    if (text.toLowerCase().includes('whatsapp') || text.toLowerCase().includes('flows')) {
-      actions.push({ label: 'Open WhatsApp Flows', onClick: onOpenWhatsApp });
-    }
-
-    if (text.toLowerCase().includes('seller studio') || text.toLowerCase().includes('dashboard')) {
-      actions.push({ label: 'Open Seller Studio', onClick: onOpenSellerStudio });
-    }
-
-    if (text.toLowerCase().includes('rfq') || text.toLowerCase().includes('quote')) {
-      actions.push({ label: 'Start RFQ', onClick: onOpenRFQ });
-    }
-
-    if (text.toLowerCase().includes('onboarding') || text.toLowerCase().includes('tour')) {
-      actions.push({ label: 'Open Onboarding', onClick: onOpenOnboarding });
-    }
-
-    if (actions.length === 0) {
-      actions.push({
-        label: 'Search in app',
-        onClick: () => onOpenSearch(text)
-      });
-    }
-
-    return actions.slice(0, 4);
-  };
-
 
   const handleCommand = (text: string) => {
     const parts = text.trim().split(' ');

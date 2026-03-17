@@ -71,11 +71,8 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({ onRefresh, childre
       <div
         className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex items-center justify-center"
         style={pullDistance > 0 || isRefreshing ? { transform: `translateY(${Math.max(-40, pullDistance - 40)}px)` } : undefined}
-      >
-        <div className="mt-2 rounded-full bg-slate-900/80 text-white text-[10px] font-bold px-3 py-1 border border-white/10">
-          {isRefreshing ? 'Refreshing…' : pullDistance >= PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}
-        </div>
-      </div>
+        aria-hidden="true"
+      />
       <div
         style={pullDistance > 0 || isRefreshing ? { transform: `translateY(${pullDistance}px)` } : undefined}
         className="h-full w-full transition-transform duration-150"

@@ -79,11 +79,14 @@ body {
 }
 
 .splash-logo {
-  width: 84px;
-  height: 84px;
+  width: clamp(48px, 18vw, 84px);
+  height: clamp(48px, 18vw, 84px);
+  max-width: 28vmin;
+  max-height: 28vmin;
   border-radius: 20px;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
   animation: splash-pop 1.2s ease infinite alternate;
+  object-fit: cover;
 }
 
 .splash-mark {

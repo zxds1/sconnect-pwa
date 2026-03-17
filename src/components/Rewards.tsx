@@ -18,6 +18,7 @@ import {
   RewardsReceipt,
   RewardsStreak
 } from '../lib/rewardsApi';
+import { SELLERS } from '../mockData';
 
 const MILESTONES = [
   { stars: 50, label: 'Free Pro Month' },
@@ -235,7 +236,16 @@ export const Rewards: React.FC<RewardsProps> = ({
     return '';
   };
 
-  const detectedSeller = detectedSellerId ? { id: detectedSellerId, name: 'Detected Seller' } : null;
+  const detectedSeller = useMemo(() => {
+    if (!detectedSellerId) return null;
+    return (
+      SELLERS.find((seller) => seller.id === detectedSellerId) || {
+        id: detectedSellerId,
+        name: 'Detected Seller',
+        location: { address: '' }
+      }
+    );
+  }, [detectedSellerId]);
   const detectedProducts: Array<{ id: string; name: string }> = [];
 
   const distanceMetersBetween = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {

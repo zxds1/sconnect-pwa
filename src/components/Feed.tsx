@@ -653,7 +653,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform">
-                  <Heart className={`w-8 h-8 ${likedIds.includes(item.productId) ? 'text-red-500 fill-red-500' : 'text-white fill-transparent'} transition-colors`} />
+                  <Heart className={`w-8 h-8 ${likedIds.includes(getItemKey(item)) ? 'text-red-500 fill-red-500' : 'text-white fill-transparent'} transition-colors`} />
                 </div>
                 <span className="text-[11px] text-white font-bold drop-shadow-md">
                   {likedIds.includes(getItemKey(item)) ? 'Liked' : 'Like'}
@@ -812,7 +812,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
           </button>
           <button
             onClick={() => setTab('live')}
-            className={`relative ${tab === 'live' ? 'text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full' : 'hover:text-white transition-colors'}`}
+            className="relative hover:text-white transition-colors"
           >
             Live
           </button>

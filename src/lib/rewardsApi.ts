@@ -3,14 +3,18 @@ import { apiFetch } from './apiClient';
 export interface RewardsBalance {
   seller_id?: string;
   balance?: number;
+  coins?: number;
+  wallet?: number;
   pending?: number;
   currency?: string;
 }
 
 export interface RewardsLedgerEntry {
   id: string;
+  ledger_id?: string;
   seller_id?: string;
   type?: string;
+  reason?: string;
   amount?: number;
   balance_after?: number;
   receipt_id?: string | null;
@@ -22,6 +26,7 @@ export interface RewardsReceipt {
   seller_id?: string;
   s3_key?: string;
   merchant_name?: string;
+  merchant?: string;
   merchant_id?: string;
   total_amount?: number;
   receipt_date?: string | null;
@@ -55,6 +60,9 @@ export interface RewardsGpsVerification {
   lat_enc?: string;
   lng_enc?: string;
   distance_m?: number;
+  distance?: number;
+  meters?: number;
+  message?: string;
   verified?: boolean;
   created_at?: string;
 }
@@ -64,6 +72,7 @@ export interface RewardsFraudAlert {
   seller_id?: string;
   type?: string;
   details?: string;
+  message?: string;
   created_at?: string;
 }
 

@@ -333,13 +333,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [analyticsMarket, setAnalyticsMarket] = useState<MarketBenchmarks | null>(null);
   const [analyticsAnomalies, setAnalyticsAnomalies] = useState<Anomaly[]>([]);
   const [analyticsStatus, setAnalyticsStatus] = useState<string | null>(null);
-  const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
+  const [, setBroadcasts] = useState<Broadcast[]>([]);
   const [broadcastMessage, setBroadcastMessage] = useState('Leo Unga 2kg KES 175 • Sukari 1kg KES 150 • Maziwa fresh!');
   const [commsStatus, setCommsStatus] = useState<string | null>(null);
   const [marketingKpis, setMarketingKpis] = useState<MarketingKPIStat | null>(null);
   const [marketingHotspots, setMarketingHotspots] = useState<MarketingHotspot[]>([]);
   const [marketingStockAlerts, setMarketingStockAlerts] = useState<Array<{ id?: string; product_id?: string; message?: string; status?: string }>>([]);
-  const [marketingFanOffers, setMarketingFanOffers] = useState<Array<{ id?: string; offer_title?: string; discount?: string; status?: string }>>([]);
+  const [, setMarketingFanOffers] = useState<Array<{ id?: string; offer_title?: string; discount?: string; status?: string }>>([]);
   const [marketingCategorySpotlights, setMarketingCategorySpotlights] = useState<Array<{ id?: string; category?: string; budget?: string; status?: string }>>([]);
   const [marketingStatus, setMarketingStatus] = useState<string | null>(null);
   const [stockAlertProductId, setStockAlertProductId] = useState('');
@@ -688,9 +688,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             if (!supplier.id) return null;
             try {
               const offers = await getSupplierOffers(supplier.id);
-              return [supplier.id, offers] as const;
+              return [supplier.id, (offers || []) as SupplierOffer[]] as const;
             } catch {
-              return [supplier.id, []] as const;
+              return [supplier.id, [] as SupplierOffer[]] as const;
             }
           })
         );
@@ -923,7 +923,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const ordersForSeller = ORDERS.filter(o => o.sellerId === seller.id);
   const last30Orders = ordersForSeller.filter(o => (now.getTime() - new Date(o.createdAt).getTime()) <= 30 * 24 * 60 * 60 * 1000);
   const last30Revenue = last30Orders.reduce((sum, o) => sum + o.quantity * o.unitPrice, 0);
-  const last30Customers = new Set(last30Orders.map(o => o.customerId)).size;
   const totalOrders = ordersForSeller.length;
   const totalUnits = ordersForSeller.reduce((sum, o) => sum + o.quantity, 0);
   const totalRevenue = ordersForSeller.reduce((sum, o) => sum + o.quantity * o.unitPrice, 0);
@@ -933,6 +932,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const estimatedMonthlyOrders = Math.max(1, last30Orders.length || totalOrders || 1);
   const conversionRate = estimatedMonthlyViews ? (estimatedMonthlyOrders / estimatedMonthlyViews) * 100 : 0;
   const estimatedMonthlyRevenue = totalOrders ? (totalRevenue / Math.max(totalOrders, 1)) * estimatedMonthlyOrders : estimatedMonthlyOrders * averagePrice;
+  const loanBase = Math.round((Math.min(850, seller.sokoScore) / 850) * 150000);
+  const loanRevenueBoost = Math.round(estimatedMonthlyRevenue * 0.4);
+  const loanEligibilityMax = Math.max(50000, Math.min(300000, loanBase + loanRevenueBoost));
   const marketingSpend = MARKETING_SPEND.filter(m => m.sellerId === seller.id).reduce((sum, m) => sum + m.amount, 0);
   const customerOrderCounts = ordersForSeller.reduce((map, o) => {
     map.set(o.customerId, (map.get(o.customerId) || 0) + 1);
@@ -1035,7 +1037,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const analyticsTrendingProducts = myProducts.slice(0, 3).map((product, idx) => ({
     name: product.name,
     demand: idx === 0 ? 'High' : idx === 1 ? 'Medium' : 'Rising',
-    supplier: product.supplier || `Supplier ${idx + 1}`
+    supplier: (product as any).supplier || (product as any).sellerName || `Supplier ${idx + 1}`
   }));
 
   const analyticsCategoryDemand = topCategories.map((cat, idx) => ({
@@ -1060,19 +1062,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const loanMaxAmount = Number(growthLoan?.max_amount ?? loanEligibilityMax);
   const loanMinAmount = Math.max(0, Math.round(loanMaxAmount * 0.35));
   const cashflowIn = Number(growthCashflow?.inflow ?? 0);
-  const cashflowOut = Number(growthCashflow?.outflow ?? 0);
-  const cashflowNet = Number(growthCashflow?.net_cashflow ?? (cashflowIn - cashflowOut));
   const projectionSeriesFallback = analyticsSalesData.map((d) => ({ name: d.name, revenue: d.sales }));
   const projectionSeries = projectionToSeries(growthProjection?.forecast as Record<string, any>, projectionSeriesFallback);
   const growthRetention = Number(growthOverview?.retention_rate ?? repeatRate);
-  const growthChurn = Number(growthOverview?.churn_rate ?? churnRate * 100);
 
   const analyticsGodViewDemand = analyticsTopSearched.map((item) => ({
     name: item.name,
     pct: clamp(Math.round((item.searches / Math.max(1, analyticsTopSearched[0]?.searches || 1)) * 100))
   }));
 
-  const analyticsGodViewBuyers = Array.from({ length: Math.max(1, Math.min(4, analyticsBuyers?.new_buyers ?? 0 || 1)) }).map((_, idx) => ({
+  const buyerSeed = (analyticsBuyers?.new_buyers ?? 0) || 1;
+  const analyticsGodViewBuyers = Array.from({ length: Math.max(1, Math.min(4, buyerSeed)) }).map((_, idx) => ({
     name: `Buyer ${idx + 1}`,
     item: analyticsTrendingProducts[idx]?.name || 'Top item',
     price: `KSh ${Math.round(averagePrice)}`,
@@ -1333,16 +1333,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setFormData(prev => ({ ...prev, mediaUrl: url }));
       const activeProduct = targetProduct || editingProduct;
       if (activeProduct) {
+        const mediaType: 'video' | 'image' = file.type.startsWith('video') ? 'video' : 'image';
         await addSellerProductMedia(activeProduct.id, {
           url,
-          media_type: file.type.startsWith('video') ? 'video' : 'image'
+          media_type: mediaType
         });
         if (activeProduct.productId) {
           const media = await listProductMedia(activeProduct.productId);
           setProductMediaByProductId(prev => ({ ...prev, [activeProduct.productId!]: media }));
         }
         setMyProducts(prev => {
-          const next = prev.map(p => (p.id === activeProduct.id ? { ...p, mediaUrl: url, mediaType: file.type.startsWith('video') ? 'video' : 'image' } : p));
+          const next = prev.map(p => (p.id === activeProduct.id ? { ...p, mediaUrl: url, mediaType } : p));
           pushProducts(next);
           return next;
         });
@@ -1873,11 +1874,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const loanBase = Math.round((Math.min(850, seller.sokoScore) / 850) * 150000);
-  const loanRevenueBoost = Math.round(estimatedMonthlyRevenue * 0.4);
-  const loanEligibilityMax = Math.max(50000, Math.min(300000, loanBase + loanRevenueBoost));
-  const loanEligibilityMin = Math.max(50000, Math.round(loanEligibilityMax * 0.35));
-
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -1970,9 +1966,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         if (!thread.id) return null;
         try {
           const responses = await listRFQResponses(thread.id);
-          return [thread.id, responses] as const;
+          return [thread.id, (responses || []) as RFQResponse[]] as const;
         } catch {
-          return [thread.id, []] as const;
+          return [thread.id, [] as RFQResponse[]] as const;
         }
       })
     );
@@ -2087,9 +2083,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         items
       });
       if (created?.id) {
+        const createdId = String(created.id);
         setRfqThreadsRemote(prev => [created, ...prev]);
-        setRfqItemsById(prev => ({ ...prev, [created.id]: items }));
-        setSelectedThreadId(created.id);
+        setRfqItemsById(prev => ({ ...prev, [createdId]: items }));
+        setSelectedThreadId(createdId);
       }
       setShowRfqModal(false);
       setRfqStep('details');
