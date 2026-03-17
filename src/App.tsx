@@ -8,6 +8,10 @@ import { Profile } from './components/Profile';
 import { Shops } from './components/Shops';
 import { Search as SearchView } from './components/Search';
 import { Settings } from './components/Settings';
+import { Login } from './components/Login';
+import { Register } from './components/Register';
+import { PasswordReset } from './components/PasswordReset';
+import { AuthOnboarding } from './components/AuthOnboarding';
 import { Notifications } from './components/Notifications';
 import { DataDashboard } from './components/DataDashboard';
 import { WhatsAppExperience } from './components/WhatsAppExperience';
@@ -27,9 +31,19 @@ import { getOnboardingState } from './lib/onboardingApi';
 import { addCompareItem, getCompareList, removeCompareItem } from './lib/compareApi';
 import { getProduct } from './lib/catalogApi';
 import { addCartItem, checkoutCart } from './lib/cartApi';
+import { getSellerProfile } from './lib/sellerProfileApi';
+import { getSessionInfo } from './lib/identityApi';
 
 export default function App() {
-  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications'>('assistant');
+  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
+    if (typeof window === 'undefined') return 'assistant';
+    try {
+      const token = localStorage.getItem('soko:auth_token');
+      return token ? 'assistant' : 'login';
+    } catch {
+      return 'assistant';
+    }
+  });
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -42,6 +56,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAction, setSearchAction] = useState<null | 'voice' | 'photo' | 'video' | 'hybrid'>(null);
   const [supportChatMode, setSupportChatMode] = useState<'duka' | 'seller-ai' | 'brand' | null>(null);
+  const [isSellerAccount, setIsSellerAccount] = useState<boolean | null>(null);
   const [sellerBalance, setSellerBalance] = useState(() => {
     if (typeof window === 'undefined') return 0;
     const raw = localStorage.getItem('soko:seller_sc_balance');
@@ -94,6 +109,12 @@ export default function App() {
         const state = await getOnboardingState();
         if (!alive) return;
         const completed = state?.status === 'completed' || !!state?.completed_at;
+        try {
+          localStorage.setItem('soko:onboarding_completed', completed ? 'true' : 'false');
+        } catch {}
+        if (completed) {
+          window.dispatchEvent(new Event('soko:onboarding-complete'));
+        }
         setShowOnboarding(!completed);
       } catch {
         if (!alive) return;
@@ -105,6 +126,70 @@ export default function App() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const loadSellerStatus = async () => {
+      try {
+        await getSellerProfile();
+        if (alive) setIsSellerAccount(true);
+      } catch {
+        if (alive) setIsSellerAccount(false);
+      }
+    };
+    loadSellerStatus();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const loadSessionRole = async () => {
+      try {
+        const session = await getSessionInfo();
+        const role = String(session?.role || '').toLowerCase();
+        if (!alive || !role) return;
+        try {
+          localStorage.setItem('soko:role', role);
+          if (session?.session_id) {
+            localStorage.setItem('soko:session_id', session.session_id);
+          }
+        } catch {}
+      } catch {}
+    };
+    loadSessionRole();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const handleOpenSellerStudio = () => {
+    if (isSellerAccount === null) {
+      setToast('Checking seller account...');
+      return;
+    }
+    if (isSellerAccount === false) {
+      setToast('Create a seller account to access Seller Studio.');
+      setView('profile');
+      return;
+    }
+    setView('seller');
+  };
+
+  const handleOpenRFQ = () => {
+    if (isSellerAccount === null) {
+      setToast('Checking seller account...');
+      return;
+    }
+    if (isSellerAccount === false) {
+      setToast('Create a seller account to start RFQs.');
+      setView('profile');
+      return;
+    }
+    setView('seller');
+    setToast('Open Supplier tab to start RFQ.');
+  };
 
   useEffect(() => {
     let alive = true;
@@ -303,11 +388,8 @@ export default function App() {
                   setSelectedSellerId(null);
                   setView('profile');
                 }}
-                onOpenSellerStudio={() => setView('seller')}
-                onOpenRFQ={() => {
-                  setView('seller');
-                  setToast('Open Supplier tab to start RFQ.');
-                }}
+                onOpenSellerStudio={handleOpenSellerStudio}
+                onOpenRFQ={handleOpenRFQ}
                 onOpenOnboarding={() => setShowOnboarding(true)}
                 onOpenBag={() => setView('bag')}
                 onOpenQrScan={() => {
@@ -319,6 +401,78 @@ export default function App() {
                 onOpenWhatsApp={() => setView('whatsapp')}
                 onOpenFeed={() => setView('feed')}
                 onToast={setToast}
+              />
+            </motion.div>
+          )}
+
+          {view === 'login' && (
+            <motion.div
+              key="login"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full bg-white z-50"
+            >
+              <Login
+                onBack={() => setView('assistant')}
+                onRegisterOpen={() => setView('register')}
+                onResetOpen={() => setView('password-reset')}
+                onAuthenticated={() => setView('assistant')}
+              />
+            </motion.div>
+          )}
+
+          {view === 'register' && (
+            <motion.div
+              key="register"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full bg-white z-50"
+            >
+              <Register
+                onBack={() => setView('login')}
+                onLoginOpen={() => setView('login')}
+                onAuthenticated={() => setView('auth-onboarding')}
+              />
+            </motion.div>
+          )}
+
+          {view === 'password-reset' && (
+            <motion.div
+              key="password-reset"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full bg-white z-50"
+            >
+              <PasswordReset
+                onBack={() => setView('login')}
+                onLoginOpen={() => setView('login')}
+              />
+            </motion.div>
+          )}
+
+          {view === 'auth-onboarding' && (
+            <motion.div
+              key="auth-onboarding"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full bg-white z-50"
+            >
+              <AuthOnboarding
+                onBack={() => setView('register')}
+                onFinish={(intent) => {
+                  if (intent === 'seller') {
+                    try {
+                      localStorage.setItem('soko:fast_track_seller', 'true');
+                    } catch {}
+                    setView('profile');
+                  } else {
+                    setView('assistant');
+                  }
+                }}
               />
             </motion.div>
           )}
@@ -415,7 +569,12 @@ export default function App() {
                 <button onClick={() => setView('assistant')} className="p-2 hover:bg-zinc-100 rounded-full">
                   <ArrowLeft className="w-6 h-6" />
                 </button>
-                <h1 className="ml-4 text-xl font-bold">Seller Studio</h1>
+                <img
+                  src="/logo-header.jpg"
+                  alt="Sconnect"
+                  className="ml-3 w-8 h-8 rounded-lg object-cover"
+                />
+                <h1 className="ml-3 text-xl font-bold">Seller Studio</h1>
               </div>
               <SellerDashboard
                 products={products}
@@ -452,6 +611,12 @@ export default function App() {
                   }
                 }}
                 onSettingsOpen={() => setView('settings')}
+                onOpenSellerStudio={handleOpenSellerStudio}
+                onSellerAccountCreated={() => {
+                  setIsSellerAccount(true);
+                  setView('seller');
+                }}
+                isSellerAccount={isSellerAccount}
                 onProductOpen={handleProductOpen}
                 sellerId={selectedSellerId || undefined}
                 products={products}
@@ -474,7 +639,12 @@ export default function App() {
                 <button onClick={() => setView('profile')} className="p-2 hover:bg-zinc-100 rounded-full">
                   <ArrowLeft className="w-6 h-6" />
                 </button>
-                <h1 className="ml-4 text-xl font-bold">Settings</h1>
+                <img
+                  src="/logo-header.jpg"
+                  alt="Sconnect"
+                  className="ml-3 w-8 h-8 rounded-lg object-cover"
+                />
+                <h1 className="ml-3 text-xl font-bold">Settings</h1>
               </div>
               <Settings onOpenDataDashboard={() => setView('data')} onOpenNotifications={() => setView('notifications')} />
             </motion.div>
@@ -555,14 +725,18 @@ export default function App() {
         </AnimatePresence>
 
         {/* Onboarding Overlay */}
-        {showOnboarding && (
-          <Onboarding
-            onFinish={() => {
-              setShowOnboarding(false);
-              setToast('📸 Ali photo’d Sugar. Beat him? +2⭐');
-            }}
-          />
-        )}
+      {showOnboarding && (
+        <Onboarding
+          onFinish={() => {
+            setShowOnboarding(false);
+            try {
+              localStorage.setItem('soko:onboarding_completed', 'true');
+            } catch {}
+            window.dispatchEvent(new Event('soko:onboarding-complete'));
+            setToast('📸 Ali photo’d Sugar. Beat him? +2⭐');
+          }}
+        />
+      )}
       </main>
 
       {toast && (
@@ -600,7 +774,7 @@ export default function App() {
         </div>
       )}
 
-      {view !== 'assistant' && (
+      {view !== 'assistant' && view !== 'login' && view !== 'register' && view !== 'password-reset' && view !== 'auth-onboarding' && (
         <button
           onClick={() => setView('assistant')}
           className="fixed bottom-6 left-6 z-[90] bg-zinc-900 text-white px-4 py-3 rounded-full text-xs font-bold shadow-2xl"

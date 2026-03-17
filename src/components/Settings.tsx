@@ -13,7 +13,9 @@ import {
   ToggleRight,
   Trash2,
   Database,
-  Volume2
+  Volume2,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { getNotificationPreferences, updateNotificationPreferences } from '../lib/notificationsApi';
 import { getConsents, getSettingsSummary, requestSettingsDeletion, requestSettingsExport, updateConsentByType } from '../lib/settingsApi';
@@ -36,6 +38,13 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     back_in_stock: false,
     trending: false,
     watched_items: false
+  });
+  const [theme, setTheme] = React.useState<'light' | 'dark' | 'system'>(() => {
+    try {
+      const stored = localStorage.getItem('soko:theme');
+      if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+    } catch {}
+    return 'system';
   });
   const [voiceFeedback, setVoiceFeedback] = React.useState(() => {
     try {
@@ -206,6 +215,15 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     } catch {}
   }, [voiceFeedback]);
 
+  React.useEffect(() => {
+    const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    const resolved = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+    document.documentElement.dataset.theme = resolved;
+    try {
+      localStorage.setItem('soko:theme', theme);
+    } catch {}
+  }, [theme]);
+
   const sections = [
     {
       title: 'Account',
@@ -232,7 +250,12 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
 
   return (
     <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">
-      <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-10">
+      <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-10 flex items-center gap-3">
+        <img
+          src="/logo-header.jpg"
+          alt="Sconnect"
+          className="w-8 h-8 rounded-lg object-cover"
+        />
         <h1 className="text-2xl font-bold text-zinc-900">Settings</h1>
       </div>
 
@@ -457,6 +480,38 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
             <button onClick={() => setVoiceFeedback(prev => !prev)} className="p-1 rounded-full">
               {voiceFeedback ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
             </button>
+          </div>
+        </div>
+
+        {/* Appearance */}
+        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {theme === 'dark' ? (
+                <Moon className="w-5 h-5 text-indigo-500" />
+              ) : theme === 'light' ? (
+                <Sun className="w-5 h-5 text-amber-500" />
+              ) : (
+                <Sun className="w-5 h-5 text-zinc-400" />
+              )}
+              <div>
+                <p className="text-sm font-bold text-zinc-900">Appearance</p>
+                <p className="text-[10px] text-zinc-500">Switch between light and dark mode.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 rounded-full">
+              {(['light', 'dark', 'system'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setTheme(mode)}
+                  className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${
+                    theme === mode ? 'bg-zinc-900 text-white' : 'text-zinc-500'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

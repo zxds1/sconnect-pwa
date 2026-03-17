@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, AlertTriangle, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp } from 'lucide-react';
 import { Product } from '../types';
@@ -28,10 +28,20 @@ import {
   updateProfile
 } from '../lib/profileApi';
 import { getShopProfile, getShopStats } from '../lib/shopDirectoryApi';
+import { updateSellerProfile } from '../lib/sellerProfileApi';
+import {
+  createSupplierApplication,
+  listSupplierApplications,
+  streamSupplierApplications,
+  SupplierApplication
+} from '../lib/suppliersApi';
 
 interface ProfileProps {
   onBack?: () => void;
   onSettingsOpen?: () => void;
+  onOpenSellerStudio?: () => void;
+  onSellerAccountCreated?: () => void;
+  isSellerAccount?: boolean | null;
   onProductOpen: (product: Product) => void;
   sellerId?: string;
   products: Product[];
@@ -50,7 +60,7 @@ type ProfileData = {
   is_public?: boolean;
 };
 
-export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProductOpen, sellerId, products, onToggleFollow }) => {
+export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpenSellerStudio, onSellerAccountCreated, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
   const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [shopProfile, setShopProfile] = useState<Record<string, any> | null>(null);
@@ -71,6 +81,22 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({ display_name: '', bio: '', avatar_url: '', is_public: true });
   const [newPost, setNewPost] = useState({ content: '', media_url: '' });
+  const [creatingSellerAccount, setCreatingSellerAccount] = useState(false);
+  const [sellerAccountStatus, setSellerAccountStatus] = useState<string | null>(null);
+  const [autoSellerRequested, setAutoSellerRequested] = useState(false);
+  const [supplierApps, setSupplierApps] = useState<SupplierApplication[]>([]);
+  const [supplierAppLoading, setSupplierAppLoading] = useState(false);
+  const [supplierAppError, setSupplierAppError] = useState<string | null>(null);
+  const [creatingSupplierApp, setCreatingSupplierApp] = useState(false);
+  const [supplierStreamActive, setSupplierStreamActive] = useState(false);
+  const [supplierForm, setSupplierForm] = useState({
+    business_name: '',
+    category: '',
+    address: '',
+    notes: '',
+  });
+  const [supplierLocation, setSupplierLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [showSupplierForm, setShowSupplierForm] = useState(false);
 
   const isOwnProfile = !sellerId;
 
@@ -180,6 +206,61 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
     };
   }, [sellerId]);
 
+  const refreshSupplierApps = useCallback(async (aliveRef?: { current: boolean }) => {
+    if (!isOwnProfile || !isSellerAccount) return;
+    setSupplierAppLoading(true);
+    setSupplierAppError(null);
+    try {
+      const apps = await listSupplierApplications();
+      if (aliveRef && !aliveRef.current) return;
+      setSupplierApps(apps || []);
+    } catch (err: any) {
+      if (aliveRef && !aliveRef.current) return;
+      setSupplierAppError(err?.message || 'Unable to load supplier applications.');
+    } finally {
+      if (!aliveRef || aliveRef.current) setSupplierAppLoading(false);
+    }
+  }, [isOwnProfile, isSellerAccount]);
+
+  useEffect(() => {
+    const aliveRef = { current: true };
+    refreshSupplierApps(aliveRef);
+    return () => {
+      aliveRef.current = false;
+    };
+  }, [refreshSupplierApps]);
+
+  useEffect(() => {
+    if (!isOwnProfile || !isSellerAccount) return;
+    let stop: null | (() => void) = null;
+    let cancelled = false;
+    const start = async () => {
+      try {
+        stop = await streamSupplierApplications(
+          (items) => {
+            if (cancelled) return;
+            setSupplierApps(items || []);
+            setSupplierStreamActive(true);
+          },
+          (message) => {
+            if (cancelled) return;
+            setSupplierAppError(message);
+            setSupplierStreamActive(false);
+          }
+        );
+      } catch (err: any) {
+        if (cancelled) return;
+        setSupplierAppError(err?.message || 'Unable to open live updates.');
+        setSupplierStreamActive(false);
+      }
+    };
+    start();
+    return () => {
+      cancelled = true;
+      if (stop) stop();
+    };
+  }, [isOwnProfile, isSellerAccount]);
+
   const handleShare = async () => {
     try {
       const created = isOwnProfile ? await createProfileShare() : null;
@@ -282,6 +363,121 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
     }
   };
 
+  const handleCreateSellerAccount = async () => {
+    setSellerAccountStatus(null);
+    setCreatingSellerAccount(true);
+    try {
+      await updateSellerProfile({
+        name: profileData.name || 'My Shop',
+        description: profileData.description || 'My shop on Sconnect'
+      });
+      onSellerAccountCreated?.();
+      setSellerAccountStatus('Seller account created.');
+    } catch (err: any) {
+      setSellerAccountStatus(err?.message || 'Unable to create seller account.');
+    } finally {
+      setCreatingSellerAccount(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    if (isSellerAccount !== false) return;
+    if (autoSellerRequested) return;
+    try {
+      const flag = localStorage.getItem('soko:fast_track_seller');
+      if (flag !== 'true') return;
+      localStorage.removeItem('soko:fast_track_seller');
+    } catch {
+      return;
+    }
+    setAutoSellerRequested(true);
+    handleCreateSellerAccount();
+  }, [isOwnProfile, isSellerAccount, autoSellerRequested]);
+
+  const requestSupplierLocation = async (): Promise<{ lat: number; lng: number } | null> => {
+    if (!navigator.geolocation) {
+      setSupplierAppError('Location services are not available.');
+      return null;
+    }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
+        (err) => {
+          setSupplierAppError(err?.message || 'Unable to read your location.');
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+  };
+
+  const handleUseSupplierLocation = async () => {
+    setSupplierAppError(null);
+    const loc = await requestSupplierLocation();
+    if (loc) {
+      setSupplierLocation(loc);
+    }
+  };
+
+  const latestSupplierApp = useMemo(() => {
+    if (!supplierApps.length) return null;
+    const sorted = [...supplierApps].sort((a, b) => {
+      const aTime = new Date(a.created_at || 0).getTime();
+      const bTime = new Date(b.created_at || 0).getTime();
+      return bTime - aTime;
+    });
+    return sorted[0] || null;
+  }, [supplierApps]);
+
+  useEffect(() => {
+    if (!isOwnProfile || !isSellerAccount) return;
+    if (supplierStreamActive) return;
+    if (latestSupplierApp?.status !== 'pending') return;
+    const aliveRef = { current: true };
+    const interval = window.setInterval(() => {
+      refreshSupplierApps(aliveRef);
+    }, 30000);
+    return () => {
+      aliveRef.current = false;
+      window.clearInterval(interval);
+    };
+  }, [isOwnProfile, isSellerAccount, latestSupplierApp?.status, refreshSupplierApps, supplierStreamActive]);
+
+  const handleCreateSupplierApplication = async () => {
+    setSupplierAppError(null);
+    setCreatingSupplierApp(true);
+    try {
+      let loc = supplierLocation;
+      if (!loc) {
+        loc = await requestSupplierLocation();
+      }
+      if (!loc) {
+        setCreatingSupplierApp(false);
+        return;
+      }
+      const payload = {
+        business_name: supplierForm.business_name.trim() || profileData.name || 'My Business',
+        category: supplierForm.category.trim() || 'General',
+        lat: loc.lat,
+        lng: loc.lng,
+        address: supplierForm.address.trim(),
+        notes: supplierForm.notes.trim(),
+      };
+      const created = await createSupplierApplication(payload);
+      setSupplierApps(prev => [created, ...prev]);
+      setShowSupplierForm(false);
+      setSupplierForm({ business_name: '', category: '', address: '', notes: '' });
+      setSupplierLocation(loc);
+    } catch (err: any) {
+      setSupplierAppError(err?.message || 'Unable to submit supplier application.');
+    } finally {
+      setCreatingSupplierApp(false);
+    }
+  };
+
   return (
     <div className="h-full bg-white flex flex-col overflow-y-auto no-scrollbar">
       <div className="p-4 flex items-center justify-between sticky top-0 bg-white z-20 border-b border-zinc-100">
@@ -291,6 +487,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
               <ChevronLeft className="w-6 h-6" />
             </button>
           )}
+          <img
+            src="/logo-header.jpg"
+            alt="Sconnect"
+            className="w-7 h-7 rounded-lg object-cover"
+          />
           <div className="flex items-center gap-1">
             <h2 className="font-bold text-lg">{(profileData.name || '').toLowerCase().replace(/\s/g, '_')}</h2>
             {profileData.is_verified && <BadgeCheck className="w-4 h-4 text-indigo-600 fill-indigo-50" />}
@@ -316,6 +517,149 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onProd
       {loading && (
         <div className="m-4 bg-white rounded-2xl border border-zinc-100 p-5 text-[11px] font-bold text-zinc-500">
           Loading profile...
+        </div>
+      )}
+
+      {isOwnProfile && (
+        <div className="mx-4 mt-2 mb-4 bg-white rounded-2xl border border-zinc-100 p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Seller Account</p>
+              <p className="text-sm font-bold text-zinc-900 mt-1">
+                {isSellerAccount === null ? 'Checking seller status…' : (isSellerAccount ? 'Active seller account' : 'Create a seller account to open your shop')}
+              </p>
+              {sellerAccountStatus && (
+                <p className="text-[10px] text-zinc-500 font-bold mt-1">{sellerAccountStatus}</p>
+              )}
+            </div>
+            {isSellerAccount ? (
+              <button
+                onClick={onOpenSellerStudio}
+                className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-bold"
+              >
+                Open Seller Studio
+              </button>
+            ) : (
+              <button
+                onClick={handleCreateSellerAccount}
+                disabled={creatingSellerAccount || isSellerAccount === null}
+                className={`px-4 py-2 rounded-xl text-[10px] font-bold ${
+                  creatingSellerAccount || isSellerAccount === null ? 'bg-zinc-200 text-zinc-500' : 'bg-indigo-600 text-white'
+                }`}
+              >
+                {creatingSellerAccount ? 'Creating…' : 'Create Seller Account'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isOwnProfile && isSellerAccount && (
+        <div className="mx-4 mb-4 bg-white rounded-2xl border border-zinc-100 p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Supplier Status</p>
+              <p className="text-sm font-bold text-zinc-900 mt-1">
+                {latestSupplierApp?.status === 'approved'
+                  ? 'Approved supplier'
+                  : latestSupplierApp?.status === 'rejected'
+                    ? 'Application rejected'
+                    : latestSupplierApp?.status === 'pending'
+                      ? 'Application under review'
+                      : 'Apply to become a supplier'}
+              </p>
+              {latestSupplierApp?.decision_reason && (
+                <p className="text-[10px] text-zinc-500 font-bold mt-1">
+                  {latestSupplierApp.decision_reason}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              {supplierAppLoading ? (
+                <span className="text-[10px] font-bold text-zinc-400">Loading…</span>
+              ) : latestSupplierApp?.status === 'approved' ? (
+                <span className="text-[10px] font-bold text-emerald-600">Verified</span>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (latestSupplierApp?.status === 'pending') return;
+                    setShowSupplierForm((prev) => !prev);
+                  }}
+                  disabled={latestSupplierApp?.status === 'pending'}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-bold ${
+                    latestSupplierApp?.status === 'pending' ? 'bg-zinc-200 text-zinc-500' : 'bg-indigo-600 text-white'
+                  }`}
+                >
+                  {latestSupplierApp?.status === 'pending'
+                    ? 'Pending'
+                    : (showSupplierForm ? 'Hide Form' : 'Apply')}
+                </button>
+              )}
+            </div>
+          </div>
+          {supplierAppError && (
+            <div className="mt-3 bg-red-50 border border-red-100 text-red-700 text-[10px] font-bold rounded-xl px-3 py-2">
+              {supplierAppError}
+            </div>
+          )}
+          {showSupplierForm && latestSupplierApp?.status !== 'approved' && latestSupplierApp?.status !== 'pending' && (
+            <div className="mt-4 grid gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Business Name</label>
+                <input
+                  value={supplierForm.business_name}
+                  onChange={(e) => setSupplierForm((prev) => ({ ...prev, business_name: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Soko Wholesale"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Category</label>
+                <input
+                  value={supplierForm.category}
+                  onChange={(e) => setSupplierForm((prev) => ({ ...prev, category: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Groceries, Produce, Hardware..."
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Address</label>
+                <input
+                  value={supplierForm.address}
+                  onChange={(e) => setSupplierForm((prev) => ({ ...prev, address: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Street, City"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Notes</label>
+                <textarea
+                  value={supplierForm.notes}
+                  onChange={(e) => setSupplierForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  rows={3}
+                  placeholder="Anything else we should know?"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={handleUseSupplierLocation}
+                  className="px-3 py-2 rounded-xl text-[10px] font-bold bg-zinc-100 text-zinc-700"
+                >
+                  {supplierLocation ? 'Location saved' : 'Use my location'}
+                </button>
+                <button
+                  onClick={handleCreateSupplierApplication}
+                  disabled={creatingSupplierApp}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-bold ${
+                    creatingSupplierApp ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-900 text-white'
+                  }`}
+                >
+                  {creatingSupplierApp ? 'Submitting…' : 'Submit Application'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -32,6 +32,7 @@ const getBaseUrl = () => getEnv('VITE_API_BASE_URL') ?? '';
 const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? '';
 const getUserId = () => getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
 const getAuthToken = () => getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
+const getRole = () => getStored('soko:role') ?? getEnv('VITE_ROLE') ?? '';
 const getCorrelationId = () => {
   const stored = getStored('soko:correlation_id');
   if (stored) return stored;
@@ -51,12 +52,14 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   const tenantId = getTenantId();
   const userId = getUserId();
   const token = getAuthToken();
+  const role = getRole();
   const correlationId = getCorrelationId();
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
   if (userId) headers['X-User-Id'] = userId;
   if (correlationId) headers['X-Correlation-Id'] = correlationId;
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (role) headers['X-Role'] = role;
 
   return {
     ...headers,

@@ -112,6 +112,7 @@ import {
 } from '../lib/sellerProfileApi';
 import { listShopReviews, replyShopReview, type ShopReview } from '../lib/sellerShopApi';
 import { getSellerNotificationPreferences, updateSellerNotificationPreferences } from '../lib/sellerNotificationsApi';
+import { getSessionInfo } from '../lib/identityApi';
 import {
   acceptRFQResponse,
   createRFQ,
@@ -119,6 +120,10 @@ import {
   getRFQComparison,
   getSupplierDelivery,
   getSupplierOffers,
+  listSupplierApplicationsAdmin,
+  approveSupplierApplication,
+  rejectSupplierApplication,
+  streamSupplierApplicationsAdmin,
   listRFQResponses,
   listRFQs,
   listSuppliers,
@@ -126,6 +131,7 @@ import {
   type RFQResponse,
   type RFQThread,
   type Supplier,
+  type SupplierApplication,
   type SupplierDelivery,
   type SupplierOffer
 } from '../lib/suppliersApi';
@@ -171,6 +177,13 @@ const toPlaceholderImage = (label: string) => {
   const safe = (label || 'Product').slice(0, 2).toUpperCase();
   const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"96\" height=\"96\"><rect width=\"100%\" height=\"100%\" fill=\"#e5e7eb\"/><text x=\"50%\" y=\"52%\" text-anchor=\"middle\" font-family=\"Arial\" font-size=\"28\" fill=\"#6b7280\">${safe}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+const normalizeRole = (role?: string) => {
+  const normalized = (role || '').toLowerCase();
+  if (normalized === 'admin' || normalized === 'owner') return 'admin';
+  if (normalized === 'seller') return 'seller';
+  return 'viewer';
 };
 
 
@@ -279,6 +292,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [suppliersStatus, setSuppliersStatus] = useState<string | null>(null);
   const [supplierOffersById, setSupplierOffersById] = useState<Record<string, SupplierOffer[]>>({});
   const [supplierDeliveryById, setSupplierDeliveryById] = useState<Record<string, SupplierDelivery>>({});
+  const [adminSupplierApps, setAdminSupplierApps] = useState<SupplierApplication[]>([]);
+  const [adminSupplierAppsLoading, setAdminSupplierAppsLoading] = useState(false);
+  const [adminSupplierAppsStatus, setAdminSupplierAppsStatus] = useState<string | null>(null);
+  const [adminDecisionReasons, setAdminDecisionReasons] = useState<Record<string, string>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
   const [rfqThreadsRemote, setRfqThreadsRemote] = useState<RFQThread[]>([]);
   const [rfqResponsesById, setRfqResponsesById] = useState<Record<string, RFQResponse[]>>({});
   const [rfqComparisonById, setRfqComparisonById] = useState<Record<string, RFQComparison>>({});
@@ -373,6 +391,29 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setBroadcastCount(0);
     }
   }, [seller.id]);
+
+  useEffect(() => {
+    let ignore = false;
+    const loadRole = async () => {
+      try {
+        const session = await getSessionInfo();
+        if (ignore) return;
+        const role = normalizeRole(session?.role);
+        setIsAdmin(role === 'admin');
+        if (session?.role) {
+          try {
+            localStorage.setItem('soko:role', String(session.role).toLowerCase());
+          } catch {}
+        }
+      } catch {
+        if (!ignore) setIsAdmin(false);
+      }
+    };
+    loadRole();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (activeTab !== 'analytics' && activeTab !== 'marketing') return;
@@ -697,6 +738,40 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       ignore = true;
     };
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'suppliers' || !isAdmin) return;
+    let stop: null | (() => void) = null;
+    let cancelled = false;
+    const start = async () => {
+      try {
+        stop = await streamSupplierApplicationsAdmin(
+          (items) => {
+            if (cancelled) return;
+            setAdminSupplierApps(items || []);
+          },
+          (message) => {
+            if (cancelled) return;
+            setAdminSupplierAppsStatus(message);
+          }
+        );
+      } catch (err: any) {
+        if (cancelled) return;
+        setAdminSupplierAppsStatus(err?.message || 'Unable to open admin updates.');
+      }
+    };
+    start();
+    return () => {
+      cancelled = true;
+      if (stop) stop();
+    };
+  }, [activeTab, isAdmin]);
+
+  useEffect(() => {
+    if (activeTab !== 'suppliers') return;
+    if (!isAdmin) return;
+    refreshAdminSupplierApps();
+  }, [activeTab, isAdmin]);
 
   useEffect(() => {
     if (activeTab !== 'comms') return;
@@ -1822,6 +1897,44 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       () => setUserCoords(null),
       { enableHighAccuracy: true, timeout: 8000 }
     );
+  };
+
+  const refreshAdminSupplierApps = async () => {
+    if (!isAdmin) return;
+    setAdminSupplierAppsStatus(null);
+    setAdminSupplierAppsLoading(true);
+    try {
+      const apps = await listSupplierApplicationsAdmin();
+      setAdminSupplierApps(apps || []);
+    } catch (err: any) {
+      setAdminSupplierAppsStatus(err?.message || 'Unable to load supplier applications.');
+    } finally {
+      setAdminSupplierAppsLoading(false);
+    }
+  };
+
+  const handleApproveSupplierApp = async (id: string) => {
+    setAdminSupplierAppsStatus(null);
+    try {
+      await approveSupplierApplication(id, {
+        decision_reason: adminDecisionReasons[id] || ''
+      });
+      await refreshAdminSupplierApps();
+    } catch (err: any) {
+      setAdminSupplierAppsStatus(err?.message || 'Unable to approve application.');
+    }
+  };
+
+  const handleRejectSupplierApp = async (id: string) => {
+    setAdminSupplierAppsStatus(null);
+    try {
+      await rejectSupplierApplication(id, {
+        decision_reason: adminDecisionReasons[id] || ''
+      });
+      await refreshAdminSupplierApps();
+    } catch (err: any) {
+      setAdminSupplierAppsStatus(err?.message || 'Unable to reject application.');
+    }
   };
 
   const baseLocation = userCoords || seller.location || null;
@@ -4754,6 +4867,103 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                         </div>
                       ))}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-bold">Supplier Applications</h3>
+                    <p className="text-[10px] text-zinc-500 font-bold">Admin review queue</p>
+                  </div>
+                  <button
+                    onClick={refreshAdminSupplierApps}
+                    className="px-3 py-2 rounded-xl text-[10px] font-bold bg-white border border-zinc-200 text-zinc-700"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {adminSupplierAppsStatus && (
+                  <div className="mb-3 p-3 bg-amber-50 border border-amber-100 rounded-2xl text-[10px] font-bold text-amber-700">
+                    {adminSupplierAppsStatus}
+                  </div>
+                )}
+                {adminSupplierAppsLoading && (
+                  <div className="text-[10px] font-bold text-zinc-500">Loading applications…</div>
+                )}
+                <div className="space-y-3">
+                  {adminSupplierApps.map((app) => (
+                    <div key={app.id || `${app.seller_id}-${app.created_at}`} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-zinc-900">{app.business_name || 'Business'}</p>
+                          <p className="text-[10px] text-zinc-500 font-bold">
+                            {app.category || 'Category'} • Seller {app.seller_id || '—'}
+                          </p>
+                          {app.address && (
+                            <p className="text-[10px] text-zinc-500 mt-1">{app.address}</p>
+                          )}
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            app.status === 'approved'
+                              ? 'bg-emerald-50 text-emerald-600'
+                              : app.status === 'rejected'
+                                ? 'bg-red-50 text-red-600'
+                                : 'bg-amber-50 text-amber-600'
+                          }`}
+                        >
+                          {app.status || 'pending'}
+                        </span>
+                      </div>
+                      {app.notes && (
+                        <div className="mt-2 text-[10px] text-zinc-600 font-bold">
+                          Notes: {app.notes}
+                        </div>
+                      )}
+                      <div className="mt-3 flex flex-col gap-2">
+                        <input
+                          value={adminDecisionReasons[app.id || ''] || ''}
+                          onChange={(e) =>
+                            setAdminDecisionReasons((prev) => ({ ...prev, [app.id || '']: e.target.value }))
+                          }
+                          className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-[11px] font-semibold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="Decision reason (optional)"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => app.id && handleApproveSupplierApp(app.id)}
+                            disabled={!app.id || app.status !== 'pending'}
+                            className={`px-3 py-2 rounded-lg text-[10px] font-bold ${
+                              !app.id || app.status !== 'pending'
+                                ? 'bg-zinc-200 text-zinc-500'
+                                : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => app.id && handleRejectSupplierApp(app.id)}
+                            disabled={!app.id || app.status !== 'pending'}
+                            className={`px-3 py-2 rounded-lg text-[10px] font-bold ${
+                              !app.id || app.status !== 'pending'
+                                ? 'bg-zinc-200 text-zinc-500'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {adminSupplierApps.length === 0 && !adminSupplierAppsLoading && (
+                    <div className="p-6 bg-zinc-50 rounded-2xl text-center text-[10px] text-zinc-500 font-bold">
+                      No supplier applications in the queue.
+                    </div>
+                  )}
                 </div>
               </div>
             )}

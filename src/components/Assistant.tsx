@@ -32,6 +32,39 @@ import {
   AssistantToolHistory,
   AssistantAttachment
 } from '../lib/assistantApi';
+import {
+  getSellerBuyerInsight,
+  getSellerFunnel,
+  getSellerInventoryInsight,
+  getSellerKpiSummary,
+  getSellerMarketBenchmarks,
+  listSellerAnomalies,
+  type BuyerInsight,
+  type FunnelMetrics,
+  type InventoryInsight,
+  type KPISummary,
+  type MarketBenchmarks,
+  type Anomaly
+} from '../lib/sellerAnalyticsApi';
+import { getSellerProfile } from '../lib/sellerProfileApi';
+import { listSellerLowStock, type SellerLowStock } from '../lib/sellerProductsApi';
+import { getMarketingKPIs, listHotspots, listSellerCampaigns, type Hotspot, type KPIStat } from '../lib/marketingApi';
+import { getCashflow, getLoanEligibility, type Cashflow, type LoanEligibility } from '../lib/growthApi';
+import { getDisputeSummary } from '../lib/supportApi';
+import { listProfileFavorites, listProfileReviews } from '../lib/profileApi';
+import { listRFQs, listRFQResponses, type RFQResponse, type RFQThread } from '../lib/suppliersApi';
+import {
+  listRecentSearches,
+  listSavedSearches,
+  listSearchAlerts,
+  listWatchlist,
+  searchTrending,
+  searchRecommendations
+} from '../lib/searchApi';
+import { getCartInsights, getCartSummary, getCartRecommendations, getCartAlerts } from '../lib/cartApi';
+import { getCompareList } from '../lib/compareApi';
+import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
+import { listNotifications, type NotificationListResponse } from '../lib/notificationsApi';
 
 type AssistantAction = {
   label: string;
@@ -53,6 +86,8 @@ type AssistantChat = {
   updatedAt: number;
   pinned?: boolean;
 };
+
+type SummaryStat = Record<string, any>;
 
 interface AssistantProps {
   products: Product[];
@@ -107,6 +142,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [toolHistory, setToolHistory] = useState<AssistantToolHistory[]>([]);
   const [metricsPayload, setMetricsPayload] = useState<string>('');
   const [opsStatus, setOpsStatus] = useState<string | null>(null);
+  const [isSellerAccount, setIsSellerAccount] = useState<boolean | null>(null);
   const [uploadForm, setUploadForm] = useState({ file_url: '', mime_type: '', expires_at: '' });
   const [attachmentForm, setAttachmentForm] = useState({ message_id: '', file_url: '', mime_type: '', type: 'image', expires_at: '' });
   const [asrForm, setAsrForm] = useState({ audio_url: '', job_id: '' });
@@ -125,15 +161,274 @@ export const Assistant: React.FC<AssistantProps> = ({
     } catch {}
     return true;
   });
+  const [sellerKpis, setSellerKpis] = useState<KPISummary | null>(null);
+  const [sellerFunnel, setSellerFunnel] = useState<FunnelMetrics | null>(null);
+  const [inventoryInsight, setInventoryInsight] = useState<InventoryInsight | null>(null);
+  const [buyerInsight, setBuyerInsight] = useState<BuyerInsight | null>(null);
+  const [marketBenchmarks, setMarketBenchmarks] = useState<MarketBenchmarks | null>(null);
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [lowStock, setLowStock] = useState<SellerLowStock[]>([]);
+  const [marketingKpis, setMarketingKpis] = useState<KPIStat | null>(null);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [campaigns, setCampaigns] = useState<Array<{ id?: string; status?: string }>>([]);
+  const [cashflow, setCashflow] = useState<Cashflow | null>(null);
+  const [loanEligibility, setLoanEligibility] = useState<LoanEligibility | null>(null);
+  const [disputeSummary, setDisputeSummary] = useState<SummaryStat | null>(null);
+  const [profileReviews, setProfileReviews] = useState<any[]>([]);
+  const [rfqThreads, setRfqThreads] = useState<RFQThread[]>([]);
+  const [rfqResponses, setRfqResponses] = useState<RFQResponse[]>([]);
+  const [recentSearches, setRecentSearches] = useState<Array<{ id?: string; query?: string }>>([]);
+  const [savedSearches, setSavedSearches] = useState<Array<{ id?: string; query?: string }>>([]);
+  const [searchAlerts, setSearchAlerts] = useState<Array<{ id?: string }>>([]);
+  const [watchlist, setWatchlist] = useState<Array<{ id?: string }>>([]);
+  const [trendingSearches, setTrendingSearches] = useState<string[]>([]);
+  const [searchRecs, setSearchRecs] = useState<any[]>([]);
+  const [cartInsights, setCartInsights] = useState<{ items?: number; seller_count?: number; total?: number } | null>(null);
+  const [cartSummary, setCartSummary] = useState<{ total?: number; currency?: string } | null>(null);
+  const [cartRecs, setCartRecs] = useState<any[]>([]);
+  const [cartAlerts, setCartAlerts] = useState<any[]>([]);
+  const [compareList, setCompareList] = useState<{ items?: any[] } | null>(null);
+  const [rewardsBalance, setRewardsBalance] = useState<RewardsBalance | null>(null);
+  const [rewardStreaks, setRewardStreaks] = useState<RewardsStreak[]>([]);
+  const [notificationSummary, setNotificationSummary] = useState<NotificationListResponse | null>(null);
+  const [favoriteShops, setFavoriteShops] = useState<any[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
   const lastMessage = activeMessages[activeMessages.length - 1];
   const showIntroCards = !activeMessages.some(m => m.role === 'user');
+  const [showNewMemberIntro, setShowNewMemberIntro] = useState(() => {
+    try {
+      const completed = localStorage.getItem('soko:onboarding_completed') === 'true';
+      const seen = localStorage.getItem('soko:assistant_new_member_intro_seen') === 'true';
+      return completed && !seen;
+    } catch {
+      return false;
+    }
+  });
   const progressStars = 2;
   const totalStars = 50;
   const progressPct = Math.round((progressStars / totalStars) * 100);
+  const toNumber = (value: any) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const formatPct = (value: number) => {
+    if (!Number.isFinite(value)) return '—';
+    const normalized = value > 1 ? value : value * 100;
+    return `${Math.round(normalized)}%`;
+  };
+  const formatKES = (value: any) => {
+    const n = toNumber(value);
+    if (!n) return '—';
+    return `KES ${Math.round(n).toLocaleString()}`;
+  };
+  const lowStockCount = lowStock.length;
+  const abandonmentRate = sellerKpis?.cart_abandonment ?? sellerFunnel?.cart_abandonment;
+  const demandHotspotCount = hotspots.length;
+  const competitorMedian = marketBenchmarks?.competitor_median_price;
+  const conversionRate = sellerKpis?.conversion_rate
+    ?? (sellerFunnel?.sessions ? (toNumber(sellerFunnel.payment_success) / Math.max(1, toNumber(sellerFunnel.sessions))) : 0);
+  const roas = marketingKpis?.roas;
+  const repeatRate = buyerInsight?.repeat_rate ?? sellerKpis?.repeat_rate_d30;
+  const fulfillmentIssues = anomalies.filter(a => {
+    const type = (a.type || '').toLowerCase();
+    return type.includes('sla') || type.includes('fulfillment') || type.includes('delivery');
+  }).length;
+  const supplierRatingAvg = rfqResponses.length
+    ? rfqResponses.reduce((sum, r) => sum + toNumber(r.supplier_rating), 0) / rfqResponses.length
+    : 0;
+  const avgReviewRating = profileReviews.length
+    ? profileReviews.reduce((sum, r) => sum + toNumber(r.rating), 0) / profileReviews.length
+    : 0;
+  const disputeOpenCount = toNumber(disputeSummary?.open_count ?? disputeSummary?.open ?? disputeSummary?.pending ?? disputeSummary?.total_open);
+  const activeCampaigns = campaigns.filter(c => (c.status || '').toLowerCase() === 'active').length;
+
+  const ownerCards = isSellerAccount ? [
+    {
+      title: 'Top SKU at Risk',
+      metric: `${lowStockCount} items`,
+      detail: 'Likely to stock out in 48h',
+      action: 'Reorder now',
+      onClick: onOpenRFQ,
+      show: lowStockCount > 0,
+    },
+    {
+      title: 'Money Leaks',
+      metric: formatPct(abandonmentRate || 0),
+      detail: 'Cart abandonment rate',
+      action: 'Review causes',
+      onClick: onOpenSellerStudio,
+      show: Boolean(abandonmentRate),
+    },
+    {
+      title: 'Demand Spike Alerts',
+      metric: `${demandHotspotCount} hotspot${demandHotspotCount === 1 ? '' : 's'}`,
+      detail: 'Demand hotspots flagged today',
+      action: 'Create promo',
+      onClick: onOpenSellerStudio,
+      show: demandHotspotCount > 0,
+    },
+    {
+      title: 'Competitor Price Gap',
+      metric: formatKES(competitorMedian),
+      detail: 'Competitor median price',
+      action: 'Update price',
+      onClick: onOpenSellerStudio,
+      show: Boolean(competitorMedian),
+    },
+    {
+      title: 'Low Stock Radar',
+      metric: `${lowStockCount} SKUs`,
+      detail: inventoryInsight?.stockout_risk
+        ? `Stockout risk ${formatPct(inventoryInsight.stockout_risk)}`
+        : 'Below safety stock',
+      action: 'Bulk restock',
+      onClick: onOpenRFQ,
+      show: lowStockCount > 0 || Boolean(inventoryInsight?.stockout_risk),
+    },
+    {
+      title: 'Conversion Snapshot',
+      metric: formatPct(conversionRate || 0),
+      detail: 'Views → chats → orders',
+      action: 'Fix bottleneck',
+      onClick: onOpenSellerStudio,
+      show: Boolean(conversionRate),
+    },
+    {
+      title: 'Best Channel ROI',
+      metric: roas ? `${roas.toFixed(1)}x` : '',
+      detail: 'Return on ad spend',
+      action: 'Shift budget',
+      onClick: onOpenSellerStudio,
+      show: Boolean(roas),
+    },
+    {
+      title: 'Repeat Customers',
+      metric: formatPct(repeatRate || 0),
+      detail: 'Repeat buyer rate',
+      action: 'Send offer',
+      onClick: onOpenSellerStudio,
+      show: Boolean(repeatRate),
+    },
+    {
+      title: 'Fulfillment SLA Health',
+      metric: `${Math.max(0, 100 - fulfillmentIssues * 5)}%`,
+      detail: `${fulfillmentIssues} SLA issue${fulfillmentIssues === 1 ? '' : 's'} flagged`,
+      action: 'Resolve delays',
+      onClick: onOpenSellerStudio,
+      show: fulfillmentIssues > 0,
+    },
+    {
+      title: 'Supplier Performance',
+      metric: `${supplierRatingAvg.toFixed(1)}★`,
+      detail: 'Avg supplier rating from RFQs',
+      action: 'Switch default',
+      onClick: onOpenRFQ,
+      show: supplierRatingAvg > 0,
+    },
+    {
+      title: 'Review Heatmap',
+      metric: `${avgReviewRating.toFixed(1)}★`,
+      detail: 'Avg rating from recent reviews',
+      action: 'Reply fast',
+      onClick: onOpenProfile,
+      show: profileReviews.length > 0,
+    },
+    {
+      title: 'Dispute Alerts',
+      metric: `${disputeOpenCount} open`,
+      detail: 'Unresolved disputes',
+      action: 'Resolve now',
+      onClick: onOpenProfile,
+      show: disputeOpenCount > 0,
+    },
+    {
+      title: 'Cashflow Forecast',
+      metric: formatKES(cashflow?.net_cashflow),
+      detail: 'Latest net cashflow',
+      action: 'View forecast',
+      onClick: onOpenSellerStudio,
+      show: Boolean(cashflow?.net_cashflow),
+    },
+    {
+      title: 'Credit Eligibility',
+      metric: formatKES(loanEligibility?.max_amount),
+      detail: loanEligibility?.status ? `Status: ${loanEligibility.status}` : 'Eligibility status',
+      action: 'Apply now',
+      onClick: onOpenSellerStudio,
+      show: Boolean(loanEligibility?.max_amount) || Boolean(loanEligibility?.status),
+    },
+    {
+      title: 'Win-back List',
+      metric: `${buyerInsight?.new_buyers} buyers`,
+      detail: 'New vs returning split',
+      action: 'Send win-back',
+      onClick: onOpenSellerStudio,
+      show: Boolean(buyerInsight?.new_buyers),
+    },
+    {
+      title: 'Promo Effectiveness',
+      metric: `${activeCampaigns} active`,
+      detail: 'Active campaigns running',
+      action: 'Duplicate offer',
+      onClick: onOpenSellerStudio,
+      show: activeCampaigns > 0,
+    }
+  ].filter(card => card.show) : [];
+
+  const buyerCards = isSellerAccount === false ? [
+    {
+      title: 'Rewards Balance',
+      metric: rewardsBalance?.balance ? formatKES(rewardsBalance.balance) : '',
+      detail: rewardsBalance?.pending ? `Pending ${formatKES(rewardsBalance.pending)}` : 'Rewards ready',
+      action: 'Open rewards',
+      onClick: onOpenRewards,
+      show: Boolean(rewardsBalance?.balance) || Boolean(rewardsBalance?.pending),
+    },
+    {
+      title: 'Rewards Streak',
+      metric: rewardStreaks.length ? `${rewardStreaks[0]?.count || 0} days` : '',
+      detail: rewardStreaks[0]?.type ? `${rewardStreaks[0].type} streak` : 'Keep it going',
+      action: 'Earn more',
+      onClick: onOpenRewards,
+      show: rewardStreaks.length > 0 && Boolean(rewardStreaks[0]?.count),
+    },
+    {
+      title: 'Notifications',
+      metric: notificationSummary?.unread_count ? `${notificationSummary.unread_count} unread` : '',
+      detail: notificationSummary?.unread_count ? 'New alerts waiting' : '',
+      action: 'Open notifications',
+      onClick: onOpenProfile,
+      show: Boolean(notificationSummary?.unread_count),
+    },
+    {
+      title: 'Favorite Shops',
+      metric: favoriteShops.length ? `${favoriteShops.length} shops` : '',
+      detail: favoriteShops.length ? 'Shops you follow' : '',
+      action: 'View profile',
+      onClick: onOpenProfile,
+      show: favoriteShops.length > 0,
+    },
+    {
+      title: 'Saved Searches',
+      metric: savedSearches.length ? `${savedSearches.length} saved` : '',
+      detail: savedSearches[0]?.query ? `Saved: ${savedSearches[0].query}` : '',
+      action: 'Open search',
+      onClick: () => onOpenSearch(savedSearches[0]?.query || ''),
+      show: savedSearches.length > 0 && Boolean(savedSearches[0]?.query),
+    },
+    {
+      title: 'Trending Near You',
+      metric: trendingSearches.length ? `${trendingSearches.length} trends` : '',
+      detail: trendingSearches[0] ? `Top: ${trendingSearches[0]}` : '',
+      action: 'Explore',
+      onClick: () => onOpenSearch(trendingSearches[0] || ''),
+      show: trendingSearches.length > 0 && Boolean(trendingSearches[0]),
+    }
+  ].filter(card => card.show) : [];
+  const canAccessSeller = isSellerAccount === true;
   const quickActions = [
     { label: 'Feed', icon: Sparkles, onClick: onOpenFeed },
     { label: 'Search', icon: Search, onClick: () => setInput('/search ') },
@@ -141,14 +436,14 @@ export const Assistant: React.FC<AssistantProps> = ({
     { label: 'Photo', icon: Camera, onClick: () => onOpenSearchAction('photo search', 'photo') },
     { label: 'Voice', icon: Mic, onClick: () => onOpenSearchAction('voice search', 'voice') },
     { label: 'Bag', icon: ShoppingBag, onClick: () => onOpenBag() },
-    { label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ() },
+    ...(canAccessSeller ? [{ label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ() }] : []),
     { label: 'Rewards', icon: Trophy, onClick: () => onOpenRewards() }
   ];
   const moreActions = [
     { label: 'Subscriptions', icon: BadgeCheck, onClick: () => onOpenSubscriptions() },
     { label: 'Partnerships', icon: Plug, onClick: () => onOpenPartnerships() },
     { label: 'WhatsApp', icon: MessageCircle, onClick: () => onOpenWhatsApp() },
-    { label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio() },
+    ...(canAccessSeller ? [{ label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio() }] : []),
     { label: 'Scan QR', icon: Camera, onClick: () => onOpenQrScan() }
   ];
   const [suggestionChips, setSuggestionChips] = useState<Array<{ label: string; value: string }>>([]);
@@ -391,17 +686,17 @@ export const Assistant: React.FC<AssistantProps> = ({
           listSuggestions()
         ]);
         if (!alive) return;
-        if (threads && threads.length) {
-          const mapped = threads.map(mapThreadToChat);
-          setChats(mapped);
-          setActiveChatId(mapped[0]?.id || '');
-        } else {
-          try {
-            const created = await createThread({ title: 'New chat' });
-            const mapped = mapThreadToChat(created);
-            setChats([mapped]);
-            setActiveChatId(mapped.id);
-          } catch {
+        const mapped = (threads || []).map(mapThreadToChat);
+        try {
+          const created = await createThread({ title: 'New chat' });
+          const newChat = mapThreadToChat(created);
+          setChats([newChat, ...mapped]);
+          setActiveChatId(newChat.id);
+        } catch {
+          if (mapped.length) {
+            setChats(mapped);
+            setActiveChatId(mapped[0]?.id || '');
+          } else {
             onToast('Unable to start assistant chat.');
           }
         }
@@ -414,6 +709,192 @@ export const Assistant: React.FC<AssistantProps> = ({
       } catch {}
     };
     load();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSellerAccount) return;
+    let alive = true;
+    const loadSellerSignals = async () => {
+      try {
+        const [
+          kpis,
+          funnel,
+          inventory,
+          buyers,
+          market,
+          anomalyList,
+          lowStockList,
+          kpiStats,
+          hotspotList,
+          campaignList,
+          cashflowResp,
+          loanResp,
+          disputeResp,
+          reviews,
+          rfqs
+        ] = await Promise.all([
+          getSellerKpiSummary().catch(() => null),
+          getSellerFunnel().catch(() => null),
+          getSellerInventoryInsight().catch(() => null),
+          getSellerBuyerInsight().catch(() => null),
+          getSellerMarketBenchmarks().catch(() => null),
+          listSellerAnomalies().catch(() => []),
+          listSellerLowStock().catch(() => []),
+          getMarketingKPIs('30d').catch(() => null),
+          listHotspots().catch(() => []),
+          listSellerCampaigns().catch(() => []),
+          getCashflow().catch(() => null),
+          getLoanEligibility().catch(() => null),
+          getDisputeSummary().catch(() => null),
+          listProfileReviews().catch(() => []),
+          listRFQs().catch(() => [])
+        ]);
+        if (!alive) return;
+        setSellerKpis(kpis);
+        setSellerFunnel(funnel);
+        setInventoryInsight(inventory);
+        setBuyerInsight(buyers);
+        setMarketBenchmarks(market);
+        setAnomalies(anomalyList as Anomaly[]);
+        setLowStock(lowStockList as SellerLowStock[]);
+        setMarketingKpis(kpiStats);
+        setHotspots(hotspotList as Hotspot[]);
+        setCampaigns((campaignList as Array<{ id?: string; status?: string }>) || []);
+        setCashflow(cashflowResp);
+        setLoanEligibility(loanResp);
+        setDisputeSummary(disputeResp as SummaryStat);
+        setProfileReviews(reviews as any[]);
+        setRfqThreads(rfqs as RFQThread[]);
+      } catch {
+        // Ignore signal load errors.
+      }
+    };
+    loadSellerSignals();
+    return () => {
+      alive = false;
+    };
+  }, [isSellerAccount]);
+
+  useEffect(() => {
+    if (isSellerAccount !== false) return;
+    let alive = true;
+    const loadBuyerSignals = async () => {
+      try {
+        const [
+          recent,
+          saved,
+          alerts,
+          watch,
+          trending,
+          recs,
+          insights,
+          summary,
+          cartRecommendations,
+          cartAlertItems,
+          compare,
+          rewards,
+          streaks,
+          notifications,
+          favorites
+        ] = await Promise.all([
+          listRecentSearches().catch(() => []),
+          listSavedSearches().catch(() => []),
+          listSearchAlerts().catch(() => []),
+          listWatchlist().catch(() => []),
+          searchTrending().catch(() => []),
+          searchRecommendations().catch(() => []),
+          getCartInsights().catch(() => null),
+          getCartSummary().catch(() => null),
+          getCartRecommendations().catch(() => []),
+          getCartAlerts().catch(() => []),
+          getCompareList().catch(() => null),
+          getRewardsBalance().catch(() => null),
+          getRewardStreaks().catch(() => []),
+          listNotifications({ limit: 20 }).catch(() => ({ items: [], unread_count: 0 })),
+          listProfileFavorites().catch(() => [])
+        ]);
+        if (!alive) return;
+        setRecentSearches(recent as any[]);
+        setSavedSearches(saved as any[]);
+        setSearchAlerts(alerts as any[]);
+        setWatchlist(watch as any[]);
+        setTrendingSearches(trending as string[]);
+        setSearchRecs(recs as any[]);
+        setCartInsights(insights as any);
+        setCartSummary(summary as any);
+        setCartRecs(cartRecommendations as any[]);
+        setCartAlerts(cartAlertItems as any[]);
+        setCompareList(compare as any);
+        setRewardsBalance(rewards as RewardsBalance);
+        setRewardStreaks(streaks as RewardsStreak[]);
+        setNotificationSummary(notifications as NotificationListResponse);
+        setFavoriteShops(favorites as any[]);
+      } catch {
+        // Ignore buyer signal load errors.
+      }
+    };
+    loadBuyerSignals();
+    return () => {
+      alive = false;
+    };
+  }, [isSellerAccount]);
+
+  useEffect(() => {
+    if (!isSellerAccount) return;
+    let alive = true;
+    const loadRfqResponses = async () => {
+      if (rfqThreads.length === 0) return;
+      try {
+        const responses = await Promise.all(
+          rfqThreads.map((thread) => thread.id ? listRFQResponses(thread.id).catch(() => []) : Promise.resolve([]))
+        );
+        if (!alive) return;
+        setRfqResponses(responses.flat() as RFQResponse[]);
+      } catch {
+        // Ignore RFQ response errors.
+      }
+    };
+    loadRfqResponses();
+    return () => {
+      alive = false;
+    };
+  }, [isSellerAccount, rfqThreads]);
+
+  useEffect(() => {
+    if (!showNewMemberIntro) return;
+    try {
+      localStorage.setItem('soko:assistant_new_member_intro_seen', 'true');
+    } catch {}
+  }, [showNewMemberIntro]);
+
+  useEffect(() => {
+    const handleOnboardingComplete = () => {
+      try {
+        const completed = localStorage.getItem('soko:onboarding_completed') === 'true';
+        const seen = localStorage.getItem('soko:assistant_new_member_intro_seen') === 'true';
+        if (completed && !seen) setShowNewMemberIntro(true);
+      } catch {}
+    };
+    window.addEventListener('soko:onboarding-complete', handleOnboardingComplete);
+    return () => {
+      window.removeEventListener('soko:onboarding-complete', handleOnboardingComplete);
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const checkSeller = async () => {
+      try {
+        await getSellerProfile();
+        if (alive) setIsSellerAccount(true);
+      } catch {
+        if (alive) setIsSellerAccount(false);
+      }
+    };
+    checkSeller();
     return () => {
       alive = false;
     };
@@ -727,9 +1208,11 @@ useEffect(() => {
         <div className={`flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} mb-4`}>
           {isSidebarOpen && (
             <div className="flex items-center gap-2">
-              <div className="p-2 bg-white/10 rounded-xl">
-                <MessageCircle className="w-4 h-4 text-white" />
-              </div>
+              <img
+                src="/logo-header.jpg"
+                alt="Sconnect"
+                className="w-8 h-8 rounded-xl object-cover border border-white/10"
+              />
               <div>
                 <p className="text-sm font-black">Conversations</p>
                 <p className="text-[10px] text-white/50">{chats.length} chats</p>
@@ -737,9 +1220,11 @@ useEffect(() => {
             </div>
           )}
           {!isSidebarOpen && (
-            <div className="p-2 bg-white/10 rounded-xl">
-              <MessageCircle className="w-4 h-4 text-white" />
-            </div>
+            <img
+              src="/logo-header.jpg"
+              alt="Sconnect"
+              className="w-9 h-9 rounded-xl object-cover border border-white/10"
+            />
           )}
           <button
             onClick={() => setIsSidebarOpen(prev => !prev)}
@@ -871,9 +1356,11 @@ useEffect(() => {
           <div className="absolute inset-y-0 left-0 w-72 bg-slate-950 border-r border-white/10 p-4 overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <div className="p-2 bg-white/10 rounded-xl">
-                  <MessageCircle className="w-4 h-4 text-white" />
-                </div>
+                <img
+                  src="/logo-header.jpg"
+                  alt="Sconnect"
+                  className="w-8 h-8 rounded-xl object-cover border border-white/10"
+                />
                 <div>
                   <p className="text-sm font-black">Conversations</p>
                   <p className="text-[10px] text-white/50">{chats.length} chats</p>
@@ -1006,7 +1493,11 @@ useEffect(() => {
             >
               <MessageCircle className="w-5 h-5" />
             </button>
-            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center font-black">SC</div>
+            <img
+              src="/logo-header.jpg"
+              alt="Sconnect"
+              className="w-10 h-10 rounded-2xl object-cover border border-white/10"
+            />
             <div>
               <p className="text-sm font-black">Sconnect</p>
               <p className="text-[10px] text-white/60">Kenya's duka demand engine</p>
@@ -1034,47 +1525,51 @@ useEffect(() => {
         <div className="flex-1 min-h-0 px-4 pt-24 pb-28 sm:px-5 sm:pt-24 sm:pb-40 flex flex-col gap-4 sm:gap-5">
           {showIntroCards && (
             <>
-              <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
-                    <h1 className="mt-2 text-lg sm:text-xl font-black">Kenya's duka demand engine</h1>
-                    <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
-                  </div>
-                  <button
-                    onClick={() => onOpenOnboarding()}
-                    className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                    aria-label="Open onboarding"
-                  >
-                    <Sparkles className="w-5 h-5 text-amber-300" />
-                  </button>
-                </div>
-                <div className="mt-4 flex items-center gap-2">
-                  <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
-                    <MessageCircle className="w-3 h-3" /> WhatsApp
-                  </span>
-                  <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
-                    <BadgeCheck className="w-3 h-3" /> PWA Ready
-                  </span>
-                </div>
-              </section>
+              {showNewMemberIntro && (
+                <>
+                  <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
+                        <h1 className="mt-2 text-lg sm:text-xl font-black">Kenya's duka demand engine</h1>
+                        <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
+                      </div>
+                      <button
+                        onClick={() => onOpenOnboarding()}
+                        className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                        aria-label="Open onboarding"
+                      >
+                        <Sparkles className="w-5 h-5 text-amber-300" />
+                      </button>
+                    </div>
+                    <div className="mt-4 flex items-center gap-2">
+                      <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
+                        <MessageCircle className="w-3 h-3" /> WhatsApp
+                      </span>
+                      <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
+                        <BadgeCheck className="w-3 h-3" /> PWA Ready
+                      </span>
+                    </div>
+                  </section>
 
-              <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
-                    <p className="text-sm font-black mt-2">Sconnect Assistant</p>
-                    <p className="text-[11px] text-white/60 mt-1 line-clamp-2">{lastMessage?.content || 'Ask me to search, compare, or open a shop.'}</p>
-                  </div>
-                  <button
-                    onClick={() => setActiveChatId(activeChatId)}
-                    className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                    aria-label="Open conversation"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                </div>
-              </section>
+                  <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
+                        <p className="text-sm font-black mt-2">Sconnect Assistant</p>
+                        <p className="text-[11px] text-white/60 mt-1 line-clamp-2">{lastMessage?.content || 'Ask me to search, compare, or open a shop.'}</p>
+                      </div>
+                      <button
+                        onClick={() => setActiveChatId(activeChatId)}
+                        className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                        aria-label="Open conversation"
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </section>
+                </>
+              )}
 
               <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-emerald-500/20">
                 <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
@@ -1115,6 +1610,70 @@ useEffect(() => {
                   <div className="h-full bg-amber-400" style={{ width: `${progressPct}%` }} />
                 </div>
               </section>
+
+              {ownerCards.length > 0 && (
+                <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Owner Command Cards</p>
+                    <p className="text-[11px] text-white/70">Daily signals to move inventory and cash.</p>
+                  </div>
+                </div>
+                <div className="max-h-[55vh] overflow-y-auto pr-1 space-y-3">
+                  {ownerCards.map((card) => (
+                    <div key={card.title} className="p-3 rounded-2xl bg-white/10 border border-white/10">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[11px] font-black text-white">{card.title}</p>
+                          <p className="text-[10px] text-white/60 mt-1">{card.detail}</p>
+                        </div>
+                        <div className="text-xs font-black text-amber-300">{card.metric}</div>
+                      </div>
+                      <div className="mt-3">
+                        <button
+                          onClick={card.onClick}
+                          className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                        >
+                          {card.action}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              )}
+
+              {buyerCards.length > 0 && (
+                <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Buyer Signals</p>
+                      <p className="text-[11px] text-white/70">Personalized shopping insights.</p>
+                    </div>
+                  </div>
+                  <div className="max-h-[55vh] overflow-y-auto pr-1 space-y-3">
+                    {buyerCards.map((card) => (
+                      <div key={card.title} className="p-3 rounded-2xl bg-white/10 border border-white/10">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[11px] font-black text-white">{card.title}</p>
+                            <p className="text-[10px] text-white/60 mt-1">{card.detail}</p>
+                          </div>
+                          <div className="text-xs font-black text-amber-300">{card.metric}</div>
+                        </div>
+                        <div className="mt-3">
+                          <button
+                            onClick={card.onClick}
+                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                          >
+                            {card.action}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
             </>
           )}
 
