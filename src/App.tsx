@@ -305,9 +305,9 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen w-screen bg-black overflow-hidden flex flex-col font-sans">
+    <div className="min-h-[100dvh] w-full bg-black overflow-x-hidden flex flex-col font-sans">
       {/* Main Content Area */}
-      <main className="flex-1 relative overflow-hidden">
+      <main className="flex-1 min-h-0 relative overflow-y-auto overflow-x-hidden">
         <PullToRefresh onRefresh={() => window.location.reload()}>
           <AnimatePresence mode="wait">
           {view === 'feed' && (

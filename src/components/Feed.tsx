@@ -886,16 +886,16 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 </button>
               </div>
               <div className="space-y-3">
-                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Product name" value={postForm.name} onChange={(e) => setPostForm(prev => ({ ...prev, name: e.target.value }))} />
-                <textarea className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Description" value={postForm.description} onChange={(e) => setPostForm(prev => ({ ...prev, description: e.target.value }))} />
+                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Product name" value={postForm.name} onChange={(e) => setPostForm(prev => ({ ...prev, name: e.target.value }))} />
+                <textarea className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Description" value={postForm.description} onChange={(e) => setPostForm(prev => ({ ...prev, description: e.target.value }))} />
                 <div className="grid grid-cols-2 gap-3">
-                  <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Price" value={postForm.price} onChange={(e) => setPostForm(prev => ({ ...prev, price: e.target.value }))} />
-                  <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Category" value={postForm.category} onChange={(e) => setPostForm(prev => ({ ...prev, category: e.target.value }))} />
+                  <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Price" value={postForm.price} onChange={(e) => setPostForm(prev => ({ ...prev, price: e.target.value }))} />
+                  <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Category" value={postForm.category} onChange={(e) => setPostForm(prev => ({ ...prev, category: e.target.value }))} />
                 </div>
-                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Media URL (optional)" value={postForm.mediaUrl} onChange={(e) => setPostForm(prev => ({ ...prev, mediaUrl: e.target.value }))} />
-                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Product ID (optional)" value={postForm.productId} onChange={(e) => setPostForm(prev => ({ ...prev, productId: e.target.value }))} />
-                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Neighborhood ID (optional)" value={postForm.neighborhoodId} onChange={(e) => setPostForm(prev => ({ ...prev, neighborhoodId: e.target.value }))} />
-                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold" placeholder="Tags (comma separated)" value={postForm.tags} onChange={(e) => setPostForm(prev => ({ ...prev, tags: e.target.value }))} />
+                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Media URL (optional)" value={postForm.mediaUrl} onChange={(e) => setPostForm(prev => ({ ...prev, mediaUrl: e.target.value }))} />
+                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Product ID (optional)" value={postForm.productId} onChange={(e) => setPostForm(prev => ({ ...prev, productId: e.target.value }))} />
+                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Neighborhood ID (optional)" value={postForm.neighborhoodId} onChange={(e) => setPostForm(prev => ({ ...prev, neighborhoodId: e.target.value }))} />
+                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Tags (comma separated)" value={postForm.tags} onChange={(e) => setPostForm(prev => ({ ...prev, tags: e.target.value }))} />
                 <button onClick={handleCreatePost} className="w-full py-3 bg-zinc-900 text-white rounded-xl text-xs font-bold">Post</button>
               </div>
             </motion.div>

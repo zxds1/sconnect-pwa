@@ -804,7 +804,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                 }
               }}
               placeholder="Search products, shops, or snap a photo..." 
-              className="w-full pl-10 pr-20 py-3 bg-zinc-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium"
+              className="w-full pl-10 pr-20 py-3 bg-zinc-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-zinc-900"
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
               <button 

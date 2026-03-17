@@ -1204,7 +1204,7 @@ useEffect(() => {
   return (
     <div className="h-full bg-slate-950 text-white flex">
             {/* Sidebar (desktop) */}
-      <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:block`}>
+      <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:flex lg:flex-col`}>
         <div className={`flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} mb-4`}>
           {isSidebarOpen && (
             <div className="flex items-center gap-2">
@@ -1236,8 +1236,8 @@ useEffect(() => {
         </div>
 
         {isSidebarOpen && (
-          <>
-            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+            <div className="space-y-2">
               {chats
                 .sort((a, b) => {
                   if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
@@ -1343,7 +1343,7 @@ useEffect(() => {
                 ))}
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
 {/* Sidebar (mobile drawer) */}
@@ -1353,7 +1353,7 @@ useEffect(() => {
             className="absolute inset-0 bg-black/60"
             onClick={() => setIsSidebarOpen(false)}
           />
-          <div className="absolute inset-y-0 left-0 w-72 bg-slate-950 border-r border-white/10 p-4 overflow-y-auto">
+          <div className="absolute inset-y-0 left-0 w-72 bg-slate-950 border-r border-white/10 p-4 flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <img
@@ -1375,107 +1375,109 @@ useEffect(() => {
               </button>
             </div>
 
-            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
-              {chats
-                .sort((a, b) => {
-                  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-                  return b.updatedAt - a.updatedAt;
-                })
-                .slice(0, 12)
-                .map((chat) => (
-                  <div
-                    key={chat.id}
-                    className={`w-full text-left p-2 rounded-xl text-[10px] font-bold flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/70'}`}
-                  >
+            <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+              <div className="space-y-2">
+                {chats
+                  .sort((a, b) => {
+                    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+                    return b.updatedAt - a.updatedAt;
+                  })
+                  .slice(0, 12)
+                  .map((chat) => (
+                    <div
+                      key={chat.id}
+                      className={`w-full text-left p-2 rounded-xl text-[10px] font-bold flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/70'}`}
+                    >
+                      <button
+                        onClick={() => {
+                          setActiveChatId(chat.id);
+                          setIsSidebarOpen(false);
+                        }}
+                        className="flex-1 text-left"
+                      >
+                        {chat.title || 'New chat'}
+                      </button>
+                      <div className="flex items-center gap-1 ml-2">
+                        <button
+                          onClick={async () => {
+                            const nextPinned = !chat.pinned;
+                            setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: nextPinned } : c));
+                            try {
+                              await updateThread(chat.id, { pinned: nextPinned });
+                            } catch {}
+                          }}
+                          className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
+                          title="Pin chat"
+                        >
+                          {chat.pinned ? 'Unpin' : 'Pin'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      const created = await createThread({ title: 'New chat' });
+                      const newChat = mapThreadToChat(created);
+                      setChats(prev => [newChat, ...prev]);
+                      setActiveChatId(newChat.id);
+                      setIsSidebarOpen(false);
+                    } catch {
+                      onToast('Unable to start assistant chat.');
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" /> New chat
+                </button>
+                <button
+                  onClick={() => {
+                    onOpenOnboarding();
+                    setIsSidebarOpen(false);
+                  }}
+                  className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                >
+                  <Trophy className="w-4 h-4" /> Onboarding
+                </button>
+              </div>
+
+              <div className="mt-6">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">Quick Actions</p>
+                <div className="space-y-2 text-[10px] font-bold">
+                  {quickActions.map(action => (
                     <button
+                      key={action.label}
                       onClick={() => {
-                        setActiveChatId(chat.id);
+                        action.onClick();
                         setIsSidebarOpen(false);
                       }}
-                      className="flex-1 text-left"
+                      className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
                     >
-                      {chat.title || 'New chat'}
+                      <action.icon className="w-3 h-3" /> {action.label}
                     </button>
-                    <div className="flex items-center gap-1 ml-2">
-                      <button
-                        onClick={async () => {
-                          const nextPinned = !chat.pinned;
-                          setChats(prev => prev.map(c => c.id === chat.id ? { ...c, pinned: nextPinned } : c));
-                          try {
-                            await updateThread(chat.id, { pinned: nextPinned });
-                          } catch {}
-                        }}
-                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
-                        title="Pin chat"
-                      >
-                        {chat.pinned ? 'Unpin' : 'Pin'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-            </div>
-
-            <div className="mt-4 space-y-2">
-              <button
-                onClick={async () => {
-                  try {
-                    const created = await createThread({ title: 'New chat' });
-                    const newChat = mapThreadToChat(created);
-                    setChats(prev => [newChat, ...prev]);
-                    setActiveChatId(newChat.id);
-                    setIsSidebarOpen(false);
-                  } catch {
-                    onToast('Unable to start assistant chat.');
-                  }
-                }}
-                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
-              >
-                <Sparkles className="w-4 h-4" /> New chat
-              </button>
-              <button
-                onClick={() => {
-                  onOpenOnboarding();
-                  setIsSidebarOpen(false);
-                }}
-                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
-              >
-                <Trophy className="w-4 h-4" /> Onboarding
-              </button>
-            </div>
-
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">Quick Actions</p>
-              <div className="space-y-2 text-[10px] font-bold">
-                {quickActions.map(action => (
-                  <button
-                    key={action.label}
-                    onClick={() => {
-                      action.onClick();
-                      setIsSidebarOpen(false);
-                    }}
-                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
-                  >
-                    <action.icon className="w-3 h-3" /> {action.label}
-                  </button>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
 
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">More</p>
-              <div className="space-y-2 text-[10px] font-bold">
-                {moreActions.map(action => (
-                  <button
-                    key={action.label}
-                    onClick={() => {
-                      action.onClick();
-                      setIsSidebarOpen(false);
-                    }}
-                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
-                  >
-                    <action.icon className="w-3 h-3" /> {action.label}
-                  </button>
-                ))}
+              <div className="mt-6">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">More</p>
+                <div className="space-y-2 text-[10px] font-bold">
+                  {moreActions.map(action => (
+                    <button
+                      key={action.label}
+                      onClick={() => {
+                        action.onClick();
+                        setIsSidebarOpen(false);
+                      }}
+                      className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
+                    >
+                      <action.icon className="w-3 h-3" /> {action.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
