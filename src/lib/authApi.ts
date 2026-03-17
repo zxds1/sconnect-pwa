@@ -15,6 +15,28 @@ export type AuthDevicePayload = {
   screen?: string;
 };
 
+const OFFLINE_LOGIN = {
+  phone: '+254700000000',
+  pin: '1234',
+  tenant_id: 'tenant_001',
+  user_id: 'buyer_offline',
+  role: 'buyer',
+};
+
+const createOfflineTokens = (): AuthTokens => ({
+  access_token: `offline_access_${Date.now().toString(16)}`,
+  refresh_token: `offline_refresh_${Math.random().toString(16).slice(2)}`,
+  expires_in: 60 * 60 * 24,
+  token_type: 'Bearer',
+});
+
+const matchesOfflineLogin = (payload: { phone: string; pin: string; tenant_id: string }) => {
+  const phone = payload.phone.trim();
+  const pin = payload.pin.trim();
+  const tenant = payload.tenant_id.trim() || OFFLINE_LOGIN.tenant_id;
+  return phone === OFFLINE_LOGIN.phone && pin === OFFLINE_LOGIN.pin && tenant === OFFLINE_LOGIN.tenant_id;
+};
+
 const getDeviceFingerprint = () => {
   try {
     const stored = localStorage.getItem('soko:device_fingerprint');
@@ -44,11 +66,25 @@ export const login = async (payload: {
   pin: string;
   tenant_id: string;
   device?: AuthDevicePayload;
-}): Promise<AuthTokens> =>
-  apiFetch('/v1/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+}): Promise<AuthTokens> => {
+  try {
+    return await apiFetch('/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    if (import.meta.env.DEV && matchesOfflineLogin(payload)) {
+      try {
+        localStorage.setItem('soko:role', OFFLINE_LOGIN.role);
+        localStorage.setItem('soko:user_id', OFFLINE_LOGIN.user_id);
+        localStorage.setItem('soko:tenant_id', OFFLINE_LOGIN.tenant_id);
+        localStorage.setItem('soko:session_id', `offline_${Date.now().toString(16)}`);
+      } catch {}
+      return createOfflineTokens();
+    }
+    throw err;
+  }
+};
 
 export const register = async (payload: {
   phone: string;

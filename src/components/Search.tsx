@@ -90,7 +90,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
   const videoInputRef = React.useRef<HTMLInputElement | null>(null);
-  const [isHybridActive, setIsHybridActive] = useState(false);
   const [pendingHybrid, setPendingHybrid] = useState(false);
   const [detectedLanguage, setDetectedLanguage] = useState<'English' | 'Swahili' | 'Sheng'>('English');
   const [transcriptChips, setTranscriptChips] = useState<string[]>([]);
@@ -114,6 +113,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [watchlistTargets, setWatchlistTargets] = useState<Record<string, string>>({});
   const sellerMetaRef = React.useRef(sellerMeta);
   const searchRunRef = React.useRef(0);
+  const hybridQueuedRef = React.useRef('');
 
   useEffect(() => {
     sellerMetaRef.current = sellerMeta;
@@ -359,14 +359,20 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     // Heuristic "visual search": use tags/categories as hints
     const sampleTags = ['electronics', 'fashion', 'food', 'home', 'beauty', 'sports', 'office', 'kids', 'outdoors', 'accessories'];
     const hint = sampleTags[Math.floor(Math.random() * sampleTags.length)];
-    setSearchQuery(hint);
-    const hybrid = pendingHybrid || false;
-    setIsHybridActive(hybrid);
+    const existingQuery = searchQuery.trim();
+    const nextQuery = existingQuery || hint;
+    if (!existingQuery) {
+      setSearchQuery(nextQuery);
+    }
+    const hybrid = pendingHybrid || Boolean(existingQuery);
     if (hybrid) {
       queueHybridSearch().catch(() => {});
+      hybridQueuedRef.current = nextQuery;
     } else {
       queuePhotoSearch().catch(() => {});
+      hybridQueuedRef.current = '';
     }
+    runSearch(nextQuery);
     setPendingHybrid(false);
     handleCloseCamera();
   };
@@ -376,7 +382,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     const url = URL.createObjectURL(file);
     setVideoPreview(url);
     setSearchQuery('video match');
-    setIsHybridActive(false);
     queueVideoSearch().catch(() => {});
   };
 
@@ -596,6 +601,14 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   }, [runSearch, searchQuery]);
 
   useEffect(() => {
+    const query = searchQuery.trim();
+    if (!capturedPreview || !query) return;
+    if (hybridQueuedRef.current === query) return;
+    queueHybridSearch().catch(() => {});
+    hybridQueuedRef.current = query;
+  }, [capturedPreview, searchQuery]);
+
+  useEffect(() => {
     if (viewMode !== 'map') return;
     if (!searchQuery.trim()) {
       setMapProducts([]);
@@ -807,6 +820,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
               className="w-full pl-10 pr-20 py-3 bg-zinc-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-zinc-900"
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <button
+                onClick={recordSearch}
+                className="p-1.5 text-zinc-400 hover:text-indigo-600 transition-colors"
+                title="Search"
+              >
+                <SearchIcon className="w-4 h-4" />
+              </button>
               <button 
                 onClick={handleStartListening}
                 className={`p-1.5 transition-colors ${isListening ? 'text-emerald-600' : 'text-zinc-400 hover:text-indigo-600'}`}
@@ -900,19 +920,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             <Navigation className="w-3 h-3" /> Near Me
           </button>
 
-          <button
-            onClick={() => {
-              if (capturedPreview && searchQuery.trim()) {
-                setIsHybridActive(true);
-              } else {
-                alert('Add a photo and text to activate hybrid search.');
-              }
-            }}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${isHybridActive ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'}`}
-          >
-            <Sparkles className="w-3 h-3" /> Hybrid
-          </button>
-          
           <div className="w-px h-4 bg-zinc-200 mx-1" />
 
           <button 

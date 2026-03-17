@@ -1082,9 +1082,9 @@ useEffect(() => {
   };
 
   return (
-    <div className="h-full bg-slate-950 text-white flex">
+    <div className="h-[100dvh] min-h-[100dvh] bg-slate-950 text-white flex overflow-hidden">
             {/* Sidebar (desktop) */}
-      <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:flex lg:flex-col`}>
+      <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:flex lg:flex-col h-full min-h-0`}>
         <div className={`flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} mb-4`}>
           {isSidebarOpen && (
             <div className="flex items-center gap-2">
@@ -1233,7 +1233,7 @@ useEffect(() => {
             className="absolute inset-0 bg-black/60"
             onClick={() => setIsSidebarOpen(false)}
           />
-          <div className="absolute inset-y-0 left-0 w-72 bg-slate-950 border-r border-white/10 p-4 flex flex-col">
+          <div className="absolute inset-y-0 left-0 w-72 bg-slate-950 border-r border-white/10 p-4 flex flex-col h-[100dvh] min-h-0">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <img
