@@ -28,7 +28,7 @@ const setStored = (key: string, value: string) => {
   } catch {}
 };
 
-const getBaseUrl = () => getEnv('VITE_API_BASE_URL') ?? '';
+const getBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
 const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? '';
 const getUserId = () => getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
 const getAuthToken = () => getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
@@ -85,7 +85,7 @@ const parseError = async (res: Response): Promise<ApiError> => {
 export const apiFetch = async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
-    throw new Error('Missing VITE_API_BASE_URL');
+    throw new Error('Missing API base URL. Set VITE_API_BASE_URL or configure it in Settings.');
   }
 
   const res = await fetch(`${baseUrl}${path}`, {
@@ -107,10 +107,23 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
 export const apiFetchRaw = async (path: string, options: RequestInit = {}): Promise<Response> => {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
-    throw new Error('Missing VITE_API_BASE_URL');
+    throw new Error('Missing API base URL. Set VITE_API_BASE_URL or configure it in Settings.');
   }
   return fetch(`${baseUrl}${path}`, {
     ...options,
     headers: buildHeaders(options.headers),
   });
+};
+
+export const getApiBaseUrl = () => getBaseUrl();
+
+export const setApiBaseUrl = (url: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (url) {
+      localStorage.setItem('soko:api_base_url', url);
+    } else {
+      localStorage.removeItem('soko:api_base_url');
+    }
+  } catch {}
 };

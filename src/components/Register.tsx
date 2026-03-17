@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Lock, Phone, UserPlus } from 'lucide-react';
 import { getSessionInfo } from '../lib/identityApi';
+import { getApiBaseUrl, setApiBaseUrl } from '../lib/apiClient';
 import { getDevicePayload, register } from '../lib/authApi';
 import { postAnalyticsEvent } from '../lib/analyticsApi';
 
@@ -20,6 +21,8 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
   });
   const [status, setStatus] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [apiBaseUrl, setApiBaseUrlState] = React.useState(getApiBaseUrl());
+  const [apiStatus, setApiStatus] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     try {
@@ -96,6 +99,33 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
           animate={{ opacity: 1, y: 0 }}
           className="bg-white rounded-3xl border border-zinc-100 shadow-sm p-6"
         >
+          <div className="mb-4 rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
+            <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">API Connection</p>
+            <p className="text-xs text-zinc-500 mt-1">Set your backend gateway URL before creating an account.</p>
+            <input
+              value={apiBaseUrl}
+              onChange={(e) => setApiBaseUrlState(e.target.value)}
+              placeholder="https://api.example.com"
+              className="mt-3 w-full bg-white rounded-xl border border-zinc-200 px-3 py-2 text-xs font-bold text-zinc-900 focus:outline-none"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const trimmed = apiBaseUrl.trim();
+                  setApiBaseUrl(trimmed);
+                  setApiStatus(trimmed ? 'Saved API base URL.' : 'Cleared API base URL.');
+                }}
+                className="px-3 py-2 rounded-xl text-[10px] font-black uppercase bg-zinc-900 text-white"
+              >
+                Save
+              </button>
+              {apiStatus && (
+                <span className="text-[10px] font-bold text-zinc-500">{apiStatus}</span>
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-2xl bg-emerald-50 text-emerald-600">
               <UserPlus className="w-5 h-5" />
