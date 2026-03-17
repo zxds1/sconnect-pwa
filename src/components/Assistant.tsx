@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Camera, Video, Star, Plus, BadgeCheck, TrendingUp, ChevronRight } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Camera, Video, Plus, BadgeCheck, TrendingUp } from 'lucide-react';
 import { Product } from '../types';
 import { SELLERS } from '../mockData';
 import {
@@ -184,8 +184,8 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [, setWatchlist] = useState<Array<{ id?: string }>>([]);
   const [trendingSearches, setTrendingSearches] = useState<string[]>([]);
   const [, setSearchRecs] = useState<any[]>([]);
-  const [, setCartInsights] = useState<{ items?: number; seller_count?: number; total?: number } | null>(null);
-  const [, setCartSummary] = useState<{ total?: number; currency?: string } | null>(null);
+  const [cartInsights, setCartInsights] = useState<{ items?: number; seller_count?: number; total?: number } | null>(null);
+  const [cartSummary, setCartSummary] = useState<{ total?: number; currency?: string } | null>(null);
   const [, setCartRecs] = useState<any[]>([]);
   const [, setCartAlerts] = useState<any[]>([]);
   const [, setCompareList] = useState<{ items?: any[] } | null>(null);
@@ -208,9 +208,6 @@ export const Assistant: React.FC<AssistantProps> = ({
       return false;
     }
   });
-  const progressStars = 2;
-  const totalStars = 50;
-  const progressPct = Math.round((progressStars / totalStars) * 100);
   const toNumber = (value: any) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -245,6 +242,127 @@ export const Assistant: React.FC<AssistantProps> = ({
     : 0;
   const disputeOpenCount = toNumber(disputeSummary?.open_count ?? disputeSummary?.open ?? disputeSummary?.pending ?? disputeSummary?.total_open);
   const activeCampaigns = campaigns.filter(c => (c.status || '').toLowerCase() === 'active').length;
+
+  const insightCard = useMemo(() => {
+    if (isSellerAccount === true) {
+      if (lowStockCount > 0) {
+        return {
+          title: 'Inventory risk',
+          metric: `${lowStockCount} low-stock`,
+          detail: 'Items likely to stock out soon'
+        };
+      }
+      if (fulfillmentIssues > 0) {
+        return {
+          title: 'Fulfillment delays',
+          metric: `${fulfillmentIssues} alerts`,
+          detail: 'Resolve delivery/SLA issues'
+        };
+      }
+      if (disputeOpenCount > 0) {
+        return {
+          title: 'Disputes',
+          metric: `${disputeOpenCount} open`,
+          detail: 'Unresolved buyer issues'
+        };
+      }
+      if (cashflow?.net_cashflow) {
+        return {
+          title: 'Cashflow',
+          metric: formatKES(cashflow.net_cashflow),
+          detail: 'Latest net cashflow'
+        };
+      }
+      if (loanEligibility?.max_amount) {
+        return {
+          title: 'Credit eligibility',
+          metric: formatKES(loanEligibility.max_amount),
+          detail: loanEligibility.status ? `Status: ${loanEligibility.status}` : 'Eligible credit line'
+        };
+      }
+      if (Number.isFinite(roas) && Number(roas) > 0) {
+        return {
+          title: 'Campaign ROAS',
+          metric: `${toNumber(roas).toFixed(1)}x`,
+          detail: 'Return on ad spend'
+        };
+      }
+      if (avgReviewRating > 0) {
+        return {
+          title: 'Recent reviews',
+          metric: `${avgReviewRating.toFixed(1)}★`,
+          detail: 'Average rating'
+        };
+      }
+      return null;
+    }
+
+    if (isSellerAccount === false) {
+      if (rewardsBalance?.pending || rewardsBalance?.balance) {
+        return {
+          title: 'Rewards',
+          metric: rewardsBalance?.balance ? formatKES(rewardsBalance.balance) : '—',
+          detail: rewardsBalance?.pending ? `Pending ${formatKES(rewardsBalance.pending)}` : 'Rewards ready'
+        };
+      }
+      if (notificationSummary?.unread_count) {
+        return {
+          title: 'Notifications',
+          metric: `${notificationSummary.unread_count} unread`,
+          detail: 'New alerts waiting'
+        };
+      }
+      if (cartInsights?.items) {
+        const currency = cartSummary?.currency || 'KES';
+        const total = cartSummary?.total ? `${currency} ${Math.round(toNumber(cartSummary.total)).toLocaleString()}` : '—';
+        return {
+          title: 'Cart snapshot',
+          metric: `${cartInsights.items} items`,
+          detail: `Total ${total}`
+        };
+      }
+      if (savedSearches.length > 0 && savedSearches[0]?.query) {
+        return {
+          title: 'Saved search',
+          metric: savedSearches[0].query,
+          detail: `${savedSearches.length} saved searches`
+        };
+      }
+      if (trendingSearches.length > 0 && trendingSearches[0]) {
+        return {
+          title: 'Trending near you',
+          metric: trendingSearches[0],
+          detail: `${trendingSearches.length} trends`
+        };
+      }
+      if (favoriteShops.length > 0) {
+        return {
+          title: 'Favorite shops',
+          metric: `${favoriteShops.length} shops`,
+          detail: 'Shops you follow'
+        };
+      }
+      return null;
+    }
+
+    return null;
+  }, [
+    isSellerAccount,
+    lowStockCount,
+    fulfillmentIssues,
+    disputeOpenCount,
+    cashflow,
+    loanEligibility,
+    roas,
+    avgReviewRating,
+    rewardsBalance,
+    notificationSummary,
+    cartInsights,
+    cartSummary,
+    savedSearches,
+    trendingSearches,
+    favoriteShops
+  ]);
 
   const ownerCards = isSellerAccount ? [
     {
@@ -1409,89 +1527,37 @@ useEffect(() => {
             <>
               {showNewMemberIntro && (
                 <>
-                  <section className="bg-gradient-to-br from-white/10 via-white/5 to-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Value Prop</p>
-                        <h1 className="mt-2 text-lg sm:text-xl font-black">Kenya's duka demand engine</h1>
-                        <p className="text-[11px] text-white/70 mt-2">Works on WhatsApp + PWA • Real-time buyer signals.</p>
-                      </div>
+              <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Quick Start</p>
+                    <p className="text-[11px] text-white/70 mt-2">Open onboarding to set your intent and personalize the assistant.</p>
+                  </div>
                       <button
                         onClick={() => onOpenOnboarding()}
                         className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
                         aria-label="Open onboarding"
                       >
                         <Sparkles className="w-5 h-5 text-amber-300" />
-                      </button>
-                    </div>
-                    <div className="mt-4 flex items-center gap-2">
-                      <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
-                        <MessageCircle className="w-3 h-3" /> WhatsApp
-                      </span>
-                      <span className="px-3 py-1.5 rounded-full bg-white/10 text-[10px] font-bold flex items-center gap-1.5">
-                        <BadgeCheck className="w-3 h-3" /> PWA Ready
-                      </span>
-                    </div>
-                  </section>
-
-                  <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Active Conversation</p>
-                        <p className="text-sm font-black mt-2">Sconnect Assistant</p>
-                        <p className="text-[11px] text-white/60 mt-1 line-clamp-2">{lastMessage?.content || 'Ask me to search, compare, or open a shop.'}</p>
-                      </div>
-                      <button
-                        onClick={() => setActiveChatId(activeChatId)}
-                        className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                        aria-label="Open conversation"
-                      >
-                        <ChevronRight className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </section>
-                </>
-              )}
-
-              <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-emerald-500/20">
-                <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
-                  <TrendingUp className="w-3 h-3" /> Insight
-                </div>
-                <div className="mt-3 flex items-end gap-3">
-                  <p className="text-2xl sm:text-3xl font-black">+47%</p>
-                  <div className="text-[11px] text-emerald-100/80">
-                    Omo demand spike in Mombasa • update your shelf today
-                  </div>
-                </div>
-              </section>
-
-              <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/60 font-bold">Your Progress</p>
-                    <p className="text-sm font-black mt-2">Rank: Bronze</p>
-                    <p className="text-[11px] text-white/60">2/50 stars to Free Pro Month</p>
-                  </div>
-                  <button
-                    onClick={onOpenRewards}
-                    className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                    aria-label="Open rewards"
-                  >
-                    <Trophy className="w-5 h-5 text-amber-300" />
                   </button>
                 </div>
-                <div className="mt-4 grid grid-cols-8 sm:grid-cols-10 gap-0.5 sm:gap-1">
-                  {Array.from({ length: totalStars }).map((_, i) => (
-                    <Star
-                      key={`star-${i}`}
-                      className={`w-2.5 h-2.5 sm:w-3 sm:h-3 ${i < progressStars ? 'text-amber-400 fill-amber-400' : 'text-white/20'}`}
-                    />
-                  ))}
-                </div>
-                <div className="mt-4 h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-400" style={{ width: `${progressPct}%` }} />
-                </div>
               </section>
+            </>
+          )}
+
+          {insightCard && (
+            <section className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-emerald-500/20">
+              <div className="flex items-center gap-2 text-emerald-200 text-[10px] font-bold uppercase tracking-[0.2em]">
+                <TrendingUp className="w-3 h-3" /> Insight
+              </div>
+              <div className="mt-3 flex items-end gap-3">
+                <p className="text-2xl sm:text-3xl font-black">{insightCard.metric}</p>
+                <div className="text-[11px] text-emerald-100/80">
+                  {insightCard.detail}
+                </div>
+              </div>
+            </section>
+          )}
 
               {ownerCards.length > 0 && (
                 <section className="bg-white/5 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/10">

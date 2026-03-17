@@ -145,6 +145,18 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
     if (!items.length && recommendations.length === 0) return;
     let alive = true;
     const loadProducts = async () => {
+      const seeded: Record<string, ProductView> = {};
+      items.forEach((item) => {
+        const name = item.product_name || item.product_title;
+        const mediaUrl = item.product_media_url || item.product_image_url;
+        if (name || mediaUrl) {
+          seeded[item.product_id] = {
+            id: item.product_id,
+            name: name || item.product_id,
+            mediaUrl: mediaUrl || undefined
+          };
+        }
+      });
       const productIds = new Set<string>();
       items.forEach((item) => productIds.add(item.product_id));
       recommendations.forEach((rec) => {
@@ -153,6 +165,9 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
       });
       const entries = await Promise.all(
         Array.from(productIds).map(async (id) => {
+          if (seeded[id]?.name || seeded[id]?.mediaUrl) {
+            return [id, null] as const;
+          }
           try {
             const product = await getProduct(id);
             return [id, product] as const;
@@ -162,8 +177,9 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
         })
       );
       if (!alive) return;
-      const next: Record<string, ProductView> = {};
+      const next: Record<string, ProductView> = { ...seeded };
       for (const [id, product] of entries) {
+        if (next[id]) continue;
         if (product) {
           next[id] = {
             id,
@@ -366,27 +382,29 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
 
         {items.map(item => {
           const product = productsById[item.product_id];
+          const displayName = product?.name || item.product_name || item.product_title || item.product_id;
+          const displayMedia = product?.mediaUrl || item.product_media_url || item.product_image_url || '';
           return (
             <div key={item.id} className="bg-white rounded-2xl border border-zinc-100 p-4 flex gap-4">
-              {product?.mediaUrl ? (
-                <img src={product.mediaUrl} className="w-16 h-16 rounded-xl object-cover" alt={product.name || item.product_id} />
+              {displayMedia ? (
+                <img src={displayMedia} className="w-16 h-16 rounded-xl object-cover" alt={displayName} />
               ) : (
                 <div className="w-16 h-16 rounded-xl bg-zinc-100 flex items-center justify-center text-[10px] font-bold text-zinc-400">
-                  {product?.name?.slice(0, 2).toUpperCase() || 'NA'}
+                  {displayName?.slice(0, 2).toUpperCase() || 'NA'}
                 </div>
               )}
               <div className="flex-1">
                 <button
                   onClick={() => {
-                    if (!product || !product.name) return;
+                    if (!displayName) return;
                     onOpenProduct({
-                      id: product.id,
+                      id: product?.id || item.product_id,
                       sellerId: item.seller_id || '',
-                      name: product.name,
+                      name: displayName,
                       description: '',
                       price: item.unit_price || 0,
                       category: '',
-                      mediaUrl: product.mediaUrl || '',
+                      mediaUrl: displayMedia,
                       mediaType: 'image',
                       tags: [],
                       stockLevel: 0
@@ -394,9 +412,9 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
                   }}
                   className="text-left"
                 >
-                  <p className="text-sm font-bold text-zinc-900">{product?.name || item.product_id}</p>
+                  <p className="text-sm font-bold text-zinc-900">{displayName}</p>
                 </button>
-                <p className="text-[10px] text-zinc-500">Seller: {item.seller_id || '—'}</p>
+                <p className="text-[10px] text-zinc-500">Seller: {item.seller_name || item.seller_id || '—'}</p>
                 <div className="mt-2 flex items-center gap-2 text-[10px] font-bold text-zinc-500">
                   <span>Qty</span>
                   <div className="flex items-center gap-2">
@@ -415,7 +433,9 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
                     </button>
                   </div>
                 </div>
-                <p className="text-sm font-black text-indigo-600 mt-2">KES {item.unit_price || 0}</p>
+                <p className="text-sm font-black text-indigo-600 mt-2">
+                  {(item.currency || summary?.currency || 'KES')} {item.unit_price || 0}
+                </p>
               </div>
               <button onClick={() => handleRemove(item.id)} className="text-[10px] font-bold text-zinc-400">Remove</button>
             </div>

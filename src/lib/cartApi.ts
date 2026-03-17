@@ -6,6 +6,12 @@ export type CartItem = {
   seller_id: string;
   quantity: number;
   unit_price: number;
+  currency?: string;
+  product_name?: string;
+  product_title?: string;
+  product_image_url?: string;
+  product_media_url?: string;
+  seller_name?: string;
   created_at?: string;
   updated_at?: string;
 };
