@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Camera, Video, Plus, BadgeCheck, TrendingUp } from 'lucide-react';
 import { Product } from '../types';
 import { SELLERS } from '../mockData';
@@ -197,7 +197,6 @@ export const Assistant: React.FC<AssistantProps> = ({
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
-  const lastMessage = activeMessages[activeMessages.length - 1];
   const showIntroCards = !activeMessages.some(m => m.role === 'user');
   const [showNewMemberIntro, setShowNewMemberIntro] = useState(() => {
     try {
