@@ -12,13 +12,11 @@ import {
   ToggleLeft,
   ToggleRight,
   Trash2,
-  Database,
   Volume2,
   Moon,
   Sun
 } from 'lucide-react';
 import { getNotificationPreferences, updateNotificationPreferences } from '../lib/notificationsApi';
-import { getApiBaseUrl, setApiBaseUrl } from '../lib/apiClient';
 import { getConsents, getSettingsSummary, requestSettingsDeletion, requestSettingsExport, updateConsentByType } from '../lib/settingsApi';
 
 interface SettingsProps {
@@ -75,9 +73,6 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     supportTicketId: ''
   });
   const [deleteStatus, setDeleteStatus] = React.useState<string | null>(null);
-  const [apiBaseUrl, setApiBaseUrlState] = React.useState(getApiBaseUrl());
-  const [apiStatus, setApiStatus] = React.useState<string | null>(null);
-
   React.useEffect(() => {
     let ignore = false;
     const load = async () => {
@@ -263,38 +258,6 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       </div>
 
       <div className="p-6 space-y-8">
-        <div className="bg-white border border-zinc-100 rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-2xl bg-indigo-50 text-indigo-600">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-zinc-900">API Connection</p>
-              <p className="text-xs text-zinc-500">Set the gateway base URL used by the app.</p>
-            </div>
-          </div>
-          <div className="mt-4 space-y-3">
-            <input
-              value={apiBaseUrl}
-              onChange={(e) => setApiBaseUrlState(e.target.value)}
-              placeholder="https://api.example.com"
-              className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
-            />
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const trimmed = apiBaseUrl.trim();
-                  setApiBaseUrl(trimmed);
-                  setApiStatus(trimmed ? 'Saved API base URL.' : 'Cleared API base URL.');
-                }}
-                className="px-3 py-2 rounded-xl text-[10px] font-black uppercase bg-zinc-900 text-white"
-              >
-                Save
-              </button>
-              {apiStatus && <span className="text-[10px] font-bold text-zinc-500">{apiStatus}</span>}
-            </div>
-          </div>
-        </div>
         {sections.map((section, idx) => (
           <div key={idx} className="space-y-3">
             <h2 className="text-xs font-bold uppercase text-zinc-400 tracking-widest px-2">{section.title}</h2>
