@@ -12,6 +12,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Trash2,
+  Database,
   Volume2,
   Moon,
   Sun
