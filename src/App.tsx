@@ -27,12 +27,14 @@ import { Assistant } from './components/Assistant';
 import { PullToRefresh } from './components/PullToRefresh';
 import { PRODUCTS } from './mockData';
 import { Product } from './types';
-import { getOnboardingState } from './lib/onboardingApi';
+import { completeOnboarding, getOnboardingState } from './lib/onboardingApi';
 import { addCompareItem, getCompareList, removeCompareItem } from './lib/compareApi';
 import { getProduct } from './lib/catalogApi';
+import { getShopProducts } from './lib/shopDirectoryApi';
 import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
+import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
 
 export default function App() {
   const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
@@ -45,6 +47,12 @@ export default function App() {
     }
   });
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [navigationPreset, setNavigationPreset] = useState<{
+    pathId?: string;
+    profile?: 'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk';
+    mode?: 'silent' | 'mapbox';
+    autoOpen: boolean;
+  } | null>(null);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
@@ -95,11 +103,14 @@ export default function App() {
       localStorage.setItem('soko:buyer_sc_payouts', JSON.stringify(buyerPayouts));
     } catch {}
   }, [sellerBalance, sellerPayouts, verifiedSellerIds, buyerBalance, buyerPayouts]);
-  const [showPostOnboardingNudges, setShowPostOnboardingNudges] = useState(() => {
+  const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window === 'undefined') return false;
-    return localStorage.getItem('soko:onboarding_nudges') !== 'dismissed';
+    return localStorage.getItem('soko:onboarding_completed') !== 'true';
   });
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [topAlerts, setTopAlerts] = useState<NotificationItem[]>([]);
+  const [updateReady, setUpdateReady] = useState(false);
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [pendingUpdateReload, setPendingUpdateReload] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -117,7 +128,12 @@ export default function App() {
         setShowOnboarding(!completed);
       } catch {
         if (!alive) return;
-        setShowOnboarding(true);
+        try {
+          const completed = localStorage.getItem('soko:onboarding_completed') === 'true';
+          setShowOnboarding(!completed);
+        } catch {
+          setShowOnboarding(true);
+        }
       }
     };
     load();
@@ -162,6 +178,53 @@ export default function App() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    const handleUpdate = () => setUpdateReady(true);
+    const handleOffline = () => setOfflineReady(true);
+    window.addEventListener('soko:sw-update', handleUpdate);
+    window.addEventListener('soko:sw-ready', handleOffline);
+    return () => {
+      window.removeEventListener('soko:sw-update', handleUpdate);
+      window.removeEventListener('soko:sw-ready', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingUpdateReload) return;
+    const sw = navigator.serviceWorker;
+    if (!sw) return;
+    const handleControllerChange = () => {
+      window.location.reload();
+    };
+    sw.addEventListener('controllerchange', handleControllerChange, { once: true });
+    return () => {
+      sw.removeEventListener('controllerchange', handleControllerChange);
+    };
+  }, [pendingUpdateReload]);
+
+  useEffect(() => {
+    if (view === 'login' || view === 'register' || view === 'password-reset' || view === 'auth-onboarding') {
+      setTopAlerts([]);
+      return;
+    }
+    let alive = true;
+    const loadAlerts = async () => {
+      try {
+        const res = await listNotifications({ limit: 2 });
+        if (!alive) return;
+        setTopAlerts((res?.items || []).filter(Boolean));
+      } catch {
+        if (alive) setTopAlerts([]);
+      }
+    };
+    loadAlerts();
+    const interval = window.setInterval(loadAlerts, 30000);
+    return () => {
+      alive = false;
+      window.clearInterval(interval);
+    };
+  }, [view]);
 
   const handleOpenSellerStudio = () => {
     if (isSellerAccount === null) {
@@ -247,8 +310,84 @@ export default function App() {
 
   const handleProductOpen = (product: Product) => {
     setSelectedProduct(product);
+    setNavigationPreset(null);
     setIsProductDetailOpen(true);
     handleInteraction(product.id, 'view_detail');
+  };
+
+  const normalizeProduct = (raw: any, fallbackSellerId?: string): Product | null => {
+    if (!raw) return null;
+    const id = raw.id || raw.product_id || raw.productId;
+    if (!id) return null;
+    const mediaType = String(raw.media_type || raw.mediaType || raw.type || '').toLowerCase() === 'video' ? 'video' : 'image';
+    const tags = Array.isArray(raw.tags)
+      ? raw.tags
+      : typeof raw.tags === 'string'
+        ? raw.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+        : [];
+    const lat = raw.location?.lat ?? raw.lat;
+    const lng = raw.location?.lng ?? raw.lng;
+    const address = raw.location?.address ?? raw.address ?? '';
+    return {
+      id: String(id),
+      sellerId: raw.seller_id || raw.sellerId || fallbackSellerId || '',
+      productId: raw.product_id || raw.productId,
+      name: raw.name || raw.title || raw.product_name || 'Product',
+      description: raw.description || raw.summary || '',
+      price: Number(raw.price ?? raw.unit_price ?? raw.current_price ?? 0),
+      costPrice: raw.cost_price ?? raw.costPrice,
+      category: raw.category || raw.category_name || 'general',
+      mediaUrl: raw.media_url || raw.mediaUrl || raw.image_url || raw.image || '',
+      mediaType,
+      tags,
+      stockLevel: Number(raw.stock_level ?? raw.stockLevel ?? raw.stock ?? 0),
+      stockStatus: raw.stock_status || raw.stockStatus,
+      expiryDate: raw.expiry_date || raw.expiryDate,
+      isFeatured: raw.is_featured ?? raw.isFeatured,
+      discountPrice: raw.discount_price ?? raw.discountPrice,
+      location: Number.isFinite(lat) && Number.isFinite(lng)
+        ? { lat: Number(lat), lng: Number(lng), address }
+        : undefined,
+      reviews: raw.reviews,
+      competitorPrice: raw.competitor_price ?? raw.competitorPrice,
+      priceHistory: raw.price_history ?? raw.priceHistory,
+      isGoodDeal: raw.is_good_deal ?? raw.isGoodDeal,
+    };
+  };
+
+  const handleStartNavigation = async (payload: Record<string, any>) => {
+    const sellerId = payload?.seller_id || payload?.destination_seller_id;
+    const productId = payload?.product_id || payload?.id;
+    const pathId = payload?.path_id || payload?.preferred_path_id || payload?.route_id;
+    const profile = ['driving', 'walking', 'cycling', 'motorbike', 'scooter', 'tuktuk'].includes(String(payload?.profile))
+      ? (payload.profile as 'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk')
+      : undefined;
+    const mode = String(payload?.mode || '').toLowerCase() === 'mapbox' ? 'mapbox' : 'silent';
+    let product: Product | null = null;
+    if (productId) {
+      try {
+        const raw = await getProduct(String(productId));
+        product = normalizeProduct(raw, sellerId);
+      } catch {}
+    }
+    if (!product && sellerId) {
+      try {
+        const items = await getShopProducts(String(sellerId));
+        product = normalizeProduct(items?.[0], sellerId);
+      } catch {}
+    }
+    if (!product) {
+      setToast('Unable to open navigation for this seller yet.');
+      return;
+    }
+    setSelectedProduct(product);
+    setNavigationPreset({
+      pathId,
+      profile,
+      mode,
+      autoOpen: true
+    });
+    setIsProductDetailOpen(true);
   };
 
   const handleAddToBag = async (product: Product) => {
@@ -364,6 +503,7 @@ export default function App() {
                 onAddToBag={handleAddToBag}
                 onAddToComparison={handleAddToComparison}
                 onOpenSeller={handleShopClick}
+                onStartNavigation={handleStartNavigation}
                 onOpenRewards={() => setView('rewards')}
                 onOpenProfile={() => {
                   setSelectedSellerId(null);
@@ -691,7 +831,10 @@ export default function App() {
           {isProductDetailOpen && selectedProduct && (
             <ProductDetail 
               product={selectedProduct} 
-              onClose={() => setIsProductDetailOpen(false)}
+              onClose={() => {
+                setIsProductDetailOpen(false);
+                setNavigationPreset(null);
+              }}
               onChatOpen={(product) => {
                 setIsProductDetailOpen(false);
                 handleChatOpen(product);
@@ -701,6 +844,10 @@ export default function App() {
               isCompared={comparisonList.some(p => p.id === selectedProduct.id)}
               onBuyNow={handleBuyNow}
               onAddToBag={handleAddToBag}
+              initialShowMap={Boolean(navigationPreset?.autoOpen)}
+              initialPreferredPathId={navigationPreset?.pathId || null}
+              initialRouteProfile={navigationPreset?.profile}
+              initialNavigationMode={navigationPreset?.mode}
             />
           )}
         </AnimatePresence>
@@ -713,6 +860,7 @@ export default function App() {
             try {
               localStorage.setItem('soko:onboarding_completed', 'true');
             } catch {}
+            completeOnboarding().catch(() => {});
             window.dispatchEvent(new Event('soko:onboarding-complete'));
             setToast('📸 Ali photo’d Sugar. Beat him? +2⭐');
           }}
@@ -726,32 +874,57 @@ export default function App() {
         </div>
       )}
 
-      {view === 'assistant' && showPostOnboardingNudges && (
+      {(topAlerts.length > 0 || updateReady || offlineReady) && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[90] w-[min(92vw,520px)] space-y-2">
-          <div className="bg-blue-600 text-white px-4 py-3 rounded-2xl text-[10px] font-bold shadow-xl flex items-center justify-between">
-            <span>2/50⭐ → Photo now → Free Pro</span>
+          {updateReady && (
             <button
               onClick={() => {
-                localStorage.setItem('soko:onboarding_nudges', 'dismissed');
-                setShowPostOnboardingNudges(false);
+                const updater = (window as any).__soko_updateSW;
+                if (typeof updater === 'function') {
+                  updater(true);
+                }
+                setUpdateReady(false);
+                setPendingUpdateReload(true);
+                setToast('Updating in background…');
               }}
-              className="text-white/70 hover:text-white"
+              className="w-full text-left bg-zinc-900 text-white px-4 py-3 rounded-2xl text-[10px] font-bold shadow-xl flex items-center justify-between gap-3"
             >
-              ✕
+              <span>Update available. Tap to download the latest.</span>
+              <span className="px-3 py-1.5 rounded-full bg-white/10 text-white">Update</span>
             </button>
-          </div>
-          <div className="bg-white text-zinc-900 px-4 py-3 rounded-2xl text-[10px] font-bold shadow-xl border border-blue-100 flex items-center justify-between">
-            <span>WhatsApp Sync: Dashboard updated! Check #3 rank</span>
-            <button
-              onClick={() => {
-                localStorage.setItem('soko:onboarding_nudges', 'dismissed');
-                setShowPostOnboardingNudges(false);
-              }}
-              className="text-zinc-400 hover:text-zinc-800"
+          )}
+          {offlineReady && !updateReady && (
+            <div className="bg-emerald-600 text-white px-4 py-2 rounded-2xl text-[10px] font-bold shadow-xl flex items-center justify-between gap-3">
+              <span>App ready for offline use.</span>
+              <button
+                onClick={() => setOfflineReady(false)}
+                className="text-white/80 hover:text-white"
+                aria-label="Dismiss offline ready"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {topAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="bg-white text-zinc-900 px-4 py-3 rounded-2xl text-[10px] font-bold shadow-xl border border-zinc-100 flex items-center justify-between gap-3"
             >
-              ✕
-            </button>
-          </div>
+              <span className="truncate">
+                {alert.title || alert.body || 'New update'}
+              </span>
+              <button
+                onClick={() => {
+                  markNotificationRead(alert.id).catch(() => {});
+                  setTopAlerts((prev) => prev.filter((item) => item.id !== alert.id));
+                }}
+                className="text-zinc-400 hover:text-zinc-800"
+                aria-label="Dismiss notification"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

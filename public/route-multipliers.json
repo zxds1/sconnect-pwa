@@ -1,0 +1,27 @@
+{
+  "profile": {
+    "driving": 1,
+    "walking": 1,
+    "cycling": 1,
+    "motorbike": 0.85,
+    "scooter": 0.95,
+    "tuktuk": 1.15
+  },
+  "city": {
+    "mombasa": { "motorbike": 0.82, "scooter": 0.92, "tuktuk": 1.08, "driving": 1, "cycling": 1.02, "walking": 1 },
+    "nairobi": { "motorbike": 0.9, "scooter": 1, "tuktuk": 1.2, "driving": 1.05, "cycling": 1.08, "walking": 1.03 },
+    "kisumu": { "motorbike": 0.88, "scooter": 0.98, "tuktuk": 1.12, "driving": 1, "cycling": 1.03, "walking": 1 },
+    "nakuru": { "motorbike": 0.87, "scooter": 0.97, "tuktuk": 1.13, "driving": 1.02, "cycling": 1.04, "walking": 1.01 },
+    "default": { "motorbike": 0.85, "scooter": 0.95, "tuktuk": 1.15, "driving": 1, "cycling": 1, "walking": 1 }
+  },
+  "roadClass": {
+    "motorway": 0.95,
+    "trunk": 0.98,
+    "primary": 1,
+    "secondary": 1.03,
+    "tertiary": 1.06,
+    "service": 1.12,
+    "residential": 1.08,
+    "track": 1.2
+  }
+}

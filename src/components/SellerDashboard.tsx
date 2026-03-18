@@ -8,6 +8,8 @@ import {
   ShieldCheck, Clock, MessageSquare, Heart, Phone, ImageIcon,
   LineChart as LineChartIcon, Zap, Send, Search as SearchIcon
 } from 'lucide-react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { MARKETING_SPEND, ORDERS, PRODUCTS, SELLERS } from '../mockData';
 import { Product, Seller } from '../types';
 import { 
@@ -16,6 +18,7 @@ import {
   LineChart, Line, Legend
 } from 'recharts';
 import { ListingOptimizer } from './ListingOptimizer';
+import { createThread, listMessages, streamThreadMessage } from '../lib/assistantApi';
 import {
   getSellerBuyerInsight,
   getSellerFunnel,
@@ -31,6 +34,7 @@ import {
   type KPISummary,
   type MarketBenchmarks
 } from '../lib/sellerAnalyticsApi';
+import { buildWsUrl } from '../lib/realtime';
 import {
   activateFeatured,
   createFanOffer,
@@ -76,12 +80,19 @@ import {
   getSellerOnboardingState,
   getSellerVerificationStatus,
   listSellerTutorials,
+  setSellerShopType,
+  connectOnlineStore,
+  bulkProductMappings,
+  getConnectionStatus,
+  triggerConnectionSync,
   recordSellerOnboardingEvent,
   refreshSellerShareLink,
   requestSellerVerification,
   type OnboardingState as SellerOnboardingState,
   type Tutorial as SellerTutorial,
-  type VerificationStatus as SellerVerificationStatus
+  type VerificationStatus as SellerVerificationStatus,
+  type OnlineConnectRequest,
+  type ProductMappingItem
 } from '../lib/sellerOnboardingApi';
 import {
   bulkImportSellerProducts,
@@ -102,6 +113,9 @@ import {
 } from '../lib/sellerProductsApi';
 import { listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { addPathLandmark, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, type PathPoint, type RecordedPath } from '../lib/searchApi';
+import { getOpsConfig, setOpsConfig } from '../lib/opsConfigApi';
+import { getDefaultRouteMultipliers, loadRouteMultipliers, type RouteMultipliersConfig } from '../lib/routeMultipliers';
 import {
   getSellerProfile,
   updateSellerProfile,
@@ -146,6 +160,25 @@ const spreadSeries = (total: number, weights: number[]) =>
 
 const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
 
+const haversineDistance = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) * 1000;
+};
+
+const AGENT_STATUS_LABELS: Record<string, string> = {
+  orchestrator: 'Orchestrator: Coordinating…',
+  discovery: 'Discovery: Comparing offers…',
+  negotiation: 'Negotiation: Checking deals…',
+  purchase: 'Purchase: Optimizing checkout…',
+  insight: 'Insight: Pulling market signals…',
+  routing: 'Routing: Comparing routes…'
+};
+
 const projectionToSeries = (forecast?: Record<string, any>, fallback: Array<{ name: string; revenue: number }> = []) => {
   if (!forecast) return fallback;
   const series = forecast.series || forecast.points || forecast.data;
@@ -158,6 +191,90 @@ const projectionToSeries = (forecast?: Record<string, any>, fallback: Array<{ na
       .filter((item) => item.name);
   }
   return fallback;
+};
+
+const extractUrls = (text?: string) => {
+  if (!text) return [];
+  const matches = text.match(/https?:\/\/[^\s]+/g) || [];
+  return matches.map((url) => url.replace(/[),.]+$/, ''));
+};
+
+const guessMediaType = (url: string): 'image' | 'video' | 'audio' | 'file' => {
+  const lower = url.toLowerCase();
+  if (lower.match(/\.(png|jpe?g|gif|webp|bmp|svg)$/)) return 'image';
+  if (lower.match(/\.(mp4|webm|mov|m4v|avi)$/)) return 'video';
+  if (lower.match(/\.(mp3|wav|m4a|aac|ogg)$/)) return 'audio';
+  return 'file';
+};
+
+const mediaFromMetadata = (metadata?: Record<string, any>) => {
+  const media: Array<{ url: string; type: 'image' | 'video' | 'audio' | 'file' }> = [];
+  const candidates = [
+    metadata?.media_url,
+    metadata?.file_url,
+    metadata?.image_url,
+    metadata?.video_url,
+    metadata?.audio_url
+  ].filter(Boolean) as string[];
+  for (const url of candidates) {
+    media.push({ url, type: guessMediaType(url) });
+  }
+  return media;
+};
+
+const renderMedia = (metadata?: Record<string, any>, content?: string) => {
+  const media = mediaFromMetadata(metadata);
+  const contentUrls = extractUrls(content);
+  for (const url of contentUrls) {
+    media.push({ url, type: guessMediaType(url) });
+  }
+  const deduped = media.filter(
+    (item, idx) => media.findIndex((m) => m.url === item.url) === idx
+  );
+  if (!deduped.length) return null;
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-2">
+      {deduped.map((item, idx) => {
+        if (item.type === 'image') {
+          return (
+            <img
+              key={`${item.url}-${idx}`}
+              src={item.url}
+              alt="assistant response"
+              className="rounded-2xl border border-white/10 max-h-56 object-cover"
+              loading="lazy"
+            />
+          );
+        }
+        if (item.type === 'video') {
+          return (
+            <video
+              key={`${item.url}-${idx}`}
+              src={item.url}
+              controls
+              className="rounded-2xl border border-white/10 max-h-56 w-full"
+            />
+          );
+        }
+        if (item.type === 'audio') {
+          return (
+            <audio key={`${item.url}-${idx}`} src={item.url} controls className="w-full" />
+          );
+        }
+        return (
+          <a
+            key={`${item.url}-${idx}`}
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[11px] text-indigo-200 underline"
+          >
+            Open attachment
+          </a>
+        );
+      })}
+    </div>
+  );
 };
 
 const formatRelativeTime = (date: Date, now = new Date()) => {
@@ -304,6 +421,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [rfqLoading, setRfqLoading] = useState(false);
   const [rfqStatus, setRfqStatus] = useState<string | null>(null);
   const [rfqLastUpdated, setRfqLastUpdated] = useState<Date | null>(null);
+  const rfqThreadsRef = useRef<RFQThread[]>([]);
   const [sellerFilters, setSellerFilters] = useState({
     category: '',
     maxDistance: 50,
@@ -333,6 +451,35 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [analyticsMarket, setAnalyticsMarket] = useState<MarketBenchmarks | null>(null);
   const [analyticsAnomalies, setAnalyticsAnomalies] = useState<Anomaly[]>([]);
   const [analyticsStatus, setAnalyticsStatus] = useState<string | null>(null);
+  const heatmapContainerRef = useRef<HTMLDivElement | null>(null);
+  const heatmapMapRef = useRef<mapboxgl.Map | null>(null);
+  const heatmapReadyRef = useRef(false);
+  const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
+    ? (import.meta as any).env.VITE_MAPBOX_TOKEN
+    : '';
+  const [showPathRecorder, setShowPathRecorder] = useState(false);
+  const [pathRecordingActive, setPathRecordingActive] = useState(false);
+  const [pathRecordingPoints, setPathRecordingPoints] = useState<PathPoint[]>([]);
+  const [pathRecordingDistance, setPathRecordingDistance] = useState(0);
+  const [pathRecordingStart, setPathRecordingStart] = useState<number | null>(null);
+  const [pathRecordingPaused, setPathRecordingPaused] = useState(false);
+  const [pathRecordingName, setPathRecordingName] = useState('');
+  const [pathRecordingShared, setPathRecordingShared] = useState(true);
+  const [pathRecordingPrimary, setPathRecordingPrimary] = useState(true);
+  const [pathRecordingStartLabel, setPathRecordingStartLabel] = useState('');
+  const [pathRecordingEndLabel, setPathRecordingEndLabel] = useState('');
+  const [pathLandmarkDrafts, setPathLandmarkDrafts] = useState<Array<{ label: string; type: string; imageUrl?: string; lat?: number; lng?: number; sequence?: number; uploading?: boolean }>>([]);
+  const [pathRecordingStatus, setPathRecordingStatus] = useState<string | null>(null);
+  const [sellerPaths, setSellerPaths] = useState<RecordedPath[]>([]);
+  const [sellerPathsStatus, setSellerPathsStatus] = useState<string | null>(null);
+  const [routeConfigDraft, setRouteConfigDraft] = useState<string>('');
+  const [routeConfigStatus, setRouteConfigStatus] = useState<string | null>(null);
+  const [routeConfigSaving, setRouteConfigSaving] = useState(false);
+  const [routeConfigUpdatedAt, setRouteConfigUpdatedAt] = useState<string | null>(null);
+  const landmarkDragIndexRef = useRef<number | null>(null);
+  const pathRecorderContainerRef = useRef<HTMLDivElement | null>(null);
+  const pathRecorderMapRef = useRef<mapboxgl.Map | null>(null);
+  const pathRecordingWatchIdRef = useRef<number | null>(null);
   const [, setBroadcasts] = useState<Broadcast[]>([]);
   const [broadcastMessage, setBroadcastMessage] = useState('Leo Unga 2kg KES 175 • Sukari 1kg KES 150 • Maziwa fresh!');
   const [commsStatus, setCommsStatus] = useState<string | null>(null);
@@ -347,12 +494,100 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [onboardingEligible, setOnboardingEligible] = useState<boolean | null>(null);
   const [onboardingTutorials, setOnboardingTutorials] = useState<SellerTutorial[]>([]);
   const [onboardingStatus, setOnboardingStatus] = useState<string | null>(null);
+  const [shopType, setShopType] = useState('physical');
+  const [onlineConnectForm, setOnlineConnectForm] = useState<OnlineConnectRequest>({
+    platform: 'shopify',
+    shop_domain: '',
+    api_base_url: '',
+    api_key: '',
+    api_secret: '',
+    webhook_secret: '',
+    webhook_url: '',
+    products_endpoint: '',
+    orders_endpoint: '',
+    demand_endpoint: '',
+    csv_import_url: '',
+    auth_code: '',
+    scopes: ''
+  });
+  const [onlineConnectionStatus, setOnlineConnectionStatus] = useState<string | null>(null);
+  const [onlineConnectionId, setOnlineConnectionId] = useState<string | null>(null);
+  const [onlineAuthUrl, setOnlineAuthUrl] = useState<string | null>(null);
+  const [mappingItems, setMappingItems] = useState<ProductMappingItem[]>([]);
+  const [mappingStatus, setMappingStatus] = useState<string | null>(null);
+  const [mappingSyncing, setMappingSyncing] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<SellerVerificationStatus | null>(null);
   const [productsStatus, setProductsStatus] = useState<string | null>(null);
   const [productsLoading, setProductsLoading] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
   const [productInsights, setProductInsights] = useState<SellerProductInsight[]>([]);
   const [productLowStock, setProductLowStock] = useState<SellerLowStock[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    loadRouteMultipliers()
+      .then((config) => {
+        if (!active) return;
+        setRouteConfigDraft(JSON.stringify(config, null, 2));
+      })
+      .catch(() => {
+        if (!active) return;
+        setRouteConfigDraft(JSON.stringify(getDefaultRouteMultipliers(), null, 2));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const parseRouteConfigDraft = () => {
+    const raw = routeConfigDraft.trim();
+    if (!raw) {
+      throw new Error('Route config cannot be empty.');
+    }
+    return JSON.parse(raw) as RouteMultipliersConfig;
+  };
+
+  const handleSaveRouteConfigLocal = () => {
+    try {
+      const parsed = parseRouteConfigDraft();
+      localStorage.setItem('soko:route_multipliers', JSON.stringify(parsed));
+      setRouteConfigStatus('Saved locally. Routes will use this immediately.');
+    } catch (err: any) {
+      setRouteConfigStatus(err?.message || 'Invalid JSON config.');
+    }
+  };
+
+  const handleLoadRouteConfigFromOps = async () => {
+    setRouteConfigStatus('Loading from ops...');
+    try {
+      const resp = await getOpsConfig('route_multipliers');
+      if (resp?.value) {
+        setRouteConfigDraft(JSON.stringify(resp.value, null, 2));
+        setRouteConfigUpdatedAt(resp.updated_at || null);
+        setRouteConfigStatus('Loaded from ops config.');
+        return;
+      }
+      setRouteConfigStatus('No ops config found yet.');
+    } catch (err: any) {
+      setRouteConfigStatus(err?.message || 'Unable to load ops config.');
+    }
+  };
+
+  const handlePublishRouteConfig = async () => {
+    setRouteConfigSaving(true);
+    setRouteConfigStatus(null);
+    try {
+      const parsed = parseRouteConfigDraft();
+      const resp = await setOpsConfig('route_multipliers', parsed);
+      setRouteConfigUpdatedAt(resp.updated_at || null);
+      localStorage.setItem('soko:route_multipliers', JSON.stringify(parsed));
+      setRouteConfigStatus('Published to ops config.');
+    } catch (err: any) {
+      setRouteConfigStatus(err?.message || 'Unable to publish config.');
+    } finally {
+      setRouteConfigSaving(false);
+    }
+  };
   const [productMediaByProductId, setProductMediaByProductId] = useState<Record<string, ProductMedia[]>>({});
   const [showMediaDrawer, setShowMediaDrawer] = useState(false);
   const [mediaDrawerProduct, setMediaDrawerProduct] = useState<Product | null>(null);
@@ -376,6 +611,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [growthReferrals, setGrowthReferrals] = useState<Record<string, any> | null>(null);
   const [growthStatus, setGrowthStatus] = useState<string | null>(null);
   const [bulkGroups, setBulkGroups] = useState<Array<{ id?: string; title?: string; product_category?: string; target_qty?: number; status?: string }>>([]);
+  const [aiInsightMessage, setAiInsightMessage] = useState('');
+  const [aiInsightMeta, setAiInsightMeta] = useState<Record<string, any> | null>(null);
+  const [aiInsightLoading, setAiInsightLoading] = useState(false);
+  const [aiInsightError, setAiInsightError] = useState<string | null>(null);
+  const [aiInsightThreadId, setAiInsightThreadId] = useState<string | null>(null);
+  const aiInsightContextRef = useRef<string>('');
+  const aiInsightInFlightRef = useRef(false);
 
   useEffect(() => {
     const isVerified = verifiedSellerIds.includes(seller.id);
@@ -415,11 +657,238 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     };
   }, []);
 
+  const runAiInsight = React.useCallback(async (force = false) => {
+    if (!seller?.id) return;
+    if (!analyticsSummary && !analyticsMarket && !analyticsInventory && !growthCashflow && !growthLoan) return;
+    if (aiInsightInFlightRef.current) return;
+    const context = {
+      revenue: analyticsSummary?.revenue,
+      orders: analyticsSummary?.orders,
+      margin: analyticsSummary?.margin,
+      inventory_value: analyticsInventory?.inventory_value,
+      low_stock: productLowStock.length,
+      price_position: analyticsMarket?.price_position,
+      market_share: analyticsMarket?.market_share,
+      cashflow: growthCashflow?.summary || growthCashflow,
+      loan_eligibility: growthLoan?.eligible
+    };
+    const contextKey = JSON.stringify(context);
+    if (!force && aiInsightContextRef.current === contextKey && aiInsightMessage) return;
+    aiInsightContextRef.current = contextKey;
+    aiInsightInFlightRef.current = true;
+    let active = true;
+    setAiInsightLoading(true);
+    setAiInsightError(null);
+    try {
+      let threadId = aiInsightThreadId;
+      if (!threadId) {
+        const thread = await createThread({ title: `Seller Dashboard Insights ${seller.id}` });
+        threadId = thread?.id ?? null;
+        if (active) setAiInsightThreadId(threadId);
+      }
+      if (!threadId) return;
+      const prompt = `Provide 3 strategic insights for this seller dashboard. Prioritize actions that increase sales or reduce stock risk. Use tools if needed. Context: ${contextKey}`;
+      const aiText = await streamThreadMessage(threadId, {
+        content: prompt,
+        metadata: { mode: 'seller_dashboard_insights', seller_id: seller.id }
+      });
+      if (!active) return;
+      setAiInsightMessage(aiText?.trim() || '');
+      const aiMessages = await listMessages(threadId);
+      const lastAssistant = [...aiMessages].reverse().find((msg) => msg.role === 'assistant');
+      if (lastAssistant?.metadata) {
+        setAiInsightMeta(lastAssistant.metadata);
+      }
+    } catch (err: any) {
+      if (active) setAiInsightError(err?.message || 'AI insights unavailable.');
+    } finally {
+      if (active) setAiInsightLoading(false);
+      aiInsightInFlightRef.current = false;
+    }
+  }, [analyticsInventory, analyticsMarket, analyticsSummary, aiInsightMessage, aiInsightThreadId, growthCashflow, growthLoan, productLowStock.length, seller?.id]);
+
+  useEffect(() => {
+    runAiInsight(false);
+  }, [runAiInsight]);
+
+  const beginPathRecordingWatch = () => {
+    if (!navigator.geolocation) {
+      setPathRecordingStatus('Geolocation not supported.');
+      return;
+    }
+    if (pathRecordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(pathRecordingWatchIdRef.current);
+    }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, recorded_at: new Date().toISOString() };
+        setPathRecordingPoints((prev) => {
+          if (prev.length > 0) {
+            const last = prev[prev.length - 1];
+            const segment = haversineDistance({ lat: last.lat, lng: last.lng }, { lat: point.lat, lng: point.lng });
+            setPathRecordingDistance((dist) => dist + segment);
+          }
+          return [...prev, point];
+        });
+        if (pathRecorderMapRef.current) {
+          pathRecorderMapRef.current.easeTo({ center: [point.lng, point.lat], duration: 500 });
+        }
+      },
+      () => {
+        setPathRecordingStatus('Unable to read GPS location.');
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    pathRecordingWatchIdRef.current = id;
+  };
+
+  const startPathRecording = () => {
+    setPathRecordingPoints([]);
+    setPathRecordingDistance(0);
+    setPathRecordingStart(Date.now());
+    setPathRecordingActive(true);
+    setPathRecordingPaused(false);
+    setPathRecordingStatus(null);
+    beginPathRecordingWatch();
+  };
+
+  const pausePathRecording = () => {
+    if (pathRecordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(pathRecordingWatchIdRef.current);
+      pathRecordingWatchIdRef.current = null;
+    }
+    setPathRecordingPaused(true);
+  };
+
+  const resumePathRecording = () => {
+    setPathRecordingPaused(false);
+    beginPathRecordingWatch();
+  };
+
+  const stopPathRecording = () => {
+    if (pathRecordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(pathRecordingWatchIdRef.current);
+      pathRecordingWatchIdRef.current = null;
+    }
+    setPathRecordingPaused(false);
+    setPathRecordingActive(false);
+  };
+
+  const addLandmarkDraft = () => {
+    const lastPoint = pathRecordingPoints[pathRecordingPoints.length - 1];
+    setPathLandmarkDrafts(prev => ([
+      ...prev,
+      {
+        label: '',
+        type: 'landmark',
+        lat: lastPoint?.lat,
+        lng: lastPoint?.lng,
+        sequence: prev.length + 1
+      }
+    ]));
+  };
+
+  const handleLandmarkFile = async (index: number, file?: File | null) => {
+    if (!file) return;
+    setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: true } : item));
+    try {
+      const url = await uploadMediaFile(file, 'path_landmark');
+      setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, imageUrl: url, uploading: false } : item));
+    } catch {
+      setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: false } : item));
+    }
+  };
+
+  const savePathRecording = async () => {
+    if (pathRecordingPoints.length < 2) {
+      setPathRecordingStatus('Record at least two points.');
+      return;
+    }
+    try {
+      const saved = await recordPath({
+        name: pathRecordingName || `${seller.name} path`,
+        shared: pathRecordingShared,
+        seller_id: seller.id,
+        start_label: pathRecordingStartLabel,
+        end_label: pathRecordingEndLabel,
+        points: pathRecordingPoints
+      });
+      if (saved?.id) {
+        precomputePathWaypoints(saved.id).catch(() => {});
+        if (pathRecordingPrimary) {
+          setPrimaryPath(saved.id, true).catch(() => {});
+        }
+        if (pathLandmarkDrafts.length > 0) {
+          await Promise.all(
+            pathLandmarkDrafts
+              .filter((item) => item.label && item.imageUrl)
+              .map((item, idx) =>
+                addPathLandmark(saved.id, {
+                  label: item.label,
+                  type: item.type,
+                  image_url: item.imageUrl!,
+                  lat: item.lat,
+                  lng: item.lng,
+                  sequence: idx + 1
+                })
+              )
+          );
+        }
+        listSellerPaths(seller.id, true)
+          .then((items) => setSellerPaths(items))
+          .catch(() => {});
+        recordSellerOnboardingEvent({ step: 'shop_path', status: 'completed' }).catch(() => {});
+      }
+      setPathRecordingStatus('Path saved.');
+      setPathRecordingName('');
+      setPathRecordingShared(true);
+      setPathRecordingPrimary(true);
+      setPathRecordingStartLabel('');
+      setPathRecordingEndLabel('');
+      setPathLandmarkDrafts([]);
+      setPathRecordingPoints([]);
+      setPathRecordingDistance(0);
+      setPathRecordingStart(null);
+      setPathRecordingActive(false);
+      setShowPathRecorder(false);
+    } catch (err: any) {
+      setPathRecordingStatus(err?.message || 'Unable to save path.');
+    }
+  };
+
+  useEffect(() => {
+    if (!showPathRecorder) return;
+    let ignore = false;
+    setSellerPathsStatus(null);
+    listSellerPaths(seller.id, true)
+      .then((items) => {
+        if (!ignore) setSellerPaths(items);
+      })
+      .catch((err: any) => {
+        if (!ignore) setSellerPathsStatus(err?.message || 'Unable to load paths.');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [seller.id, showPathRecorder]);
+
+  const handleSetPrimaryPath = async (pathId: string) => {
+    setSellerPathsStatus(null);
+    try {
+      await setPrimaryPath(pathId, true);
+      const items = await listSellerPaths(seller.id, true);
+      setSellerPaths(items);
+    } catch (err: any) {
+      setSellerPathsStatus(err?.message || 'Unable to set primary path.');
+    }
+  };
+
   useEffect(() => {
     if (activeTab !== 'analytics' && activeTab !== 'marketing') return;
-    let ignore = false;
-    const loadAnalytics = async () => {
-      setAnalyticsStatus(null);
+    let cancelled = false;
+    let ws: WebSocket | null = null;
+
+    const loadOnce = async () => {
       try {
         const [summary, funnel, inventory, buyers, market, anomalies] = await Promise.all([
           getSellerKpiSummary(),
@@ -429,7 +898,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           getSellerMarketBenchmarks(),
           listSellerAnomalies()
         ]);
-        if (ignore) return;
+        if (cancelled) return;
         setAnalyticsSummary(summary);
         setAnalyticsFunnel(funnel);
         setAnalyticsInventory(inventory);
@@ -437,41 +906,117 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setAnalyticsMarket(market);
         setAnalyticsAnomalies(anomalies);
       } catch (err: any) {
-        if (!ignore) setAnalyticsStatus(err?.message || 'Unable to load analytics.');
+        if (!cancelled) setAnalyticsStatus(err?.message || 'Unable to load analytics.');
       }
     };
-    loadAnalytics();
+
+    const connect = () => {
+      setAnalyticsStatus(null);
+      ws = new WebSocket(buildWsUrl('/v1/analytics/ws'));
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type !== 'analytics:update') return;
+          const data = payload?.data || {};
+          setAnalyticsSummary(data.dashboard ?? null);
+          setAnalyticsFunnel(data.funnel ?? null);
+          setAnalyticsInventory(data.inventory ?? null);
+          setAnalyticsBuyers(data.buyers ?? null);
+          setAnalyticsMarket(data.market ?? null);
+          setAnalyticsAnomalies(Array.isArray(data.anomalies) ? data.anomalies : []);
+        } catch {
+          // Ignore parse errors.
+        }
+      };
+      ws.onerror = () => {
+        if (cancelled) return;
+        setAnalyticsStatus('Live analytics connection failed. Showing last known data.');
+        loadOnce();
+      };
+      ws.onclose = () => {
+        if (cancelled) return;
+        setAnalyticsStatus('Live analytics disconnected.');
+      };
+    };
+
+    loadOnce();
+    connect();
+
     return () => {
-      ignore = true;
+      cancelled = true;
+      if (ws) ws.close();
     };
   }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== 'suppliers') return;
-    if (rfqThreadsRemote.length === 0) return;
     let cancelled = false;
-    const poll = async () => {
-      try {
-        const { responsesById, comparisonsById } = await buildRfqUpdates(rfqThreadsRemote);
+    let ws: WebSocket | null = null;
+
+    const connect = () => {
+      ws = new WebSocket(buildWsUrl('/v1/rfq/ws'));
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type !== 'rfq:update') return;
+          const data = payload?.data || {};
+          const threads = Array.isArray(data.threads) ? data.threads : [];
+          const responses = data.responses && typeof data.responses === 'object' ? data.responses : {};
+          const comparisons = data.comparisons && typeof data.comparisons === 'object' ? data.comparisons : {};
+          if (threads.length) {
+            setRfqThreadsRemote(threads);
+          }
+          setRfqResponsesById(responses);
+          setRfqComparisonById(comparisons);
+          setRfqLastUpdated(new Date());
+        } catch {
+          // Ignore parse errors.
+        }
+      };
+      ws.onerror = () => {
         if (cancelled) return;
-        setRfqResponsesById(responsesById);
-        setRfqComparisonById(comparisonsById);
-        setRfqLastUpdated(new Date());
-      } catch {
-        // Ignore polling errors.
-      }
+        const threads = rfqThreadsRef.current;
+        if (threads.length) {
+          buildRfqUpdates(threads)
+            .then(({ responsesById, comparisonsById }) => {
+              if (cancelled) return;
+              setRfqResponsesById(responsesById);
+              setRfqComparisonById(comparisonsById);
+              setRfqLastUpdated(new Date());
+            })
+            .catch(() => {});
+        }
+      };
     };
-    poll();
-    const interval = window.setInterval(poll, 20000);
+
+    connect();
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (ws) ws.close();
     };
-  }, [activeTab, rfqThreadsRemote]);
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== 'marketing') return;
     let ignore = false;
+    let ws: WebSocket | null = null;
+
+    const normalizeCampaigns = (items: ApiCampaign[]) =>
+      items.map((c: ApiCampaign) => {
+        const targeting = (c.targeting_rules || {}) as Record<string, any>;
+        const durationDays = Number(targeting.duration_days ?? 7);
+        return {
+          id: c.id,
+          name: c.name || 'Campaign',
+          objective: (c.objective as 'reach' | 'sales' | 'favorites') || 'sales',
+          budget: Number(c.budget_total || 0),
+          durationDays: Number.isFinite(durationDays) ? durationDays : 7,
+          productId: c.product_id || '',
+          channel: (c.channel as 'search' | 'feed' | 'messages') || 'search',
+          status: (c.status as 'scheduled' | 'active' | 'completed' | 'paused' | 'draft') || 'draft',
+        };
+      });
+
     const loadMarketing = async () => {
       setCampaignStatus(null);
       setMarketingStatus(null);
@@ -486,21 +1031,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           listCategorySpotlights()
         ]);
         if (ignore) return;
-        const normalized = items.map((c: ApiCampaign) => {
-          const targeting = (c.targeting_rules || {}) as Record<string, any>;
-          const durationDays = Number(targeting.duration_days ?? 7);
-          return {
-            id: c.id,
-            name: c.name || 'Campaign',
-            objective: (c.objective as 'reach' | 'sales' | 'favorites') || 'sales',
-            budget: Number(c.budget_total || 0),
-            durationDays: Number.isFinite(durationDays) ? durationDays : 7,
-            productId: c.product_id || '',
-            channel: (c.channel as 'search' | 'feed' | 'messages') || 'search',
-            status: (c.status as 'scheduled' | 'active' | 'completed' | 'paused' | 'draft') || 'draft',
-          };
-        });
-        setCampaigns(normalized);
+        setCampaigns(normalizeCampaigns(items));
         setMarketingKpis(kpis);
         setMarketingHotspots(hotspots);
         setMarketingStockAlerts(stockAlerts);
@@ -512,9 +1043,42 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         if (!ignore) setCampaignLoading(false);
       }
     };
+
+    const connect = () => {
+      ws = new WebSocket(buildWsUrl('/v1/marketing/ws'));
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type !== 'marketing:update') return;
+          const data = payload?.data || {};
+          setCampaigns(normalizeCampaigns(Array.isArray(data.campaigns) ? data.campaigns : []));
+          setMarketingKpis(data.kpis ?? null);
+          setMarketingHotspots(Array.isArray(data.hotspots) ? data.hotspots : []);
+          setMarketingStockAlerts(Array.isArray(data.stock_alerts) ? data.stock_alerts : []);
+          setMarketingFanOffers(Array.isArray(data.fan_offers) ? data.fan_offers : []);
+          setMarketingCategorySpotlights(Array.isArray(data.category_spotlight) ? data.category_spotlight : []);
+          setCampaignLoading(false);
+        } catch {
+          // ignore parse errors
+        }
+      };
+      ws.onerror = () => {
+        if (ignore) return;
+        setMarketingStatus('Live marketing connection failed. Showing last known data.');
+        loadMarketing();
+      };
+      ws.onclose = () => {
+        if (ignore) return;
+        setMarketingStatus('Live marketing disconnected.');
+      };
+    };
+
     loadMarketing();
+    connect();
+
     return () => {
       ignore = true;
+      if (ws) ws.close();
     };
   }, [activeTab]);
 
@@ -535,6 +1099,34 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setOnboardingEligible(eligibility?.eligible ?? null);
         setOnboardingTutorials(tutorials);
         setVerificationStatus(verification);
+        if (state?.shop_type) setShopType(state.shop_type);
+        if (state?.connection?.id) {
+          setOnlineConnectionId(state.connection.id);
+          if (state.connection.connection_status) {
+            setOnlineConnectionStatus(`Status: ${state.connection.connection_status}`);
+          }
+          setOnlineConnectForm(prev => ({
+            ...prev,
+            platform: state.connection?.platform || prev.platform,
+            api_base_url: state.connection?.api_base_url || prev.api_base_url,
+            shop_domain: state.connection?.shop_domain || prev.shop_domain,
+            products_endpoint: state.connection?.products_endpoint || prev.products_endpoint,
+            orders_endpoint: state.connection?.orders_endpoint || prev.orders_endpoint,
+            demand_endpoint: state.connection?.demand_endpoint || prev.demand_endpoint,
+            csv_import_url: state.connection?.csv_import_url || prev.csv_import_url,
+            webhook_url: state.connection?.webhook_url || prev.webhook_url,
+            scopes: state.connection?.scopes || prev.scopes
+          }));
+        }
+        if (!state?.shop_type) {
+          try {
+            const stored = localStorage.getItem('soko:shop_type');
+            if (stored) {
+              setShopType(stored);
+              await setSellerShopType({ shop_type: stored });
+            }
+          } catch {}
+        }
       } catch (err: any) {
         if (!ignore) setOnboardingStatus(err?.message || 'Unable to load onboarding status.');
       }
@@ -544,6 +1136,45 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       ignore = true;
     };
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'onboarding') return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const shop = params.get('shop');
+    if (code) {
+      setOnlineConnectForm(prev => ({
+        ...prev,
+        platform: 'shopify',
+        auth_code: code,
+        shop_domain: shop || prev.shop_domain
+      }));
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    setOnlineAuthUrl(null);
+    setOnlineConnectForm(prev => {
+      const next = { ...prev };
+      if ((onlinePlatform === 'custom' || onlinePlatform === 'marketplace') && !next.products_endpoint) {
+        next.products_endpoint = '/api/products';
+      }
+      if ((onlinePlatform === 'custom' || onlinePlatform === 'marketplace') && !next.orders_endpoint) {
+        next.orders_endpoint = '/api/orders';
+      }
+      if (onlinePlatform === 'opencart' && !next.products_endpoint) {
+        next.products_endpoint = '/api/products';
+      }
+      if (onlinePlatform === 'opencart' && !next.orders_endpoint) {
+        next.orders_endpoint = '/api/orders';
+      }
+      return next;
+    });
+  }, [onlinePlatform]);
+
+  useEffect(() => {
+    rfqThreadsRef.current = rfqThreadsRemote;
+  }, [rfqThreadsRemote]);
 
   useEffect(() => {
     if (activeTab !== 'settings') return;
@@ -797,6 +1428,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   useEffect(() => {
     if (activeTab !== 'growth') return;
     let ignore = false;
+    let ws: WebSocket | null = null;
+
     const loadGrowth = async () => {
       setGrowthStatus(null);
       try {
@@ -821,9 +1454,42 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         if (!ignore) setGrowthStatus(err?.message || 'Unable to load growth data.');
       }
     };
+
+    const connect = () => {
+      ws = new WebSocket(buildWsUrl('/v1/growth/ws'));
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type !== 'growth:update') return;
+          const data = payload?.data || {};
+          setGrowthOverview(data.overview ?? null);
+          setGrowthCashflow(data.cashflow ?? null);
+          setGrowthHealth(data.health ?? null);
+          setGrowthLoan(data.loan ?? null);
+          setGrowthProjection(data.projection ?? null);
+          setGrowthReferrals(data.referrals ?? null);
+          setBulkGroups(Array.isArray(data.groups) ? data.groups : []);
+        } catch {
+          // ignore parse errors
+        }
+      };
+      ws.onerror = () => {
+        if (ignore) return;
+        setGrowthStatus('Live growth connection failed. Showing last known data.');
+        loadGrowth();
+      };
+      ws.onclose = () => {
+        if (ignore) return;
+        setGrowthStatus('Live growth disconnected.');
+      };
+    };
+
     loadGrowth();
+    connect();
+
     return () => {
       ignore = true;
+      if (ws) ws.close();
     };
   }, [activeTab]);
 
@@ -1140,6 +1806,167 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         demand: 40 + ((i * 23) % 60)
       }))).filter(p => p.location);
 
+  useEffect(() => {
+    if (activeTab !== 'marketing') return;
+    if (!mapboxToken) return;
+    if (!heatmapContainerRef.current) return;
+    mapboxgl.accessToken = mapboxToken;
+    if (!heatmapMapRef.current) {
+      const center = demandHeatmap[0]?.location
+        ? [demandHeatmap[0].location!.lng || 39.6682, demandHeatmap[0].location!.lat || -4.0435]
+        : [39.6682, -4.0435];
+      const map = new mapboxgl.Map({
+        container: heatmapContainerRef.current,
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center,
+        zoom: 11
+      });
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.on('load', () => {
+        heatmapReadyRef.current = true;
+        if (!map.getSource('demand-heat')) {
+          map.addSource('demand-heat', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'demand-heatmap',
+            type: 'heatmap',
+            source: 'demand-heat',
+            paint: {
+              'heatmap-weight': ['interpolate', ['linear'], ['get', 'demand'], 0, 0, 100, 1],
+              'heatmap-intensity': 1.1,
+              'heatmap-radius': 22,
+              'heatmap-opacity': 0.8,
+              'heatmap-color': [
+                'interpolate',
+                ['linear'],
+                ['heatmap-density'],
+                0, 'rgba(14, 165, 233, 0)',
+                0.4, 'rgba(99, 102, 241, 0.6)',
+                0.7, 'rgba(236, 72, 153, 0.7)',
+                1, 'rgba(244, 63, 94, 0.9)'
+              ]
+            }
+          });
+          map.addLayer({
+            id: 'demand-points',
+            type: 'circle',
+            source: 'demand-heat',
+            paint: {
+              'circle-color': '#ef4444',
+              'circle-radius': 4,
+              'circle-opacity': 0.6
+            }
+          });
+        }
+      });
+      heatmapMapRef.current = map;
+    }
+    if (heatmapMapRef.current && heatmapReadyRef.current) {
+      const source = heatmapMapRef.current.getSource('demand-heat') as mapboxgl.GeoJSONSource | undefined;
+      if (source) {
+        const features = demandHeatmap.map((p) => ({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [p.location!.lng, p.location!.lat]
+          },
+          properties: {
+            demand: p.demand,
+            name: p.name
+          }
+        }));
+        source.setData({ type: 'FeatureCollection', features } as any);
+      }
+    }
+  }, [activeTab, demandHeatmap, mapboxToken]);
+
+  useEffect(() => {
+    if (!showPathRecorder) return;
+    if (!mapboxToken) return;
+    if (!pathRecorderContainerRef.current) return;
+    mapboxgl.accessToken = mapboxToken;
+    if (!pathRecorderMapRef.current) {
+      const fallback = sellerLocations[0]?.location || sellerLocations[0];
+      const centerLng = Number(fallback?.lng ?? fallback?.longitude ?? 39.6682);
+      const centerLat = Number(fallback?.lat ?? fallback?.latitude ?? -4.0435);
+      const map = new mapboxgl.Map({
+        container: pathRecorderContainerRef.current,
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [centerLng, centerLat],
+        zoom: 14
+      });
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.on('load', () => {
+        if (!map.getSource('recording-path')) {
+          map.addSource('recording-path', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'recording-path',
+            type: 'line',
+            source: 'recording-path',
+            paint: {
+              'line-color': '#ef4444',
+              'line-width': 4
+            }
+          });
+        }
+      });
+      pathRecorderMapRef.current = map;
+    }
+  }, [mapboxToken, sellerLocations, showPathRecorder]);
+
+  useEffect(() => {
+    if (!showPathRecorder || !pathRecorderMapRef.current) return;
+    const source = pathRecorderMapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    if (pathRecordingPoints.length < 2) {
+      source.setData({ type: 'FeatureCollection', features: [] } as any);
+      return;
+    }
+    const line = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: pathRecordingPoints.map((p) => [p.lng, p.lat])
+          },
+          properties: {}
+        }
+      ]
+    };
+    source.setData(line as any);
+  }, [pathRecordingPoints, showPathRecorder]);
+
+  useEffect(() => {
+    if (showPathRecorder || !pathRecorderMapRef.current) return;
+    pathRecorderMapRef.current.remove();
+    pathRecorderMapRef.current = null;
+    if (pathRecordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(pathRecordingWatchIdRef.current);
+      pathRecordingWatchIdRef.current = null;
+    }
+    setPathRecordingActive(false);
+    setPathRecordingPaused(false);
+    setPathRecordingPoints([]);
+    setPathRecordingDistance(0);
+    setPathRecordingStart(null);
+  }, [showPathRecorder]);
+
+  useEffect(() => {
+    if (activeTab === 'marketing') return;
+    if (heatmapMapRef.current) {
+      heatmapMapRef.current.remove();
+      heatmapMapRef.current = null;
+      heatmapReadyRef.current = false;
+    }
+  }, [activeTab]);
+
   const productsWithCompetitor = myProducts.filter(p => p.competitorPrice);
   const priceCompetitiveness = productsWithCompetitor.length
     ? (productsWithCompetitor.reduce((sum, p) => sum + (p.price / (p.competitorPrice || p.price)), 0) / productsWithCompetitor.length) * 100
@@ -1293,12 +2120,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const uploadMediaFile = async (file: File) => {
+  const uploadMediaFile = async (file: File, context = 'seller_product_media') => {
     const presign = await requestUploadPresign({
       file_name: file.name,
       mime_type: file.type,
       content_length: file.size,
-      context: 'seller_product_media'
+      context
     });
     if (!presign.upload_url && !presign.url) {
       throw new Error('Upload presign failed.');
@@ -1424,6 +2251,96 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
+  const handleShopTypeSelect = async (type: string) => {
+    setShopType(type);
+    setOnboardingStatus(null);
+    try {
+      const state = await setSellerShopType({ shop_type: type });
+      setOnboardingState(state);
+      setOnboardingStatus('Shop type saved.');
+    } catch (err: any) {
+      setOnboardingStatus(err?.message || 'Unable to save shop type.');
+    }
+  };
+
+  const handleConnectOnline = async () => {
+    setOnlineConnectionStatus(null);
+    setMappingStatus(null);
+    try {
+      const payload: OnlineConnectRequest = {
+        ...onlineConnectForm,
+        shop_type: shopType
+      };
+      const response = await connectOnlineStore(payload);
+      const connection = (response as any)?.connection ?? (response as any);
+      if (response?.auth_url) {
+        setOnlineAuthUrl(response.auth_url);
+      } else {
+        setOnlineAuthUrl(null);
+      }
+      if (connection?.id) {
+        setOnlineConnectionId(connection.id);
+        setOnlineConnectionStatus(`Connection ${connection.connection_status || 'created'}.`);
+      } else if (response?.auth_url) {
+        setOnlineConnectionStatus('Authorization required. Complete Shopify OAuth to finish.');
+      } else {
+        setOnlineConnectionStatus('Connection created.');
+      }
+      const state = await getSellerOnboardingState();
+      setOnboardingState(state);
+    } catch (err: any) {
+      setOnlineConnectionStatus(err?.message || 'Unable to connect store.');
+    }
+  };
+
+  const handleAddMappingRow = () => {
+    setMappingItems(prev => ([
+      ...prev,
+      { external_sku: '', canonical_sku: '', platform: onlineConnectForm.platform || 'custom', sync_enabled: true }
+    ]));
+  };
+
+  const handleSaveMappings = async () => {
+    if (mappingItems.length === 0) {
+      setMappingStatus('Add at least one mapping.');
+      return;
+    }
+    setMappingStatus(null);
+    setMappingSyncing(true);
+    try {
+      await bulkProductMappings(mappingItems);
+      setMappingStatus('Mappings saved.');
+    } catch (err: any) {
+      setMappingStatus(err?.message || 'Unable to save mappings.');
+    } finally {
+      setMappingSyncing(false);
+    }
+  };
+
+  const handleRefreshConnection = async () => {
+    if (!onlineConnectionId) return;
+    setOnlineConnectionStatus(null);
+    try {
+      const status = await getConnectionStatus(onlineConnectionId);
+      if (status?.connection_status) {
+        setOnlineConnectionStatus(`Status: ${status.connection_status}`);
+      }
+    } catch (err: any) {
+      setOnlineConnectionStatus(err?.message || 'Unable to fetch connection status.');
+    }
+  };
+
+  const handleSyncNow = async () => {
+    if (!onlineConnectionId) return;
+    setOnlineConnectionStatus(null);
+    try {
+      const status = await triggerConnectionSync(onlineConnectionId);
+      setOnlineConnectionStatus(`Sync started (${status?.connection_status || 'syncing'}).`);
+    } catch (err: any) {
+      setOnlineConnectionStatus(err?.message || 'Unable to trigger sync.');
+    }
+  };
+
   const handleActivateFeatured = async () => {
     setMarketingStatus(null);
     try {
@@ -1455,6 +2372,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setMarketingStatus(err?.message || 'Unable to send stock alert.');
     }
   };
+
+  const onlinePlatform = onlineConnectForm.platform;
+  const isShopify = onlinePlatform === 'shopify';
+  const isWoo = onlinePlatform === 'woocommerce';
+  const isOpenCart = onlinePlatform === 'opencart';
+  const isCustom = onlinePlatform === 'custom';
+  const isCSV = onlinePlatform === 'csv';
+  const isMarketplace = onlinePlatform === 'marketplace';
 
   const handleCreateFanOffer = async () => {
     setMarketingStatus(null);
@@ -2415,6 +3340,306 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             </div>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Unified Shop Registry</p>
+                  <p className="text-sm font-bold text-zinc-900">Select how you sell today</p>
+                  <p className="text-[10px] text-zinc-500">Physical, online, hybrid, or marketplace sellers — one flow.</p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-zinc-50 text-[10px] font-black text-zinc-600">
+                  Current: {shopType}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-bold">
+                {[
+                  { id: 'physical', label: 'Physical Shop' },
+                  { id: 'online', label: 'Online Store' },
+                  { id: 'hybrid', label: 'Hybrid' },
+                  { id: 'marketplace', label: 'Marketplace' }
+                ].map(option => (
+                  <button
+                    key={option.id}
+                    onClick={() => handleShopTypeSelect(option.id)}
+                    className={`px-3 py-3 rounded-2xl border ${
+                      shopType === option.id
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              {onboardingStatus && (
+                <div className="mt-3 text-[10px] font-bold text-emerald-600">{onboardingStatus}</div>
+              )}
+            </div>
+
+            {shopType !== 'physical' && (
+              <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Online Connection</p>
+                    <p className="text-sm font-bold text-zinc-900">Connect your store in 60 seconds</p>
+                  </div>
+                  {onlineConnectionId && (
+                    <div className="text-[10px] text-zinc-500 font-bold">
+                      Connection ID: {onlineConnectionId}
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Platform
+                    <select
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.platform}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, platform: e.target.value }))}
+                    >
+                      <option value="shopify">Shopify</option>
+                      <option value="woocommerce">WooCommerce</option>
+                      <option value="opencart">OpenCart</option>
+                      <option value="custom">Custom API</option>
+                      <option value="csv">CSV Upload</option>
+                      <option value="marketplace">Marketplace</option>
+                    </select>
+                  </label>
+                  {isShopify && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Shop Domain
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.shop_domain || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, shop_domain: e.target.value }))}
+                        placeholder="yourstore.myshopify.com"
+                      />
+                    </label>
+                  )}
+                  {(isWoo || isOpenCart || isCustom || isMarketplace) && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Store Base URL
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.api_base_url || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_base_url: e.target.value }))}
+                        placeholder="https://store.example.com"
+                      />
+                    </label>
+                  )}
+                  {!isCSV && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      API Key / Token
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.api_key || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_key: e.target.value }))}
+                        placeholder={isShopify ? 'OAuth access token (auto after auth)' : 'secure token'}
+                      />
+                    </label>
+                  )}
+                  {(isWoo || isCustom || isMarketplace) && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      API Secret
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.api_secret || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_secret: e.target.value }))}
+                        placeholder="secret key"
+                      />
+                    </label>
+                  )}
+                  {(isCustom || isMarketplace || isOpenCart) && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Products Endpoint
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.products_endpoint || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, products_endpoint: e.target.value }))}
+                        placeholder="/api/products"
+                      />
+                    </label>
+                  )}
+                  {(isCustom || isMarketplace || isOpenCart) && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Orders Endpoint
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.orders_endpoint || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, orders_endpoint: e.target.value }))}
+                        placeholder="/api/orders"
+                      />
+                    </label>
+                  )}
+                  {(isCustom || isMarketplace) && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Demand Endpoint (optional)
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.demand_endpoint || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, demand_endpoint: e.target.value }))}
+                        placeholder="/api/demand"
+                      />
+                    </label>
+                  )}
+                  {isCSV && (
+                    <label className="text-[10px] font-bold text-zinc-500 sm:col-span-2">
+                      CSV Import URL
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.csv_import_url || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, csv_import_url: e.target.value }))}
+                        placeholder="https://files.example.com/products.csv"
+                      />
+                    </label>
+                  )}
+                  {!isCSV && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Webhook Secret
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.webhook_secret || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_secret: e.target.value }))}
+                        placeholder="auto-generated secret"
+                      />
+                    </label>
+                  )}
+                  {!isCSV && (
+                    <label className="text-[10px] font-bold text-zinc-500 sm:col-span-2">
+                      Webhook URL
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.webhook_url || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_url: e.target.value }))}
+                        placeholder="https://yourstore.com/sokoconnect/webhook"
+                      />
+                    </label>
+                  )}
+                  {isShopify && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      OAuth Code (after auth)
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.auth_code || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, auth_code: e.target.value }))}
+                        placeholder="Paste Shopify auth code"
+                      />
+                    </label>
+                  )}
+                  {isShopify && (
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Scopes (optional)
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={onlineConnectForm.scopes || ''}
+                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, scopes: e.target.value }))}
+                        placeholder="read_products,read_orders,read_customers"
+                      />
+                    </label>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleConnectOnline}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+                  >
+                    Connect Store
+                  </button>
+                  {onlineAuthUrl && (
+                    <button
+                      onClick={() => window.open(onlineAuthUrl, '_blank', 'noopener')}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
+                    >
+                      Authorize Shopify
+                    </button>
+                  )}
+                  <button
+                    onClick={handleRefreshConnection}
+                    className="px-4 py-2 bg-zinc-100 text-zinc-800 rounded-xl text-[10px] font-black"
+                    disabled={!onlineConnectionId}
+                  >
+                    Refresh Status
+                  </button>
+                  <button
+                    onClick={handleSyncNow}
+                    className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black"
+                    disabled={!onlineConnectionId}
+                  >
+                    Start Sync
+                  </button>
+                </div>
+                {onlineConnectionStatus && (
+                  <div className="text-[10px] font-bold text-emerald-600">{onlineConnectionStatus}</div>
+                )}
+              </div>
+            )}
+
+            {shopType !== 'physical' && (
+              <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm space-y-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Mapping Preview</p>
+                  <p className="text-sm font-bold text-zinc-900">Map external SKU → canonical SKU</p>
+                  <p className="text-[10px] text-zinc-500">Bulk or manual mapping to sync products.</p>
+                </div>
+                <div className="space-y-2">
+                  {mappingItems.length === 0 && (
+                    <div className="text-[10px] text-zinc-500 font-bold bg-zinc-50 rounded-2xl px-3 py-2">
+                      No mappings added yet.
+                    </div>
+                  )}
+                  {mappingItems.map((item, idx) => (
+                    <div key={`${item.external_sku}_${idx}`} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        className="px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                        placeholder="External SKU"
+                        value={item.external_sku}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setMappingItems(prev => prev.map((m, i) => i === idx ? { ...m, external_sku: value } : m));
+                        }}
+                      />
+                      <input
+                        className="px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                        placeholder="Canonical SKU"
+                        value={item.canonical_sku}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setMappingItems(prev => prev.map((m, i) => i === idx ? { ...m, canonical_sku: value } : m));
+                        }}
+                      />
+                      <input
+                        className="px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                        placeholder="Platform"
+                        value={item.platform}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setMappingItems(prev => prev.map((m, i) => i === idx ? { ...m, platform: value } : m));
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleAddMappingRow}
+                    className="px-4 py-2 bg-zinc-100 text-zinc-800 rounded-xl text-[10px] font-black"
+                  >
+                    Add Mapping
+                  </button>
+                  <button
+                    onClick={handleSaveMappings}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
+                    disabled={mappingSyncing}
+                  >
+                    {mappingSyncing ? 'Saving…' : 'Save Mappings'}
+                  </button>
+                </div>
+                {mappingStatus && (
+                  <div className="text-[10px] font-bold text-emerald-600">{mappingStatus}</div>
+                )}
+              </div>
+            )}
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">WhatsApp-Based Onboarding</p>
@@ -2434,6 +3659,66 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div className="p-3 bg-zinc-50 rounded-2xl">4. Tuma picha za bidhaa</div>
               </div>
               <div className="mt-4 text-[10px] text-zinc-500 font-bold">Voice onboarding available for low-literacy sellers.</div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <MapPin className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <p className="text-sm font-bold text-zinc-900">Record Path To Your Shop</p>
+                  <p className="text-[10px] text-zinc-500">Capture the real route so buyers can find you faster.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPathRecorder(true)}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+              >
+                Open Path Recorder
+              </button>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <Settings className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <p className="text-sm font-bold text-zinc-900">Route Multipliers</p>
+                  <p className="text-[10px] text-zinc-500">Tune ETA multipliers for city + road types.</p>
+                </div>
+              </div>
+              <textarea
+                value={routeConfigDraft}
+                onChange={(e) => setRouteConfigDraft(e.target.value)}
+                rows={12}
+                className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-[10px] font-mono text-zinc-700"
+                placeholder='{"profile":{"motorbike":0.85},"city":{"mombasa":{"tuktuk":1.1}},"roadClass":{"service":1.12}}'
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={handleSaveRouteConfigLocal}
+                  className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black"
+                >
+                  Save Locally
+                </button>
+                <button
+                  onClick={handleLoadRouteConfigFromOps}
+                  className="px-4 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black"
+                >
+                  Load From Ops
+                </button>
+                <button
+                  onClick={handlePublishRouteConfig}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
+                  disabled={routeConfigSaving}
+                >
+                  {routeConfigSaving ? 'Publishing…' : 'Publish to Ops'}
+                </button>
+              </div>
+              {routeConfigUpdatedAt && (
+                <div className="mt-2 text-[10px] text-zinc-500 font-bold">Last published: {new Date(routeConfigUpdatedAt).toLocaleString()}</div>
+              )}
+              {routeConfigStatus && (
+                <div className="mt-2 text-[10px] font-bold text-emerald-600">{routeConfigStatus}</div>
+              )}
             </div>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
@@ -3654,47 +4939,90 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="grid grid-cols-1 gap-6">
               <div className="bg-zinc-900 text-white p-6 rounded-3xl shadow-xl relative overflow-hidden">
                 <div className="relative z-10">
-                  <div className="flex items-center gap-2 mb-6">
-                    <Sparkles className="w-5 h-5 text-indigo-400" />
-                    <h3 className="text-sm font-black uppercase tracking-widest">AI Strategic Insights</h3>
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-indigo-400" />
+                      <h3 className="text-sm font-black uppercase tracking-widest">AI Strategic Insights</h3>
+                    </div>
+                    <button
+                      onClick={() => runAiInsight(true)}
+                      className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase bg-white/10 text-white/70 hover:text-white hover:bg-white/20"
+                    >
+                      Refresh Insights
+                    </button>
                   </div>
                   <div className="space-y-4">
-                    <div className="flex gap-4 items-start">
-                      <div className="p-2 bg-indigo-500/20 rounded-xl shrink-0">
-                        <TrendingUp className="w-4 h-4 text-indigo-400" />
+                    {aiInsightLoading && (
+                      <div className="flex items-center gap-2 text-[10px] text-indigo-200">
+                        <span className="inline-flex h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />
+                        Generating insights…
                       </div>
-                      <div>
-                        <p className="text-xs font-bold mb-1">Demand Surge Detected</p>
-                        <p className="text-[10px] text-zinc-400 leading-relaxed">
-                          Accessories category is trending 25% higher than your current inventory levels. Consider restocking "Bamboo Watch" variants.
-                        </p>
+                    )}
+                    {aiInsightError && (
+                      <div className="text-[10px] text-amber-300 font-bold">
+                        {aiInsightError}
                       </div>
-                    </div>
-                    <div className="flex gap-4 items-start">
-                      <div className="p-2 bg-amber-500/20 rounded-xl shrink-0">
-                        <AlertCircle className="w-4 h-4 text-amber-400" />
+                    )}
+                    {!aiInsightLoading && aiInsightMessage && (
+                      <div className="space-y-3">
+                        <p className="text-[11px] text-white/80 leading-relaxed">{aiInsightMessage}</p>
+                        {aiInsightMeta?.agent_status && Array.isArray(aiInsightMeta.agent_status) && aiInsightMeta.agent_status.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {aiInsightMeta.agent_status.map((status: string, idx: number) => {
+                              const key = String(status || '').toLowerCase();
+                              const label = AGENT_STATUS_LABELS[key] || status;
+                              return (
+                                <span
+                                  key={`insight-agent-${idx}`}
+                                  className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-white/10 text-white/70"
+                                >
+                                  {label}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {renderMedia(aiInsightMeta || undefined, aiInsightMessage)}
+                        {Array.isArray(aiInsightMeta?.references) && aiInsightMeta?.references.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {aiInsightMeta.references.map((ref: any, idx: number) => (
+                                <span
+                                  key={`insight-ref-${idx}`}
+                                  className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-emerald-500/10 text-emerald-200"
+                                >
+                                  {ref.label}{ref.detail ? ` · ${ref.detail}` : ''}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="space-y-1">
+                              {aiInsightMeta.references.map((ref: any, idx: number) => {
+                                const items = ref?.data?.items;
+                                if (!Array.isArray(items) || items.length === 0) return null;
+                                return (
+                                  <div key={`insight-ref-items-${idx}`} className="text-[10px] text-white/70 space-y-1">
+                                    {items.slice(0, 3).map((item: any, itemIdx: number) => (
+                                      <div key={`insight-ref-item-${idx}-${itemIdx}`} className="flex flex-wrap gap-2">
+                                        {Object.entries(item).map(([key, value]) => (
+                                          <span key={key} className="px-2 py-1 rounded-full bg-white/5">
+                                            {key}: {String(value ?? '')}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <p className="text-xs font-bold mb-1">Pricing Optimization</p>
-                        <p className="text-[10px] text-zinc-400 leading-relaxed">
-                          Your "Quantum Headphones" are priced 12% above the platform average. A temporary 5% discount could increase conversion by 18%.
-                        </p>
+                    )}
+                    {!aiInsightLoading && !aiInsightMessage && !aiInsightError && (
+                      <div className="text-[10px] text-white/60">
+                        Insights will appear once your data refreshes.
                       </div>
-                    </div>
-                    <div className="flex gap-4 items-start bg-indigo-500/10 p-3 rounded-2xl border border-indigo-500/20">
-                      <div className="p-2 bg-indigo-500/20 rounded-xl shrink-0">
-                        <Zap className="w-4 h-4 text-indigo-400" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-bold mb-1 text-indigo-300">Demand Alert</p>
-                        <p className="text-[10px] text-zinc-400 leading-relaxed">
-                          5 people searched for "Eco Tote" near your shop today. You have it in stock. Want to feature it?
-                        </p>
-                        <button className="mt-2 px-3 py-1 bg-indigo-600 text-white rounded-lg text-[10px] font-bold">
-                          Feature Now
-                        </button>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 blur-3xl -mr-16 -mt-16" />
@@ -3882,22 +5210,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <span className="text-[10px] text-zinc-400 font-bold">Hotspots by product demand</span>
               </div>
               <div className="relative h-64 rounded-2xl overflow-hidden bg-zinc-100 border border-zinc-200">
-                <div className="absolute inset-0 opacity-40 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '22px 22px' }} />
-                {demandHeatmap.map((p) => {
-                  const top = ((p.location!.lat - 34) * 11) % 80 + 10;
-                  const left = ((p.location!.lng + 120) * 11) % 80 + 10;
-                  const size = Math.max(18, Math.min(54, p.demand));
-                  return (
-                    <div
-                      key={p.id}
-                      className="absolute rounded-full bg-rose-500/30 border border-rose-500/40 backdrop-blur-sm"
-                      style={{ top: `${top}%`, left: `${left}%`, width: `${size}px`, height: `${size}px` }}
-                      title={`${p.name} • Demand ${p.demand}`}
-                    />
-                  );
-                })}
+                <div ref={heatmapContainerRef} className="absolute inset-0" />
+                {!mapboxToken && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
+                    Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                  </div>
+                )}
+                <div className="absolute top-3 right-3 flex flex-col gap-2">
+                  <button
+                    onClick={() => setShowPathRecorder(true)}
+                    className="px-3 py-1.5 rounded-full bg-white/90 backdrop-blur text-[9px] font-black text-zinc-700 shadow border border-white"
+                  >
+                    Record Path
+                  </button>
+                </div>
                 <div className="absolute bottom-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold text-zinc-700">
-                  Warmer circles = higher demand
+                  Warmer areas = higher demand
                 </div>
               </div>
             </div>
@@ -6176,6 +7504,247 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   >
                     {rfqLoading ? 'Sending…' : 'Send RFQ'}
                   </button>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showPathRecorder && (
+          <div className="fixed inset-0 z-[95] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <MapPin className="w-5 h-5 text-emerald-600" />
+                  <div>
+                    <p className="text-sm font-black text-zinc-900">Record Shop Path</p>
+                    <p className="text-[10px] text-zinc-500 font-bold">Capture the real route to your shop</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowPathRecorder(false)}
+                  className="p-2 rounded-full hover:bg-zinc-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="relative h-[360px] bg-zinc-100">
+                <div ref={pathRecorderContainerRef} className="absolute inset-0" />
+                {!mapboxToken && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
+                    Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                  </div>
+                )}
+                <div className="absolute top-3 right-3 flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      if (pathRecordingActive) {
+                        stopPathRecording();
+                      } else {
+                        startPathRecording();
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-[9px] font-black shadow ${pathRecordingActive ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}
+                  >
+                    {pathRecordingActive ? 'Stop Recording' : 'Record Path'}
+                  </button>
+                  {pathRecordingActive && (
+                    <button
+                      onClick={pathRecordingPaused ? resumePathRecording : pausePathRecording}
+                      className="px-3 py-1.5 rounded-full text-[9px] font-black bg-white/90 text-zinc-700 shadow"
+                    >
+                      {pathRecordingPaused ? 'Resume' : 'Pause'}
+                    </button>
+                  )}
+                </div>
+                {pathRecordingActive && (
+                  <div className="absolute top-3 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                    <div>
+                      Recording… {Math.round(pathRecordingDistance)}m · {Math.floor((pathRecordingStart ? (Date.now() - pathRecordingStart) : 0) / 60000)}m
+                    </div>
+                    <div className="text-[9px] text-white/80">Points: {pathRecordingPoints.length} / 10</div>
+                  </div>
+                )}
+              </div>
+              <div className="p-4 border-t">
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <input
+                    value={pathRecordingName}
+                    onChange={(e) => setPathRecordingName(e.target.value)}
+                    placeholder="Name this path"
+                    className="w-full px-3 py-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                  />
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <input
+                      type="checkbox"
+                      checked={pathRecordingShared}
+                      onChange={(e) => setPathRecordingShared(e.target.checked)}
+                    />
+                    Share with community
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <input
+                    value={pathRecordingStartLabel}
+                    onChange={(e) => setPathRecordingStartLabel(e.target.value)}
+                    placeholder="Start label (e.g. Main road)"
+                    className="w-full px-3 py-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                  />
+                  <input
+                    value={pathRecordingEndLabel}
+                    onChange={(e) => setPathRecordingEndLabel(e.target.value)}
+                    placeholder="End label (e.g. Shop front)"
+                    className="w-full px-3 py-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 mb-3">
+                  <input
+                    type="checkbox"
+                    checked={pathRecordingPrimary}
+                    onChange={(e) => setPathRecordingPrimary(e.target.checked)}
+                  />
+                  Set as primary route for buyers
+                </label>
+                <div className="mb-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Landmarks & Shop Front</p>
+                    <button
+                      onClick={addLandmarkDraft}
+                      className="px-3 py-1 rounded-full bg-zinc-900 text-white text-[9px] font-black"
+                      type="button"
+                    >
+                      Add Landmark
+                    </button>
+                  </div>
+                  {pathLandmarkDrafts.length === 0 && (
+                    <p className="mt-2 text-[10px] text-zinc-500 font-bold">Add photos so buyers can recognize your route.</p>
+                  )}
+                  <div className="mt-2 space-y-2">
+                    {pathLandmarkDrafts.map((item, idx) => (
+                      <div
+                        key={`${item.label}-${idx}`}
+                        className="grid grid-cols-1 sm:grid-cols-[auto,auto,1fr,1fr] gap-2 bg-zinc-50 rounded-2xl p-3 border border-dashed border-zinc-200"
+                        draggable
+                        onDragStart={() => {
+                          landmarkDragIndexRef.current = idx;
+                        }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => {
+                          const from = landmarkDragIndexRef.current;
+                          if (from === null || from === idx) return;
+                          setPathLandmarkDrafts((prev) => {
+                            const next = [...prev];
+                            const [moved] = next.splice(from, 1);
+                            next.splice(idx, 0, moved);
+                            return next;
+                          });
+                          landmarkDragIndexRef.current = null;
+                        }}
+                      >
+                        <div className="flex items-center justify-center text-[10px] font-black text-zinc-400 cursor-move">
+                          #{idx + 1}
+                        </div>
+                        <div className="w-12 h-12 rounded-xl overflow-hidden border border-white/60 bg-white shadow-sm flex items-center justify-center">
+                          {item.imageUrl ? (
+                            <img src={item.imageUrl} alt="Landmark preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[9px] text-zinc-400 font-bold">Preview</span>
+                          )}
+                        </div>
+                        <input
+                          value={item.label}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setPathLandmarkDrafts(prev => prev.map((p, i) => i === idx ? { ...p, label: value } : p));
+                          }}
+                          placeholder="Landmark label"
+                          className="px-3 py-2 rounded-xl bg-white border border-zinc-200 text-[10px] font-bold"
+                        />
+                        <select
+                          value={item.type}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setPathLandmarkDrafts(prev => prev.map((p, i) => i === idx ? { ...p, type: value } : p));
+                          }}
+                          className="px-3 py-2 rounded-xl bg-white border border-zinc-200 text-[10px] font-bold"
+                        >
+                          <option value="landmark">Landmark</option>
+                          <option value="shop_front">Shop Front</option>
+                          <option value="turn">Turn</option>
+                        </select>
+                        <label className="px-3 py-2 rounded-xl bg-white border border-dashed border-zinc-200 text-[10px] font-bold text-zinc-500 cursor-pointer">
+                          {item.uploading ? 'Uploading…' : item.imageUrl ? 'Image added' : 'Upload image'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleLandmarkFile(idx, e.target.files?.[0])}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="mb-3">
+                  <div className="flex items-center justify-between text-[9px] font-bold text-zinc-500">
+                    <span>Recording progress</span>
+                    <span>{pathRecordingPoints.length} / 10 points</span>
+                  </div>
+                  <div className="mt-2 h-2 bg-zinc-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full"
+                      style={{ width: `${Math.min(100, Math.round((pathRecordingPoints.length / 10) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={savePathRecording}
+                  disabled={pathRecordingPoints.length < 2}
+                  className="w-full py-2 rounded-xl bg-emerald-600 text-white text-xs font-black disabled:opacity-50"
+                >
+                  Save Path
+                </button>
+                {pathRecordingStatus && (
+                  <div className="mt-2 text-[10px] font-bold text-zinc-500">{pathRecordingStatus}</div>
+                )}
+                {sellerPaths.length > 0 && (
+                  <div className="mt-4 border-t border-zinc-100 pt-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Routes</p>
+                    <div className="mt-2 space-y-2">
+                      {sellerPaths.map((path) => (
+                        <div key={path.id} className="flex items-center justify-between bg-zinc-50 rounded-2xl px-3 py-2 text-[10px] font-bold text-zinc-600">
+                          <div>
+                            <p className="text-[10px] font-black text-zinc-800">{path.name || 'Recorded path'}</p>
+                            <p className="text-[9px] text-zinc-500">
+                              {path.usage_count || 0} uses · {path.distance_meters ? `${Math.round(path.distance_meters / 10) / 100} km` : '—'}
+                              {path.start_label || path.end_label ? ` · ${path.start_label || 'Start'} → ${path.end_label || 'Shop'}` : ''}
+                            </p>
+                          </div>
+                          {path.is_primary ? (
+                            <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-black">
+                              Primary
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleSetPrimaryPath(path.id)}
+                              className="px-2 py-1 rounded-full bg-zinc-900 text-white text-[9px] font-black"
+                            >
+                              Set Primary
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {sellerPathsStatus && (
+                  <div className="mt-2 text-[10px] font-bold text-amber-600">{sellerPathsStatus}</div>
                 )}
               </div>
             </motion.div>

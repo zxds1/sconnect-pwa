@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   Search as SearchIcon, 
   SlidersHorizontal, 
@@ -11,7 +13,6 @@ import {
   Map as MapIcon, 
   Grid,
   Mic,
-  Camera,
   Navigation,
   CheckCircle2,
   TrendingUp,
@@ -31,12 +32,18 @@ import {
   updateWatchlistItem,
   deleteWatchlistItem,
   queueHybridSearch,
+  queueOCRSearch,
   queuePhotoSearch,
   queueVideoSearch,
   queueVoiceSearch,
   createSearchAlert,
   updateSearchAlert,
   deleteSearchAlert,
+  recordPath,
+  listMyPaths,
+  listPopularPaths,
+  recordPathUse,
+  verifyPath,
   recordSearchEvent,
   saveSearch,
   deleteSavedSearch,
@@ -46,10 +53,14 @@ import {
   searchTrending,
   type SearchAlert,
   type SearchResult,
+  type MediaSearchRequest,
+  type PathPoint,
+  type RecordedPath,
   type WatchlistItem,
   type SavedSearch,
   type RecentSearch
 } from '../lib/searchApi';
+import { requestUploadPresign } from '../lib/uploadsApi';
 import {
   addShopFavorite,
   getShopProfile,
@@ -58,6 +69,16 @@ import {
   searchShops,
   type ShopDirectoryEntry
 } from '../lib/shopDirectoryApi';
+import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
+import {
+  detectCityKey,
+  getCityMultiplier,
+  getDefaultRouteMultipliers,
+  getProfileMultiplier,
+  getStepRoadMultiplier,
+  loadRouteMultipliers,
+  type RouteMultipliersConfig
+} from '../lib/routeMultipliers';
 
 interface SearchProps {
   onProductOpen: (product: Product) => void;
@@ -81,19 +102,75 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [sortBy, setSortBy] = useState<'price_asc' | 'price_desc' | 'rating'>('rating');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
-  const [activeLocationTooltip, setActiveLocationTooltip] = useState<string | null>(null);
+  const [showQuickActions, setShowQuickActions] = useState(false);
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [isNearMeActive, setIsNearMeActive] = useState(false);
+  const [locationSuggestions, setLocationSuggestions] = useState<Array<{ id: string; label: string; lng: number; lat: number }>>([]);
+  const [mapStatus, setMapStatus] = useState<string | null>(null);
+  const [routeInfo, setRouteInfo] = useState<{ distanceKm: number; durationMin: number } | null>(null);
+  const [mapReadyVersion, setMapReadyVersion] = useState(0);
+  const [routeSteps, setRouteSteps] = useState<Array<{ instruction: string; distance: number; duration: number }>>([]);
+  const [routeProfile, setRouteProfile] = useState<'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk'>('driving');
+  const [routeConfig, setRouteConfig] = useState<RouteMultipliersConfig>(() => getDefaultRouteMultipliers());
+  const routeTelemetry = useMemo(() => createRouteTelemetryTracker('search_map'), []);
+
+  useEffect(() => {
+    let active = true;
+    loadRouteMultipliers().then((config) => {
+      if (active) setRouteConfig(config);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toMapboxProfile = (profile: typeof routeProfile) => {
+    if (profile === 'walking' || profile === 'cycling') return profile;
+    return 'driving-traffic';
+  };
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingPaused, setRecordingPaused] = useState(false);
+  const [recordingPoints, setRecordingPoints] = useState<PathPoint[]>([]);
+  const [recordingDistance, setRecordingDistance] = useState(0);
+  const [recordingStart, setRecordingStart] = useState<number | null>(null);
+  const [recordingName, setRecordingName] = useState('');
+  const [recordingShared, setRecordingShared] = useState(false);
+  const [showRecordingPanel, setShowRecordingPanel] = useState(false);
+  const [showPathsPanel, setShowPathsPanel] = useState(false);
+  const [showPopularPaths, setShowPopularPaths] = useState(true);
+  const [showMyPaths, setShowMyPaths] = useState(true);
+  const [popularPaths, setPopularPaths] = useState<RecordedPath[]>([]);
+  const [myPaths, setMyPaths] = useState<RecordedPath[]>([]);
+  const [pathVerifying, setPathVerifying] = useState<Record<string, boolean>>({});
   const [isListening, setIsListening] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const recognitionRef = React.useRef<any>(null);
+  const cameraStreamRef = React.useRef<MediaStream | null>(null);
+  const videoPreviewRef = React.useRef<string | null>(null);
+  const capturedPreviewRef = React.useRef<string | null>(null);
+  const mediaInputRef = React.useRef<HTMLInputElement | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const videoInputRef = React.useRef<HTMLInputElement | null>(null);
-  const [pendingHybrid, setPendingHybrid] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [mediaStatus, setMediaStatus] = useState<string | null>(null);
+  const mediaStatusTimerRef = React.useRef<number | null>(null);
+  const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const mapRef = React.useRef<mapboxgl.Map | null>(null);
+  const userMarkerRef = React.useRef<mapboxgl.Marker | null>(null);
+  const mapReadyRef = React.useRef(false);
+  const mapPopupRef = React.useRef<mapboxgl.Popup | null>(null);
+  const routeTargetRef = React.useRef<{ lng: number; lat: number } | null>(null);
+  const recordingWatchIdRef = React.useRef<number | null>(null);
+  const routeManeuversRef = React.useRef<Array<{ instruction: string; location: [number, number] }>>([]);
+  const routeStepIndexRef = React.useRef(0);
   const [detectedLanguage, setDetectedLanguage] = useState<'English' | 'Swahili' | 'Sheng'>('English');
   const [transcriptChips, setTranscriptChips] = useState<string[]>([]);
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(false);
+  const [voiceDirectionsEnabled, setVoiceDirectionsEnabled] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
@@ -113,11 +190,29 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [watchlistTargets, setWatchlistTargets] = useState<Record<string, string>>({});
   const sellerMetaRef = React.useRef(sellerMeta);
   const searchRunRef = React.useRef(0);
-  const hybridQueuedRef = React.useRef('');
+  const skipAutoSearchRef = React.useRef(false);
+  const mapItemsRef = React.useRef<Product[]>([]);
+  const navWatchIdRef = React.useRef<number | null>(null);
 
   useEffect(() => {
     sellerMetaRef.current = sellerMeta;
   }, [sellerMeta]);
+
+
+  useEffect(() => {
+    cameraStreamRef.current = cameraStream;
+  }, [cameraStream]);
+
+  useEffect(() => {
+    videoPreviewRef.current = videoPreview;
+  }, [videoPreview]);
+
+  useEffect(() => {
+    if (capturedPreviewRef.current && capturedPreviewRef.current !== capturedPreview) {
+      URL.revokeObjectURL(capturedPreviewRef.current);
+    }
+    capturedPreviewRef.current = capturedPreview;
+  }, [capturedPreview]);
 
   useEffect(() => {
     if (initialQuery !== undefined) {
@@ -134,10 +229,9 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       handleOpenCamera();
     }
     if (initialAction === 'video') {
-      videoInputRef.current?.click();
+      mediaInputRef.current?.click();
     }
     if (initialAction === 'hybrid') {
-      setPendingHybrid(true);
       handleOpenCamera();
     }
   }, [initialAction]);
@@ -147,6 +241,14 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       setVoiceFeedbackEnabled(localStorage.getItem('soko:voice_feedback') === 'true');
     } catch {
       setVoiceFeedbackEnabled(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      setVoiceDirectionsEnabled(localStorage.getItem('soko:voice_directions') === 'true');
+    } catch {
+      setVoiceDirectionsEnabled(false);
     }
   }, []);
 
@@ -166,6 +268,328 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
   };
+
+  const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+    const R = 6371e3;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLng = (b.lng - a.lng) * Math.PI / 180;
+    const lat1 = a.lat * Math.PI / 180;
+    const lat2 = b.lat * Math.PI / 180;
+    const sin1 = Math.sin(dLat / 2);
+    const sin2 = Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2), Math.sqrt(1 - (sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2)));
+    return R * c;
+  };
+
+  const speak = (text: string) => {
+    if (!voiceFeedbackEnabled) return;
+    if ('speechSynthesis' in window && text) {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-US';
+      window.speechSynthesis.speak(utter);
+    }
+  };
+
+  const mapboxToken = (() => {
+    const token = (import.meta as any)?.env?.VITE_MAPBOX_TOKEN;
+    return typeof token === 'string' ? token : '';
+  })();
+
+  const fetchMapboxSuggestions = async (query: string) => {
+    if (!mapboxToken || !query.trim()) return [];
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query.trim())}.json?access_token=${mapboxToken}&autocomplete=true&types=place,locality,neighborhood,poi,address&limit=5`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch locations');
+    const data = await res.json();
+    return (data.features || []).map((feature: any) => ({
+      id: feature.id,
+      label: feature.place_name,
+      lng: feature.center?.[0],
+      lat: feature.center?.[1]
+    })).filter((item: any) => Number.isFinite(item.lng) && Number.isFinite(item.lat));
+  };
+
+  const reverseGeocode = async (lng: number, lat: number) => {
+    if (!mapboxToken) return null;
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&types=place,locality,neighborhood,poi,address&limit=1`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const feature = data.features?.[0];
+    if (!feature) return null;
+    return {
+      label: feature.place_name,
+      lng: feature.center?.[0],
+      lat: feature.center?.[1]
+    };
+  };
+
+  const ensureMap = React.useCallback(() => {
+    if (!mapboxToken) {
+      setMapStatus('Mapbox token missing.');
+      return;
+    }
+    if (!mapContainerRef.current || mapRef.current) return;
+    mapboxgl.accessToken = mapboxToken;
+    const center = userCoords ? [userCoords.lng, userCoords.lat] : [39.6682, -4.0435];
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center,
+      zoom: userCoords ? 12 : 11
+    });
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    map.on('load', () => {
+      mapReadyRef.current = true;
+      setMapStatus(null);
+      setMapReadyVersion((prev) => prev + 1);
+      if (!map.getSource('products')) {
+        map.addSource('products', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+          cluster: true,
+          clusterRadius: 50,
+          clusterMaxZoom: 14
+        });
+        map.addLayer({
+          id: 'clusters',
+          type: 'circle',
+          source: 'products',
+          filter: ['has', 'point_count'],
+          paint: {
+            'circle-color': '#4f46e5',
+            'circle-radius': ['step', ['get', 'point_count'], 18, 10, 22, 30, 26],
+            'circle-opacity': 0.85
+          }
+        });
+        map.addLayer({
+          id: 'cluster-count',
+          type: 'symbol',
+          source: 'products',
+          filter: ['has', 'point_count'],
+          layout: {
+            'text-field': '{point_count_abbreviated}',
+            'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+            'text-size': 12
+          },
+          paint: {
+            'text-color': '#ffffff'
+          }
+        });
+        map.addLayer({
+          id: 'unclustered-point',
+          type: 'circle',
+          source: 'products',
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-color': '#ffffff',
+            'circle-radius': 8,
+            'circle-stroke-color': '#4f46e5',
+            'circle-stroke-width': 3
+          }
+        });
+        map.on('click', 'clusters', (event) => {
+          const features = map.queryRenderedFeatures(event.point, { layers: ['clusters'] });
+          const clusterId = features[0]?.properties?.cluster_id;
+          const source = map.getSource('products') as mapboxgl.GeoJSONSource | undefined;
+          if (!source || clusterId == null) return;
+          (source as any).getClusterExpansionZoom(clusterId, (err: any, zoom: number) => {
+            if (err) return;
+            const coordinates = (features[0].geometry as any).coordinates;
+            map.easeTo({ center: coordinates, zoom });
+          });
+          (source as any).getClusterLeaves(clusterId, 6, 0, (err: any, leaves: any[]) => {
+            if (err || !leaves?.length) return;
+            const previewCards = leaves
+              .map((leaf) => {
+                const id = leaf?.properties?.productId;
+                const product = mapItemsRef.current.find((item) => item.id === id);
+                if (!product) return '';
+                const img = product.mediaUrl ? `<img src="${product.mediaUrl}" class="h-8 w-8 rounded-lg object-cover" />` : '';
+                const name = product.name ? `<div class="text-[9px] font-bold text-zinc-900 truncate">${product.name}</div>` : '';
+                const price = product.price ? `<div class="text-[9px] font-bold text-indigo-600">KES ${product.price}</div>` : '';
+                return `<div class="flex items-center gap-2">${img}<div class="min-w-0">${name}${price}</div></div>`;
+              })
+              .filter(Boolean)
+              .slice(0, 4)
+              .join('');
+            if (!previewCards) return;
+            mapPopupRef.current?.remove();
+            mapPopupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, offset: 12 })
+              .setLngLat((features[0].geometry as any).coordinates)
+              .setHTML(`<div class="space-y-2">${previewCards}<div class="text-[9px] font-bold text-zinc-500">+${Math.max(0, leaves.length - 4)} more nearby</div></div>`)
+              .addTo(map);
+          });
+        });
+        map.on('click', 'unclustered-point', (event) => {
+          const feature = event.features?.[0];
+          const props: any = feature?.properties || {};
+          const productId = props.productId;
+          const lng = Number(props.lng);
+          const lat = Number(props.lat);
+          const product = mapItemsRef.current.find((item) => item.id === productId);
+          if (product) {
+            onProductOpen(product);
+            if (Number.isFinite(lng) && Number.isFinite(lat)) {
+              updateRoute(lng, lat);
+            }
+          }
+          if (Number.isFinite(lng) && Number.isFinite(lat)) {
+            mapPopupRef.current?.remove();
+            mapPopupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, offset: 12 })
+              .setLngLat([lng, lat])
+              .setHTML(`<div class="text-[10px] font-bold text-zinc-900">${product?.name || 'Product'}</div>`)
+              .addTo(map);
+          }
+        });
+        map.on('mouseenter', 'clusters', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'clusters', () => {
+          map.getCanvas().style.cursor = '';
+        });
+        map.on('mouseenter', 'unclustered-point', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'unclustered-point', () => {
+          map.getCanvas().style.cursor = '';
+        });
+      }
+      if (!map.getSource('route-line')) {
+        map.addSource('route-line', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'route-line',
+          type: 'line',
+          source: 'route-line',
+          paint: {
+            'line-color': '#4f46e5',
+            'line-width': 4
+          }
+        });
+      }
+      if (!map.getSource('recording-path')) {
+        map.addSource('recording-path', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'recording-path',
+          type: 'line',
+          source: 'recording-path',
+          paint: {
+            'line-color': '#3bb2d0',
+            'line-width': 5
+          }
+        });
+      }
+      if (!map.getSource('popular-paths')) {
+        map.addSource('popular-paths', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'popular-paths',
+          type: 'line',
+          source: 'popular-paths',
+          paint: {
+            'line-color': '#f97316',
+            'line-width': 3,
+            'line-opacity': 0.6
+          }
+        });
+      }
+      if (!map.getSource('my-paths')) {
+        map.addSource('my-paths', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'my-paths',
+          type: 'line',
+          source: 'my-paths',
+          paint: {
+            'line-color': '#10b981',
+            'line-width': 3,
+            'line-opacity': 0.7
+          }
+        });
+      }
+    });
+    map.on('click', async (event) => {
+      const coords = event.lngLat;
+      const picked = await reverseGeocode(coords.lng, coords.lat);
+      if (picked) {
+        setLocationQuery(picked.label);
+        setUserCoords({ lat: picked.lat, lng: picked.lng });
+        setIsNearMeActive(true);
+        setMaxDistance((prev) => prev ?? 10);
+        setLocationSuggestions([]);
+      }
+    });
+    mapRef.current = map;
+  }, [mapboxToken, userCoords, updateRoute, onProductOpen]);
+
+  const updateRoute = React.useCallback(async (toLng: number, toLat: number) => {
+    if (!mapboxToken || !userCoords || !mapRef.current || !mapReadyRef.current) return;
+    routeTargetRef.current = { lng: toLng, lat: toLat };
+    const fromLng = userCoords.lng;
+    const fromLat = userCoords.lat;
+    const profile = toMapboxProfile(routeProfile);
+    const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const route = data.routes?.[0];
+      if (!route) return;
+      const geojson = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: route.geometry,
+            properties: {}
+          }
+        ]
+      };
+      const source = mapRef.current.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+      source?.setData(geojson as any);
+      const steps = route.legs?.[0]?.steps || [];
+      const cityKey = detectCityKey(locationQuery);
+      const cityMultiplier = getCityMultiplier(routeConfig, cityKey, routeProfile);
+      const profileMultiplier = getProfileMultiplier(routeConfig, routeProfile);
+      const adjustedSteps = steps.map((step: any) => ({
+        instruction: step.maneuver?.instruction || 'Continue',
+        distance: Math.round(step.distance || 0),
+        duration: Math.round((step.duration || 0) * profileMultiplier * cityMultiplier * getStepRoadMultiplier(routeConfig, step))
+      }));
+      const adjustedDuration = adjustedSteps.reduce((sum, step) => sum + (step.duration || 0), 0);
+      setRouteInfo({
+        distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+        durationMin: Math.max(1, Math.round(adjustedDuration / 60))
+      });
+      setRouteSteps(adjustedSteps);
+      routeTelemetry({
+        profile: routeProfile,
+        city: cityKey,
+        distance_km: Math.round((route.distance / 1000) * 10) / 10,
+        duration_min: Math.max(1, Math.round(adjustedDuration / 60)),
+        source: 'search',
+      });
+      routeManeuversRef.current = steps
+        .map((step: any) => ({
+          instruction: step.maneuver?.instruction || 'Continue',
+          location: step.maneuver?.location as [number, number]
+        }))
+        .filter((item: any) => Array.isArray(item.location) && item.location.length === 2);
+      routeStepIndexRef.current = 0;
+    } catch {
+      // Ignore route errors.
+    }
+  }, [mapboxToken, routeProfile, userCoords]);
 
   const normalizeLocation = (raw: any) => {
     if (!raw) return undefined;
@@ -189,6 +613,39 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       return item?.url || item?.media_url || item?.src || item?.path || '';
     }
     return '';
+  };
+
+  const uploadToPresignedUrl = async (file: File, presign: any) => {
+    const uploadUrl = presign?.upload_url || presign?.url;
+    if (!uploadUrl) throw new Error('Missing upload URL');
+    const method = (presign?.method || (presign?.fields ? 'POST' : 'PUT')).toUpperCase();
+    if (presign?.fields) {
+      const form = new FormData();
+      Object.entries(presign.fields).forEach(([key, value]) => form.append(key, value as string));
+      form.append('file', file);
+      const res = await fetch(uploadUrl, { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+      return presign.fields.key || presign.s3_key || presign.key || '';
+    }
+    const headers: Record<string, string> = { ...(presign?.headers || {}) };
+    if (!headers['Content-Type'] && file.type) headers['Content-Type'] = file.type;
+    const res = await fetch(uploadUrl, { method, headers, body: file });
+    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+    return presign?.s3_key || presign?.key || '';
+  };
+
+  const uploadMediaFile = async (file: File, context: string) => {
+    const presign = await requestUploadPresign({
+      file_name: file.name,
+      mime_type: file.type || 'application/octet-stream',
+      content_length: file.size,
+      context
+    });
+    const mediaKey = await uploadToPresignedUrl(file, presign);
+    return {
+      mediaKey,
+      mediaUrl: presign?.url
+    };
   };
 
   const buildProductFromSearch = (result: SearchResult, detail?: any): Product => {
@@ -332,6 +789,12 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   };
 
   const handleOpenCamera = async () => {
+    if (mediaUploading) return;
+    if (isCameraOpen) {
+      handleCloseCamera();
+      return;
+    }
+    setMediaError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       setCameraStream(stream);
@@ -346,13 +809,17 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   };
 
   const handleCloseCamera = () => {
-    cameraStream?.getTracks().forEach(t => t.stop());
+    cameraStreamRef.current?.getTracks().forEach(t => t.stop());
     setCameraStream(null);
     setIsCameraOpen(false);
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
   };
 
-  const handleCapture = () => {
+  const handleCapture = async () => {
     if (!videoRef.current) return;
+    if (mediaUploading) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 640;
@@ -360,36 +827,81 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    setCapturedPreview(dataUrl);
-    // Heuristic "visual search": use tags/categories as hints
-    const sampleTags = ['electronics', 'fashion', 'food', 'home', 'beauty', 'sports', 'office', 'kids', 'outdoors', 'accessories'];
-    const hint = sampleTags[Math.floor(Math.random() * sampleTags.length)];
-    const existingQuery = searchQuery.trim();
-    const nextQuery = existingQuery || hint;
-    if (!existingQuery) {
-      setSearchQuery(nextQuery);
+    try {
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (!blob) throw new Error('Unable to capture image.');
+      const file = new File([blob], `search_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      await handleMediaFile(file);
+    } catch (err: any) {
+      setMediaError(err?.message || 'Photo search failed.');
+    } finally {
+      handleCloseCamera();
     }
-    const hybrid = pendingHybrid || Boolean(existingQuery);
-    if (hybrid) {
-      queueHybridSearch().catch(() => {});
-      hybridQueuedRef.current = nextQuery;
-    } else {
-      queuePhotoSearch().catch(() => {});
-      hybridQueuedRef.current = '';
-    }
-    runSearch(nextQuery);
-    setPendingHybrid(false);
-    handleCloseCamera();
   };
 
-  const handleVideoSelect = (file?: File | null) => {
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    setVideoPreview(url);
-    setSearchQuery('video match');
-    queueVideoSearch().catch(() => {});
-  };
+  const handleMediaFile = React.useCallback(async (file: File) => {
+    if (mediaUploading) return;
+    setMediaUploading(true);
+    setMediaError(null);
+    if (mediaStatusTimerRef.current) {
+      window.clearTimeout(mediaStatusTimerRef.current);
+      mediaStatusTimerRef.current = null;
+    }
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) {
+      setMediaUploading(false);
+      setMediaError('Unsupported media type.');
+      return;
+    }
+    setMediaStatus(isVideo ? 'Video search queued' : 'Image search queued (OCR + visual)');
+    if (isVideo) {
+      if (videoPreviewRef.current) {
+        URL.revokeObjectURL(videoPreviewRef.current);
+      }
+      setVideoPreview(URL.createObjectURL(file));
+    } else {
+      const previewUrl = URL.createObjectURL(file);
+      setCapturedPreview(previewUrl);
+    }
+    try {
+      const context = isVideo ? 'search_video' : 'search_photo';
+      const uploaded = await uploadMediaFile(file, context);
+      const query = searchQuery.trim();
+      const payload: MediaSearchRequest = {
+        query: query || undefined,
+        media_key: uploaded.mediaKey || undefined,
+        media_url: uploaded.mediaUrl || undefined,
+        mime_type: file.type
+      };
+      if (isVideo) {
+        await queueVideoSearch(payload);
+        if (query) {
+          runSearch(query);
+        } else {
+          setMediaError('Video uploaded. Add a text query to refine results.');
+        }
+        return;
+      }
+      await Promise.allSettled([
+        queueOCRSearch(payload),
+        query ? queueHybridSearch(payload) : queuePhotoSearch(payload)
+      ]);
+      if (query) {
+        runSearch(query);
+      } else {
+        setMediaError('Image processed. Add a text query to refine results.');
+      }
+    } catch (err: any) {
+      setMediaError(err?.message || 'Media search failed.');
+    } finally {
+      setMediaUploading(false);
+      mediaStatusTimerRef.current = window.setTimeout(() => {
+        setMediaStatus(null);
+        mediaStatusTimerRef.current = null;
+      }, 8000);
+    }
+  }, [mediaUploading, runSearch, searchQuery]);
 
   const handleReadResults = () => {
     if (!voiceFeedbackEnabled) {
@@ -404,6 +916,17 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       return;
     }
     alert('Voice feedback not supported on this browser.');
+  };
+
+  const fitPathOnMap = (path: RecordedPath) => {
+    if (!mapRef.current || !path.line_geojson) return;
+    const coords = path.line_geojson.coordinates || [];
+    if (!Array.isArray(coords) || coords.length === 0) return;
+    const bounds = coords.reduce(
+      (b: mapboxgl.LngLatBounds, coord: number[]) => b.extend(coord as [number, number]),
+      new mapboxgl.LngLatBounds(coords[0], coords[0])
+    );
+    mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 16 });
   };
 
   const detectLanguage = (text: string): 'English' | 'Swahili' | 'Sheng' => {
@@ -423,20 +946,45 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       alert('Speech recognition not supported on this browser.');
       return;
     }
-    queueVoiceSearch().catch(() => {});
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+    setMediaError(null);
     const recognition = new SpeechRecognition();
     recognition.lang = detectedLanguage === 'Swahili' ? 'sw-KE' : 'en-US';
     recognition.interimResults = false;
     recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onresult = async (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript || '';
+      if (!transcript) {
+        setIsListening(false);
+        recognitionRef.current = null;
+        return;
+      }
+      skipAutoSearchRef.current = true;
       setSearchQuery(transcript);
       const nextLang = detectLanguage(transcript);
       setDetectedLanguage(nextLang);
       setTranscriptChips(prev => [transcript, ...prev].slice(0, 5));
+      try {
+        await queueVoiceSearch({
+          query: transcript,
+          transcript,
+          language: nextLang === 'Swahili' ? 'sw-KE' : 'en-US'
+        });
+      } catch {}
+      runSearch(transcript);
     };
+    recognitionRef.current = recognition;
     recognition.start();
   };
 
@@ -600,6 +1148,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       setSearchQueryId(null);
       return;
     }
+    if (skipAutoSearchRef.current) {
+      skipAutoSearchRef.current = false;
+      return;
+    }
     const timeout = setTimeout(() => {
       runSearch(searchQuery);
     }, 350);
@@ -607,12 +1159,56 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   }, [runSearch, searchQuery]);
 
   useEffect(() => {
-    const query = searchQuery.trim();
-    if (!capturedPreview || !query) return;
-    if (hybridQueuedRef.current === query) return;
-    queueHybridSearch().catch(() => {});
-    hybridQueuedRef.current = query;
-  }, [capturedPreview, searchQuery]);
+    return () => {
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+      if (videoPreviewRef.current) {
+        URL.revokeObjectURL(videoPreviewRef.current);
+      }
+      if (capturedPreviewRef.current) {
+        URL.revokeObjectURL(capturedPreviewRef.current);
+      }
+      if (mediaStatusTimerRef.current) {
+        window.clearTimeout(mediaStatusTimerRef.current);
+        mediaStatusTimerRef.current = null;
+      }
+      if (recordingWatchIdRef.current) {
+        navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+        recordingWatchIdRef.current = null;
+      }
+      mapPopupRef.current?.remove();
+      mapPopupRef.current = null;
+      if (userMarkerRef.current) {
+        userMarkerRef.current.remove();
+        userMarkerRef.current = null;
+      }
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      mapReadyRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      if (!event.clipboardData) return;
+      const items = Array.from(event.clipboardData.items || []);
+      const fileItem = items.find((item) => item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/')));
+      if (!fileItem) return;
+      const file = fileItem.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      handleMediaFile(file);
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [handleMediaFile]);
 
   useEffect(() => {
     if (viewMode !== 'map') return;
@@ -644,6 +1240,342 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       ignore = true;
     };
   }, [viewMode, searchQuery, isNearMeActive, userCoords, maxDistance, hydrateProductsFromResults]);
+
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    ensureMap();
+  }, [ensureMap, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    if (!mapRef.current || !mapReadyRef.current) return;
+    const source = mapRef.current.getSource('products') as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    const features = mapItems
+      .filter((product) => product.location)
+      .map((product) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [product.location!.lng, product.location!.lat]
+        },
+        properties: {
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          lng: product.location!.lng,
+          lat: product.location!.lat
+        }
+      }));
+    source.setData({ type: 'FeatureCollection', features } as any);
+  }, [mapItems, mapReadyVersion, viewMode]);
+
+  useEffect(() => {
+    if (!mapRef.current || !mapReadyRef.current) return;
+    const source = mapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    const coords = recordingPoints.map((p) => [p.lng, p.lat]);
+    const data = coords.length >= 2
+      ? {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: coords
+              },
+              properties: {}
+            }
+          ]
+        }
+      : { type: 'FeatureCollection', features: [] };
+    source.setData(data as any);
+  }, [recordingPoints, mapReadyVersion]);
+
+  useEffect(() => {
+    if (!mapRef.current || !mapReadyRef.current) return;
+    const popularSource = mapRef.current.getSource('popular-paths') as mapboxgl.GeoJSONSource | undefined;
+    if (popularSource) {
+      const features = showPopularPaths
+        ? popularPaths.map((path) => path.line_geojson ? ({
+            type: 'Feature',
+            geometry: path.line_geojson,
+            properties: {
+              id: path.id,
+              name: path.name,
+              usage_count: path.usage_count || 0
+            }
+          }) : null).filter(Boolean)
+        : [];
+      popularSource.setData({ type: 'FeatureCollection', features } as any);
+    }
+    const mySource = mapRef.current.getSource('my-paths') as mapboxgl.GeoJSONSource | undefined;
+    if (mySource) {
+      const features = showMyPaths
+        ? myPaths.map((path) => path.line_geojson ? ({
+            type: 'Feature',
+            geometry: path.line_geojson,
+            properties: {
+              id: path.id,
+              name: path.name,
+              shared: path.shared
+            }
+          }) : null).filter(Boolean)
+        : [];
+      mySource.setData({ type: 'FeatureCollection', features } as any);
+    }
+  }, [mapReadyVersion, myPaths, popularPaths, showMyPaths, showPopularPaths]);
+
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    if (!mapRef.current || !userCoords) return;
+    mapRef.current.setCenter([userCoords.lng, userCoords.lat]);
+    if (!userMarkerRef.current) {
+      const el = document.createElement('div');
+      el.className = 'h-3 w-3 rounded-full bg-emerald-500 border-2 border-white shadow-lg';
+      userMarkerRef.current = new mapboxgl.Marker({ element: el })
+        .setLngLat([userCoords.lng, userCoords.lat])
+        .addTo(mapRef.current);
+    } else {
+      userMarkerRef.current.setLngLat([userCoords.lng, userCoords.lat]);
+    }
+  }, [userCoords, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    if (!mapRef.current || !mapReadyRef.current) return;
+    let timeout: number | null = null;
+    const handleIdle = () => {
+      if (!mapRef.current || !mapReadyRef.current) return;
+      const bounds = mapRef.current.getBounds();
+      const bbox = [
+        bounds.getWest(),
+        bounds.getSouth(),
+        bounds.getEast(),
+        bounds.getNorth()
+      ].join(',');
+      if (timeout) window.clearTimeout(timeout);
+      timeout = window.setTimeout(async () => {
+        try {
+          const [popular, mine] = await Promise.all([
+            listPopularPaths({ bbox, limit: 50 }),
+            listMyPaths()
+          ]);
+          setPopularPaths(popular);
+          setMyPaths(mine);
+        } catch {}
+      }, 300);
+    };
+    mapRef.current.on('idle', handleIdle);
+    return () => {
+      if (timeout) window.clearTimeout(timeout);
+      mapRef.current?.off('idle', handleIdle);
+    };
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (!userCoords || viewMode !== 'map') return;
+    const target = routeTargetRef.current;
+    if (!target) return;
+    updateRoute(target.lng, target.lat);
+  }, [routeProfile, updateRoute, userCoords, viewMode]);
+
+  const stopNavWatch = () => {
+    if (navWatchIdRef.current) {
+      navigator.geolocation.clearWatch(navWatchIdRef.current);
+      navWatchIdRef.current = null;
+    }
+  };
+
+  const beginNavWatch = () => {
+    if (!navigator.geolocation || navWatchIdRef.current) return;
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserCoords(point);
+        if (routeManeuversRef.current.length > 0) {
+          const idx = routeStepIndexRef.current;
+          const next = routeManeuversRef.current[idx];
+          if (next?.location) {
+            const dist = haversine({ lat: point.lat, lng: point.lng }, { lat: next.location[1], lng: next.location[0] });
+            if (dist < 25 && idx < routeManeuversRef.current.length - 1) {
+              routeStepIndexRef.current = idx + 1;
+              speak(next.instruction);
+            }
+          }
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    navWatchIdRef.current = id;
+  };
+
+  useEffect(() => {
+    if (!voiceDirectionsEnabled || viewMode !== 'map' || isRecording) {
+      stopNavWatch();
+      return;
+    }
+    if (!routeManeuversRef.current.length) {
+      stopNavWatch();
+      return;
+    }
+    beginNavWatch();
+    return () => stopNavWatch();
+  }, [isRecording, routeSteps.length, viewMode, voiceDirectionsEnabled]);
+
+  const beginRecordingWatch = () => {
+    if (!navigator.geolocation) {
+      setMapStatus('Geolocation not supported.');
+      return;
+    }
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+    }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          recorded_at: new Date().toISOString()
+        };
+        setRecordingPoints((prev) => {
+          if (prev.length > 0) {
+            const last = prev[prev.length - 1];
+            const segment = haversine({ lat: last.lat, lng: last.lng }, { lat: point.lat, lng: point.lng });
+            setRecordingDistance((dist) => dist + segment);
+          }
+          return [...prev, point];
+        });
+        if (routeManeuversRef.current.length > 0) {
+          const idx = routeStepIndexRef.current;
+          const next = routeManeuversRef.current[idx];
+          if (next?.location) {
+            const dist = haversine({ lat: point.lat, lng: point.lng }, { lat: next.location[1], lng: next.location[0] });
+            if (dist < 25 && idx < routeManeuversRef.current.length - 1) {
+              routeStepIndexRef.current = idx + 1;
+              speak(next.instruction);
+            }
+          }
+        }
+      },
+      () => {
+        setMapStatus('Unable to read GPS location.');
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    recordingWatchIdRef.current = id;
+  };
+
+  const startRecording = () => {
+    setRecordingPoints([]);
+    setRecordingDistance(0);
+    setRecordingStart(Date.now());
+    setIsRecording(true);
+    setRecordingPaused(false);
+    speak('Recording started. Follow your path.');
+    beginRecordingWatch();
+  };
+
+  const pauseRecording = () => {
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+      recordingWatchIdRef.current = null;
+    }
+    setRecordingPaused(true);
+    speak('Recording paused.');
+  };
+
+  const resumeRecording = () => {
+    if (!isRecording) return;
+    setRecordingPaused(false);
+    speak('Recording resumed.');
+    beginRecordingWatch();
+  };
+
+  const stopRecording = () => {
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+      recordingWatchIdRef.current = null;
+    }
+    setRecordingPaused(false);
+    setIsRecording(false);
+    setShowRecordingPanel(true);
+  };
+
+  const saveRecording = async () => {
+    if (recordingPoints.length < 2) {
+      setMapStatus('Record at least two points.');
+      return;
+    }
+    try {
+      const saved = await recordPath({
+        name: recordingName || 'Recorded path',
+        shared: recordingShared,
+        points: recordingPoints
+      });
+      setMyPaths((prev) => [saved, ...prev]);
+      setShowRecordingPanel(false);
+      setRecordingName('');
+      setRecordingShared(false);
+      setRecordingPoints([]);
+      setRecordingDistance(0);
+      setRecordingStart(null);
+      setMapStatus('Path saved.');
+    } catch (err: any) {
+      setMapStatus(err?.message || 'Unable to save path.');
+    }
+  };
+
+  const handleVerifyPath = async (pathId: string) => {
+    setPathVerifying((prev) => ({ ...prev, [pathId]: true }));
+    setMapStatus(null);
+    try {
+      const resp = await verifyPath(pathId);
+      const verified = Boolean(resp?.verified);
+      setPopularPaths((prev) => prev.map((p) => (p.id === pathId ? { ...p, verified } : p)));
+      setMyPaths((prev) => prev.map((p) => (p.id === pathId ? { ...p, verified } : p)));
+      if (!verified) {
+        setMapStatus('Verification recorded. More confirmations needed.');
+      }
+    } catch (err: any) {
+      setMapStatus(err?.message || 'Unable to verify path.');
+    } finally {
+      setPathVerifying((prev) => ({ ...prev, [pathId]: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    if (userCoords) return;
+    setRouteInfo(null);
+    setRouteSteps([]);
+    if (mapRef.current && mapReadyRef.current) {
+      const source = mapRef.current.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+      source?.setData({ type: 'FeatureCollection', features: [] } as any);
+    }
+  }, [userCoords, viewMode]);
+
+  useEffect(() => {
+    if (!locationQuery.trim()) {
+      setLocationSuggestions([]);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const results = await fetchMapboxSuggestions(locationQuery);
+        if (active) setLocationSuggestions(results);
+      } catch {
+        if (active) setLocationSuggestions([]);
+      }
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [locationQuery]);
 
   useEffect(() => {
     let ignore = false;
@@ -752,6 +1684,9 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     if (minRating > 0) {
       results = results.filter((p) => (sellerMeta[p.sellerId]?.rating || 0) >= minRating);
     }
+    if (verifiedOnly) {
+      results = results.filter((p) => Boolean(sellerMeta[p.sellerId]?.verified));
+    }
 
     if (isNearMeActive && userCoords) {
       results = results.filter((p) => {
@@ -805,9 +1740,30 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const mapItems = viewMode === 'map'
     ? (mapProducts.length > 0 ? mapProducts : filteredProducts)
     : filteredProducts;
+  const recordingElapsedSec = recordingStart ? Math.max(0, Math.round((Date.now() - recordingStart) / 1000)) : 0;
+  const recordingPointCount = recordingPoints.length;
+  const recordingGoal = 10;
+  const recordingProgress = Math.min(1, recordingPointCount / recordingGoal);
+
+  useEffect(() => {
+    mapItemsRef.current = mapItems;
+  }, [mapItems]);
 
   return (
-    <div className="h-full bg-zinc-50 flex flex-col overflow-hidden">
+    <div
+      className="h-full bg-zinc-50 flex flex-col overflow-hidden"
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragActive(true);
+      }}
+      onDragLeave={() => setIsDragActive(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setIsDragActive(false);
+        const file = event.dataTransfer?.files?.[0];
+        if (file) handleMediaFile(file);
+      }}
+    >
       {/* Search Header */}
       <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-20">
         <div className="flex gap-3 items-center mb-4">
@@ -823,7 +1779,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                 }
               }}
               placeholder="Search products, shops, or snap a photo..." 
-              className="w-full pl-10 pr-20 py-3 bg-zinc-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-zinc-900"
+              className="w-full pl-10 pr-24 py-2.5 bg-zinc-100 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-zinc-900"
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
               <button
@@ -840,51 +1796,68 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
               >
                 <Mic className="w-4 h-4" />
               </button>
-              <button 
-                onClick={handleOpenCamera}
-                className="p-1.5 text-zinc-400 hover:text-indigo-600 transition-colors"
-                title="Camera search"
-              >
-                <Camera className="w-4 h-4" />
-              </button>
               <button
-                onClick={() => videoInputRef.current?.click()}
+                onClick={() => mediaInputRef.current?.click()}
                 className="p-1.5 text-zinc-400 hover:text-indigo-600 transition-colors"
-                title="Video search"
+                title="Add media"
               >
                 <Sparkles className="w-4 h-4" />
               </button>
             </div>
           </div>
-          <button 
-            onClick={() => setShowFilters(!showFilters)}
-            className={`p-3 rounded-xl transition-colors ${showFilters ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
-          >
-            <SlidersHorizontal className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={handleSaveSearch}
-            className="p-3 rounded-xl bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
-            title="Save this search"
-          >
-            <Bookmark className="w-5 h-5" />
-          </button>
-          <button
-            onClick={handleReadResults}
-            className="p-3 rounded-xl bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
-            title="Read results aloud"
-          >
-            <Bell className="w-5 h-5" />
-          </button>
         </div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowQuickActions((prev) => !prev)}
+              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
+            >
+              More
+            </button>
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-colors ${showFilters ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+            >
+              Filters
+            </button>
+          </div>
+          {mediaUploading && (
+            <div className="text-[10px] font-bold text-indigo-600">
+              Uploading…
+            </div>
+          )}
+        </div>
+        {showQuickActions && (
+          <div className="flex items-center gap-2 mb-2">
+            <button 
+              onClick={handleSaveSearch}
+              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
+              title="Save this search"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleReadResults}
+              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
+              title="Read results aloud"
+            >
+              Read
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 mb-2">
           <div className="px-3 py-1.5 bg-zinc-100 rounded-full text-[10px] font-black text-zinc-600">
             Detected: {detectedLanguage}
           </div>
-          <div className="px-3 py-1.5 bg-emerald-50 rounded-full text-[10px] font-black text-emerald-700">
-            Voice ready
+          <div className={`px-3 py-1.5 rounded-full text-[10px] font-black ${isListening ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-50 text-emerald-700'}`}>
+            {isListening ? 'Listening...' : 'Voice ready'}
           </div>
+          {mediaStatus && (
+            <div className="px-3 py-1.5 bg-indigo-50 rounded-full text-[10px] font-black text-indigo-700">
+              {mediaStatus}
+            </div>
+          )}
           {initialAction && (
             <div className="px-3 py-1.5 bg-indigo-50 rounded-full text-[10px] font-black text-indigo-700">
               {initialAction === 'voice' && 'Voice Search Active'}
@@ -910,11 +1883,15 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         )}
 
         <input
-          ref={videoInputRef}
+          ref={mediaInputRef}
           type="file"
-          accept="video/*"
+          accept="image/*,video/*"
           className="hidden"
-          onChange={(e) => handleVideoSelect(e.target.files?.[0])}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            handleMediaFile(file);
+          }}
         />
 
         {/* Quick Actions & Categories */}
@@ -948,6 +1925,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto p-6 no-scrollbar relative">
+        {isDragActive && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-indigo-900/10 border-2 border-dashed border-indigo-400 rounded-3xl">
+            <div className="px-4 py-2 bg-white rounded-full text-xs font-bold text-indigo-700 shadow">
+              Drop an image or video to search
+            </div>
+          </div>
+        )}
         {/* View Toggle */}
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">
@@ -968,95 +1952,291 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             </button>
           </div>
         </div>
-        {searchError && (
+        {(searchError || mediaError || mediaUploading) && (
           <div className="mb-4 text-[10px] font-bold text-rose-500">
-            {searchError}
+            {searchError || mediaError || 'Uploading media...'}
           </div>
         )}
 
         {viewMode === 'map' ? (
-          <div className="h-[320px] sm:h-[500px] w-full bg-zinc-100 rounded-3xl overflow-hidden relative border-2 border-zinc-200">
-            {/* Mock Map Background */}
-            <div className="absolute inset-0 opacity-40 pointer-events-none">
-              <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
-            </div>
-            
-            {/* Map Markers */}
-            {mapItems.map((product, i) => {
-              if (!product.location) return null;
-              const top = ((product.location.lat - 34) * 15) % 80 + 10;
-              const left = ((product.location.lng + 120) * 15) % 80 + 10;
-              
-              return (
-                <motion.div 
-                  key={product.id || `${product.name}-${i}`}
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: i * 0.1 }}
-                  style={{ top: `${top}%`, left: `${left}%` }}
-                  className="absolute z-10"
-                >
-                  <div className="relative group">
-                    <button 
-                      onClick={() => setActiveLocationTooltip(product.id)}
-                      className="w-10 h-10 bg-white rounded-full border-2 border-indigo-600 shadow-xl overflow-hidden active:scale-90 transition-transform"
-                    >
-                      <img src={product.mediaUrl} className="w-full h-full object-cover" alt="marker" />
-                    </button>
-                    
-                    <AnimatePresence>
-                      {activeLocationTooltip === product.id && (
-                        <motion.div 
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 bg-white p-3 rounded-2xl shadow-2xl border border-zinc-100 z-20"
-                        >
-                          <div className="flex flex-col gap-2">
-                            <img src={product.mediaUrl} className="w-full h-24 object-cover rounded-xl" alt="prod" />
-                            <div>
-                              <p className="text-xs font-black text-zinc-900 line-clamp-1">{product.name}</p>
-                              <p className="text-[10px] font-bold text-indigo-600">${product.price}</p>
-                            </div>
-                            <button 
-                              onClick={() => {
-                                trackSearchEvent('view', product.id);
-                                onProductOpen(product);
-                              }}
-                              className="w-full py-2 bg-zinc-900 text-white rounded-lg text-[10px] font-bold"
-                            >
-                              View Product
-                            </button>
-                            {product.location?.address && (
-                              <button
-                                onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(product.location!.address)}`, '_blank')}
-                                className="w-full py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-bold"
-                              >
-                                Get Directions
-                              </button>
-                            )}
-                          </div>
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-white" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </motion.div>
-              );
-            })}
-
-            <div className="absolute bottom-4 left-4 right-4 bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-white shadow-xl">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-100 rounded-xl">
-                  <MapPin className="w-5 h-5 text-indigo-600" />
+          <>
+            <div className="relative h-[360px] sm:h-[520px] w-full rounded-3xl overflow-hidden border-2 border-zinc-200 bg-zinc-100">
+              <div ref={mapContainerRef} className="absolute inset-0" />
+              {!mapboxToken && (
+                <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/70 text-white text-xs font-bold">
+                  Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
                 </div>
-                <div>
-                  <p className="text-xs font-black text-zinc-900">Nearby Market View</p>
-                  <p className="text-[10px] text-zinc-500">Showing {mapItems.length} items within your area</p>
+              )}
+              <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
+                <div className="bg-white/90 backdrop-blur-md border border-white shadow-xl rounded-2xl p-2 flex items-center gap-2">
+                  <button
+                    onClick={() => setShowPathsPanel((prev) => !prev)}
+                    className="px-3 py-1.5 rounded-full bg-zinc-900 text-white text-[10px] font-black"
+                  >
+                    Paths
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = !voiceDirectionsEnabled;
+                      setVoiceDirectionsEnabled(next);
+                      try {
+                        localStorage.setItem('soko:voice_directions', String(next));
+                      } catch {}
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-black ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
+                  >
+                    {voiceDirectionsEnabled ? 'Voice On' : 'Voice Off'}
+                  </button>
+                </div>
+                <div className="bg-white/90 backdrop-blur-md border border-white shadow-xl rounded-2xl p-2 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (isRecording) {
+                        stopRecording();
+                      } else {
+                        startRecording();
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-black ${isRecording ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}
+                  >
+                    {isRecording ? 'Stop Recording' : 'Record Path'}
+                  </button>
+                  {isRecording && (
+                    <button
+                      onClick={recordingPaused ? resumeRecording : pauseRecording}
+                      className="px-3 py-1.5 rounded-full bg-zinc-100 text-[10px] font-black text-zinc-700"
+                    >
+                      {recordingPaused ? 'Resume' : 'Pause'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isRecording && (
+                <div className="absolute top-4 left-4 bg-rose-600/90 text-white px-3 py-2 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                  <div>
+                    Recording… {Math.round(recordingDistance)}m · {Math.floor(recordingElapsedSec / 60)}m {recordingElapsedSec % 60}s
+                  </div>
+                  <div className="text-[9px] text-white/80">Points: {recordingPointCount} / {recordingGoal}</div>
+                </div>
+              )}
+              {showPathsPanel && (
+                <div className="absolute top-20 right-4 w-72 bg-white/95 backdrop-blur rounded-2xl border border-white shadow-xl p-4 space-y-3 z-10">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Paths</div>
+                    <button
+                      onClick={() => setShowPathsPanel(false)}
+                      className="text-[10px] font-black text-zinc-400"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-bold">
+                    <span>Popular paths</span>
+                    <input
+                      type="checkbox"
+                      checked={showPopularPaths}
+                      onChange={(e) => setShowPopularPaths(e.target.checked)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-bold">
+                    <span>My paths</span>
+                    <input
+                      type="checkbox"
+                      checked={showMyPaths}
+                      onChange={(e) => setShowMyPaths(e.target.checked)}
+                    />
+                  </div>
+                  {showMyPaths && myPaths.length > 0 && (
+                    <div className="space-y-2 max-h-40 overflow-auto">
+                      {myPaths.slice(0, 5).map((path) => (
+                        <div key={path.id} className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              fitPathOnMap(path);
+                              recordPathUse(path.id).catch(() => {});
+                            }}
+                            className="flex-1 text-left px-3 py-2 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-700"
+                          >
+                            {path.name || 'Recorded path'}
+                            {path.shared && <span className="ml-2 text-[9px] text-emerald-600">Shared</span>}
+                          </button>
+                          {path.verified ? (
+                            <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[9px] font-black">
+                              Verified
+                            </span>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVerifyPath(path.id);
+                              }}
+                              disabled={pathVerifying[path.id]}
+                              className="px-2 py-1 rounded-full bg-white text-[9px] font-black text-indigo-600 border border-indigo-100 disabled:opacity-50"
+                            >
+                              {pathVerifying[path.id] ? '...' : 'Verify'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {showPopularPaths && popularPaths.length > 0 && (
+                    <div className="space-y-2 max-h-40 overflow-auto">
+                      {popularPaths.slice(0, 5).map((path) => (
+                        <div key={path.id} className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              fitPathOnMap(path);
+                              recordPathUse(path.id).catch(() => {});
+                            }}
+                            className="flex-1 text-left px-3 py-2 bg-amber-50 rounded-xl text-[10px] font-bold text-zinc-700"
+                          >
+                            {path.name || 'Popular path'}
+                            {path.usage_count ? (
+                              <span className="ml-2 text-[9px] text-amber-600">{path.usage_count} uses</span>
+                            ) : null}
+                          </button>
+                          {path.verified ? (
+                            <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[9px] font-black">
+                              Verified
+                            </span>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVerifyPath(path.id);
+                              }}
+                              disabled={pathVerifying[path.id]}
+                              className="px-2 py-1 rounded-full bg-white text-[9px] font-black text-indigo-600 border border-indigo-100 disabled:opacity-50"
+                            >
+                              {pathVerifying[path.id] ? '...' : 'Verify'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {routeInfo && (
+                <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md px-3 py-2 rounded-2xl border border-white shadow-xl text-[10px] font-bold text-zinc-700">
+                  Route: {routeInfo.distanceKm} km · {routeInfo.durationMin} min
+                </div>
+              )}
+              <div className="absolute top-4 right-32 bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex flex-wrap gap-1 text-[9px] font-bold text-zinc-700">
+                {[
+                  { label: 'Drive', value: 'driving' },
+                  { label: 'Motorbike', value: 'motorbike' },
+                  { label: 'Scooter', value: 'scooter' },
+                  { label: 'TukTuk', value: 'tuktuk' },
+                  { label: 'Cycle', value: 'cycling' },
+                  { label: 'Walk', value: 'walking' }
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setRouteProfile(opt.value as any)}
+                    className={`px-2 py-1 rounded-full ${routeProfile === opt.value ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 pb-3 px-3 sm:px-4">
+                <div className="bg-white/95 backdrop-blur-md rounded-t-3xl border border-white shadow-2xl p-4 space-y-3 max-h-[45vh] overflow-hidden">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-100 rounded-xl">
+                      <MapPin className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-zinc-900">Nearby Market View</p>
+                      <p className="text-[10px] text-zinc-500">Showing {mapItems.length} items within your area</p>
+                      {mapStatus && (
+                        <p className="text-[10px] text-rose-600 font-bold mt-1">{mapStatus}</p>
+                      )}
+                    </div>
+                  </div>
+                  {routeSteps.length > 0 && (
+                    <div className="max-h-32 overflow-auto text-[10px] text-zinc-700 space-y-1">
+                      <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Directions</div>
+                      {routeSteps.slice(0, 6).map((step, idx) => (
+                        <div key={`route-step-${idx}`} className="flex items-center justify-between gap-2">
+                          <span className="font-bold">{step.instruction}</span>
+                          <span className="text-[9px] text-zinc-500">
+                            {Math.max(1, Math.round(step.distance / 10) * 10)}m · {Math.max(1, Math.round(step.duration / 60))}m
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {routeSteps.length === 0 && routeInfo && (
+                    <div className="text-[10px] font-bold text-zinc-600">
+                      Directions unavailable. Enable location services and try again.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
+            <AnimatePresence>
+              {showRecordingPanel && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="mt-4 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-black text-zinc-900">Save Recorded Path</div>
+                    <button
+                      onClick={() => {
+                        setShowRecordingPanel(false);
+                        setRecordingPoints([]);
+                        setRecordingDistance(0);
+                        setRecordingStart(null);
+                      }}
+                      className="text-[10px] font-bold text-zinc-400"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <input
+                    value={recordingName}
+                    onChange={(e) => setRecordingName(e.target.value)}
+                    placeholder="Name this path"
+                    className="w-full px-3 py-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                  />
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <input
+                      type="checkbox"
+                      checked={recordingShared}
+                      onChange={(e) => setRecordingShared(e.target.checked)}
+                    />
+                    Share with community
+                  </label>
+                </div>
+                <div className="mb-3">
+                  <div className="flex items-center justify-between text-[9px] font-bold text-zinc-500">
+                    <span>Recording progress</span>
+                    <span>{recordingPointCount} / {recordingGoal} points</span>
+                  </div>
+                  <div className="mt-2 h-2 bg-zinc-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full"
+                      style={{ width: `${Math.round(recordingProgress * 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={saveRecording}
+                  disabled={recordingPoints.length < 2}
+                  className="w-full py-2 rounded-xl bg-indigo-600 text-white text-xs font-black disabled:opacity-50"
+                >
+                  Save Path
+                </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
         ) : (
           <>
             {/* Saved Searches */}
@@ -1302,75 +2482,163 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden mb-6"
                 >
-                  <div className="bg-white p-5 rounded-2xl border border-zinc-100 space-y-6 shadow-sm">
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white p-4 rounded-2xl border border-zinc-100 space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Filters</div>
+                      <button
+                        onClick={() => {
+                          setSelectedCategory(null);
+                          setPriceRange([0, 1000]);
+                          setMinRating(0);
+                          setSortBy('rating');
+                          setVerifiedOnly(false);
+                          setLocationQuery('');
+                          setUserCoords(null);
+                          setIsNearMeActive(false);
+                          setMaxDistance(null);
+                        }}
+                        className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-100 text-zinc-600"
+                      >
+                        Reset
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Sort By</label>
-                        <select 
-                          value={sortBy}
-                          onChange={(e) => setSortBy(e.target.value as any)}
-                          className="w-full bg-zinc-50 border-none rounded-xl text-xs font-bold p-3 focus:ring-2 focus:ring-indigo-500"
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Category</label>
+                        <select
+                          value={selectedCategory || ''}
+                          onChange={(e) => setSelectedCategory(e.target.value || null)}
+                          className="w-full bg-zinc-50 border-none rounded-xl text-xs font-bold p-2.5 focus:ring-2 focus:ring-indigo-500"
                         >
-                          <option value="rating">Top Rated</option>
-                          <option value="price_asc">Price: Low to High</option>
-                          <option value="price_desc">Price: High to Low</option>
+                          <option value="">All Categories</option>
+                          {categories.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Min Trust Score</label>
-                        <select 
-                          value={minRating}
-                          onChange={(e) => setMinRating(parseFloat(e.target.value))}
-                          className="w-full bg-zinc-50 border-none rounded-xl text-xs font-bold p-3 focus:ring-2 focus:ring-indigo-500"
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Sort</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { value: 'rating', label: 'Top Rated' },
+                            { value: 'price_asc', label: 'Low → High' },
+                            { value: 'price_desc', label: 'High → Low' }
+                          ].map((opt) => (
+                            <button
+                              key={opt.value}
+                              onClick={() => setSortBy(opt.value as any)}
+                              className={`px-3 py-1.5 rounded-full text-[10px] font-black ${sortBy === opt.value ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Trust</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[0, 4, 4.5].map((rating) => (
+                            <button
+                              key={rating}
+                              onClick={() => setMinRating(rating)}
+                              className={`px-3 py-1.5 rounded-full text-[10px] font-black ${minRating === rating ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                            >
+                              {rating === 0 ? 'Any' : `${rating}+`}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => setVerifiedOnly((prev) => !prev)}
+                          className={`mt-2 w-full px-3 py-2 rounded-xl text-[10px] font-black ${verifiedOnly ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
                         >
-                          <option value="0">Any Rating</option>
-                          <option value="4">4.0+ Stars</option>
-                          <option value="4.5">4.5+ Stars</option>
-                        </select>
+                          {verifiedOnly ? 'Verified Sellers Only' : 'Include Unverified'}
+                        </button>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Price Range</label>
                         <span className="text-xs font-black text-indigo-600">${priceRange[0]} - ${priceRange[1]}</span>
                       </div>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="1000" 
-                        step="10"
-                        value={priceRange[1]}
-                        onChange={(e) => setPriceRange([priceRange[0], parseInt(e.target.value)])}
-                        className="w-full accent-indigo-600"
-                      />
-                    </div>
-
-                    <div className="space-y-4 pt-2 border-t border-zinc-50">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Location</label>
-                        <div className="relative">
-                          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <div className="text-[9px] font-bold text-zinc-400">Min</div>
                           <input 
-                            type="text" 
-                            value={locationQuery}
+                            type="range" 
+                            min="0" 
+                            max="1000" 
+                            step="10"
+                            value={priceRange[0]}
                             onChange={(e) => {
-                              setLocationQuery(e.target.value);
-                              if (e.target.value !== 'My Location') {
-                                setUserCoords(null);
-                                setIsNearMeActive(false);
-                              }
+                              const next = Math.min(parseInt(e.target.value), priceRange[1]);
+                              setPriceRange([next, priceRange[1]]);
                             }}
-                            placeholder="Enter city or address..." 
-                            className="w-full pl-10 pr-4 py-3 bg-zinc-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500"
+                            className="w-full accent-indigo-600"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-[9px] font-bold text-zinc-400">Max</div>
+                          <input 
+                            type="range" 
+                            min="0" 
+                            max="1000" 
+                            step="10"
+                            value={priceRange[1]}
+                            onChange={(e) => {
+                              const next = Math.max(parseInt(e.target.value), priceRange[0]);
+                              setPriceRange([priceRange[0], next]);
+                            }}
+                            className="w-full accent-indigo-600"
                           />
                         </div>
                       </div>
+                    </div>
 
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Location</label>
+                      <div className="relative">
+                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                        <input 
+                          type="text" 
+                          value={locationQuery}
+                          onChange={(e) => {
+                            setLocationQuery(e.target.value);
+                            if (e.target.value !== 'My Location') {
+                              setUserCoords(null);
+                              setIsNearMeActive(false);
+                            }
+                          }}
+                          placeholder="City or address..." 
+                          className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {locationSuggestions.length > 0 && (
+                          <div className="absolute z-20 mt-2 w-full bg-white rounded-2xl border border-zinc-100 shadow-lg overflow-hidden">
+                            {locationSuggestions.map((suggestion) => (
+                              <button
+                                key={suggestion.id}
+                                onClick={() => {
+                                  setLocationQuery(suggestion.label);
+                                  setUserCoords({ lat: suggestion.lat, lng: suggestion.lng });
+                                  setIsNearMeActive(true);
+                                  setMaxDistance((prev) => prev ?? 10);
+                                  setLocationSuggestions([]);
+                                }}
+                                className="w-full text-left px-3 py-2 text-[10px] font-bold text-zinc-700 hover:bg-indigo-50"
+                              >
+                                {suggestion.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       {userCoords && (
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Distance Radius</label>
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase">Radius</label>
                             <span className="text-xs font-black text-indigo-600">{maxDistance} km</span>
                           </div>
                           <input 
@@ -1384,14 +2652,32 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                           />
                         </div>
                       )}
-
-                      <button 
-                        onClick={handleUseMyLocation}
-                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-colors ${isNearMeActive ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-white hover:bg-zinc-800'}`}
-                      >
-                        <Navigation className="w-4 h-4" /> {isNearMeActive ? 'Near Me Active' : 'Filter by Nearby Availability'}
-                      </button>
                     </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button 
+                          onClick={handleUseMyLocation}
+                          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-bold transition-colors ${isNearMeActive ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-white hover:bg-zinc-800'}`}
+                        >
+                          <Navigation className="w-4 h-4" /> {isNearMeActive ? 'Near Me Active' : 'Use Nearby'}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!mapRef.current) return;
+                            const center = mapRef.current.getCenter();
+                            const picked = await reverseGeocode(center.lng, center.lat);
+                            if (!picked) return;
+                            setLocationQuery(picked.label);
+                            setUserCoords({ lat: picked.lat, lng: picked.lng });
+                            setIsNearMeActive(true);
+                            setMaxDistance((prev) => prev ?? 10);
+                            setLocationSuggestions([]);
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-bold bg-zinc-100 text-zinc-600 hover:text-indigo-600"
+                        >
+                          Use Map Pin
+                        </button>
+                      </div>
                   </div>
                 </motion.div>
               )}
@@ -1616,11 +2902,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 flex items-center justify-between">
+                  <div className="p-4 flex items-center justify-between">
                 <span className="text-xs text-white font-bold">Visual Search</span>
-                <button onClick={handleCapture} className="px-4 py-2 bg-white text-black rounded-xl text-xs font-bold">
-                  Capture
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleCapture} className="px-4 py-2 bg-white text-black rounded-xl text-xs font-bold">
+                    {mediaUploading ? 'Uploading...' : 'Capture'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

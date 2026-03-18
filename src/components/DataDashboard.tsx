@@ -13,6 +13,7 @@ import {
   type ConsentRecord,
   type ExportResponse,
 } from '../lib/analyticsApi';
+import { buildWsUrl } from '../lib/realtime';
 
 interface DataDashboardProps {
   onBack?: () => void;
@@ -34,7 +35,9 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
 
   useEffect(() => {
     let isMounted = true;
-    const load = async () => {
+    let ws: WebSocket | null = null;
+
+    const loadOnce = async () => {
       setLoading(true);
       setError(null);
       try {
@@ -61,9 +64,45 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
         if (isMounted) setLoading(false);
       }
     };
-    load();
+
+    const connect = () => {
+      ws = new WebSocket(buildWsUrl('/v1/data/ws'));
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type !== 'data:update') return;
+          const data = payload?.data || {};
+          const summaryResp = data.summary || {};
+          setSummary({
+            searches: summaryResp.searches ?? 0,
+            receipts: summaryResp.receipts ?? 0,
+            purchases: summaryResp.purchases ?? 0,
+            reviews: summaryResp.reviews ?? 0,
+          });
+          setUsage(Array.isArray(data.usage) ? data.usage : []);
+          setConsents(Array.isArray(data.consents) ? data.consents : []);
+          setExports(Array.isArray(data.exports) ? data.exports : []);
+          setLoading(false);
+        } catch {
+          // ignore parse errors
+        }
+      };
+      ws.onerror = () => {
+        if (!isMounted) return;
+        setError('Live data connection failed. Showing last known data.');
+        loadOnce();
+      };
+      ws.onclose = () => {
+        if (!isMounted) return;
+        setError('Live data connection disconnected.');
+      };
+    };
+
+    loadOnce();
+    connect();
     return () => {
       isMounted = false;
+      if (ws) ws.close();
     };
   }, []);
 
@@ -251,7 +290,6 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
               <div>ID: {exportLookupResult.id}</div>
               <div>Status: {exportLookupResult.status}</div>
               <div>Type: {exportLookupResult.export_type || '—'}</div>
-              <div>Path: {exportLookupResult.s3_export_path || '—'}</div>
             </div>
           )}
         </section>

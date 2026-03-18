@@ -149,6 +149,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
           <button
             onClick={() => {
               recordOnboardingEvent({ step: index, action: 'exit' }).catch(() => {});
+              completeOnboarding().catch(() => {});
               onFinish();
             }}
             className="w-8 h-8 rounded-full bg-white shadow flex items-center justify-center text-slate-500 hover:text-slate-900"

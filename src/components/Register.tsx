@@ -93,7 +93,7 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-3xl border border-zinc-100 shadow-sm p-6"
+          className="bg-white rounded-3xl border border-zinc-100 shadow-sm p-6 max-w-md mx-auto w-full"
         >
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-2xl bg-emerald-50 text-emerald-600">

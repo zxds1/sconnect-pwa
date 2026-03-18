@@ -7,6 +7,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { registerSW } from 'virtual:pwa-register';
 
 const storedTheme = (() => {
   try {
@@ -49,6 +50,20 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    window.dispatchEvent(new Event('soko:sw-update'));
+  },
+  onOfflineReady() {
+    window.dispatchEvent(new Event('soko:sw-ready'));
+  }
+});
+
+if (typeof window !== 'undefined') {
+  (window as any).__soko_updateSW = updateSW;
+}
 
 const splash = document.getElementById('app-splash');
 if (splash) {

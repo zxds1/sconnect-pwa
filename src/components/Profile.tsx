@@ -432,20 +432,6 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     return sorted[0] || null;
   }, [supplierApps]);
 
-  useEffect(() => {
-    if (!isOwnProfile || !isSellerAccount) return;
-    if (supplierStreamActive) return;
-    if (latestSupplierApp?.status !== 'pending') return;
-    const aliveRef = { current: true };
-    const interval = window.setInterval(() => {
-      refreshSupplierApps(aliveRef);
-    }, 30000);
-    return () => {
-      aliveRef.current = false;
-      window.clearInterval(interval);
-    };
-  }, [isOwnProfile, isSellerAccount, latestSupplierApp?.status, refreshSupplierApps, supplierStreamActive]);
-
   const handleCreateSupplierApplication = async () => {
     setSupplierAppError(null);
     setCreatingSupplierApp(true);

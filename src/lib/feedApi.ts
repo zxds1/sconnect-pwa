@@ -110,3 +110,17 @@ export const joinLiveSession = async (id: string) =>
 
 export const leaveLiveSession = async (id: string) =>
   apiFetch(`/v1/live/${id}/leave`, { method: 'POST' });
+
+export const getLiveSession = async (id: string): Promise<any> =>
+  apiFetch(`/v1/live/${id}`);
+
+export const listLiveComments = async (id: string, params: { cursor?: string; limit?: number } = {}): Promise<FeedList> => {
+  const query = new URLSearchParams();
+  if (params.cursor) query.set('cursor', params.cursor);
+  if (params.limit) query.set('limit', String(params.limit));
+  const suffix = query.toString() ? `?${query}` : '';
+  return apiFetch(`/v1/live/${id}/comments${suffix}`);
+};
+
+export const createLiveComment = async (id: string, message: string) =>
+  apiFetch(`/v1/live/${id}/comments`, { method: 'POST', body: JSON.stringify({ message }) });

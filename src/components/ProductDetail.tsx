@@ -22,9 +22,12 @@ import {
   Share2,
   Flag
 } from 'lucide-react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Product, PricePoint, Review } from '../types';
 import { ProductAIChat } from './ProductAIChat';
+import { getCustomNavigation, listPathLandmarks, listPopularPaths, listSellerPaths, precomputePathWaypoints, recordPath, type PathLandmark, type PathPoint, type RecordedPath } from '../lib/searchApi';
 import {
   getProductDetail,
   getProductMedia,
@@ -54,6 +57,17 @@ import {
 } from '../lib/supportApi';
 import { createAuditEvent } from '../lib/securityApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
+import {
+  detectCityKey,
+  getCityMultiplier,
+  getDefaultRouteMultipliers,
+  getProfileMultiplier,
+  getStepRoadMultiplier,
+  loadRouteMultipliers,
+  type RouteProfile,
+  type RouteMultipliersConfig
+} from '../lib/routeMultipliers';
 
 interface ProductDetailProps {
   product: Product;
@@ -64,6 +78,10 @@ interface ProductDetailProps {
   isCompared: boolean;
   onBuyNow?: (product: Product) => void;
   onAddToBag?: (product: Product) => void;
+  initialShowMap?: boolean;
+  initialPreferredPathId?: string | null;
+  initialRouteProfile?: 'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk';
+  initialNavigationMode?: 'silent' | 'mapbox';
 }
 
 type QuestionItem = { id: string; question: string; answer?: string; author?: string };
@@ -124,7 +142,25 @@ const normalizeQuestion = (item: any): QuestionItem => ({
   author: item.author || item.user_name || 'Community',
 });
 
-export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, onChatOpen, onOpenSupportChat, onAddToComparison, isCompared, onBuyNow, onAddToBag }) => {
+const toMapboxProfile = (profile: RouteProfile) => {
+  if (profile === 'walking' || profile === 'cycling') return profile;
+  return 'driving-traffic';
+};
+
+export const ProductDetail: React.FC<ProductDetailProps> = ({
+  product,
+  onClose,
+  onChatOpen,
+  onOpenSupportChat,
+  onAddToComparison,
+  isCompared,
+  onBuyNow,
+  onAddToBag,
+  initialShowMap,
+  initialPreferredPathId,
+  initialRouteProfile,
+  initialNavigationMode
+}) => {
   const [showAIChat, setShowAIChat] = React.useState(false);
   const [quantity, setQuantity] = React.useState(1);
   const [flyThumb, setFlyThumb] = React.useState<null | { src: string; start: { x: number; y: number; size: number }; end: { x: number; y: number; size: number } }>(null);
@@ -136,6 +172,43 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
   const [followUpEnabled, setFollowUpEnabled] = React.useState(false);
   const [followupOrderId, setFollowupOrderId] = React.useState('');
   const [ratingOrderId, setRatingOrderId] = React.useState('');
+  const [showMapModal, setShowMapModal] = React.useState(Boolean(initialShowMap));
+  const [routeInfo, setRouteInfo] = React.useState<{ distanceKm: number; durationMin: number } | null>(null);
+  const [routeSteps, setRouteSteps] = React.useState<Array<{ instruction: string; distance: number; duration: number }>>([]);
+  const [userCoords, setUserCoords] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [routeProfile, setRouteProfile] = React.useState<RouteProfile>(initialRouteProfile || 'driving');
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [recordingPaused, setRecordingPaused] = React.useState(false);
+  const [recordingPoints, setRecordingPoints] = React.useState<PathPoint[]>([]);
+  const [recordingDistance, setRecordingDistance] = React.useState(0);
+  const [recordingStart, setRecordingStart] = React.useState<number | null>(null);
+  const [showRecordingPanel, setShowRecordingPanel] = React.useState(false);
+  const [recordingName, setRecordingName] = React.useState('');
+  const [recordingShared, setRecordingShared] = React.useState(true);
+  const [recordingStatus, setRecordingStatus] = React.useState<string | null>(null);
+  const [voiceDirectionsEnabled, setVoiceDirectionsEnabled] = React.useState(false);
+  const [popularPaths, setPopularPaths] = React.useState<RecordedPath[]>([]);
+  const [preferredPathId, setPreferredPathId] = React.useState<string | null>(initialPreferredPathId ?? null);
+  const [navigationMode, setNavigationMode] = React.useState<'silent' | 'mapbox'>(initialNavigationMode || 'silent');
+  const [pathLandmarks, setPathLandmarks] = React.useState<PathLandmark[]>([]);
+  const shopFrontImage = React.useMemo(
+    () => pathLandmarks.find((landmark) => landmark.type === 'shop_front')?.image_url,
+    [pathLandmarks]
+  );
+  const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const mapRef = React.useRef<mapboxgl.Map | null>(null);
+  const userMarkerRef = React.useRef<mapboxgl.Marker | null>(null);
+  const sellerMarkerRef = React.useRef<mapboxgl.Marker | null>(null);
+  const mapReadyRef = React.useRef(false);
+  const routeManeuversRef = React.useRef<Array<{ instruction: string; location: [number, number] }>>([]);
+  const routeStepIndexRef = React.useRef(0);
+  const routeStepMarkersRef = React.useRef<mapboxgl.Marker[]>([]);
+  const landmarkMarkersRef = React.useRef<mapboxgl.Marker[]>([]);
+  const recordingWatchIdRef = React.useRef<number | null>(null);
+  const navWatchIdRef = React.useRef<number | null>(null);
+  const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
+    ? (import.meta as any).env.VITE_MAPBOX_TOKEN
+    : '';
   const [orderRating, setOrderRating] = React.useState(5);
   const [orderComment, setOrderComment] = React.useState('');
   const [qaList, setQaList] = React.useState<QuestionItem[]>([]);
@@ -183,6 +256,42 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
   const [evidenceStatus, setEvidenceStatus] = React.useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
+  const [routeConfig, setRouteConfig] = React.useState<RouteMultipliersConfig>(() => getDefaultRouteMultipliers());
+  const routeTelemetry = React.useMemo(() => createRouteTelemetryTracker('product_detail'), []);
+
+  React.useEffect(() => {
+    let active = true;
+    loadRouteMultipliers().then((config) => {
+      if (active) setRouteConfig(config);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (initialShowMap) {
+      setShowMapModal(true);
+    }
+  }, [initialShowMap]);
+
+  React.useEffect(() => {
+    if (initialPreferredPathId) {
+      setPreferredPathId(initialPreferredPathId);
+    }
+  }, [initialPreferredPathId]);
+
+  React.useEffect(() => {
+    if (initialRouteProfile) {
+      setRouteProfile(initialRouteProfile);
+    }
+  }, [initialRouteProfile]);
+
+  React.useEffect(() => {
+    if (initialNavigationMode) {
+      setNavigationMode(initialNavigationMode);
+    }
+  }, [initialNavigationMode]);
 
   const activeProduct = React.useMemo(() => ({ ...product, ...productDetail }), [product, productDetail]);
   const productId = activeProduct.id;
@@ -205,6 +314,25 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
     ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
     : baseRating.toFixed(1);
 
+  const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+    const R = 6371;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLon = ((b.lng - a.lng) * Math.PI) / 180;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) * 1000;
+  };
+
+  const speak = (text: string) => {
+    if (!voiceDirectionsEnabled) return;
+    if ('speechSynthesis' in window && text) {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-US';
+      window.speechSynthesis.speak(utter);
+    }
+  };
+
   const benchmarkPrice = numberOrZero(
     benchmark?.average_price ?? benchmark?.avg_price ?? benchmark?.price ?? benchmark?.market_price ?? activeProduct.competitorPrice
   );
@@ -223,6 +351,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
 
   const handleGetDirections = () => {
     const address = activeProduct.location?.address || sellerProfile?.location?.address || sellerProfile?.address;
+    const loc = activeProduct.location || sellerProfile?.location;
+    if (mapboxToken && loc?.lat && loc?.lng) {
+      setShowMapModal(true);
+      return;
+    }
     if (address) {
       window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
     }
@@ -498,7 +631,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
     }
     if (!evidenceForm.s3Key.trim() || !evidenceForm.fileName.trim() || !evidenceForm.mimeType.trim()) {
       setEvidenceErrors({
-        s3Key: evidenceForm.s3Key.trim() ? '' : 'S3 key is required.',
+        s3Key: evidenceForm.s3Key.trim() ? '' : 'Evidence file is required.',
         fileName: evidenceForm.fileName.trim() ? '' : 'File name is required.',
         mimeType: evidenceForm.mimeType.trim() ? '' : 'MIME type is required.',
       });
@@ -659,6 +792,490 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
       alive = false;
     };
   }, [productId, sellerId]);
+
+  React.useEffect(() => {
+    try {
+      setVoiceDirectionsEnabled(localStorage.getItem('soko:voice_directions') === 'true');
+    } catch {
+      setVoiceDirectionsEnabled(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!showMapModal) return;
+    const loc = activeProduct.location || sellerProfile?.location;
+    const lat = loc?.lat;
+    const lng = loc?.lng;
+    if (!mapboxToken || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (!mapContainerRef.current) return;
+    mapboxgl.accessToken = mapboxToken;
+    if (!mapRef.current) {
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [lng as number, lat as number],
+        zoom: 14
+      });
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.on('load', () => {
+        mapReadyRef.current = true;
+        if (!map.getSource('route-line')) {
+          map.addSource('route-line', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'route-line',
+            type: 'line',
+            source: 'route-line',
+            paint: {
+              'line-color': '#4f46e5',
+              'line-width': 4
+            }
+          });
+        }
+        if (!map.getSource('popular-paths')) {
+          map.addSource('popular-paths', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'popular-paths',
+            type: 'line',
+            source: 'popular-paths',
+            paint: {
+              'line-color': '#f97316',
+              'line-width': 3,
+              'line-opacity': 0.6
+            }
+          });
+        }
+        if (!map.getSource('recording-path')) {
+          map.addSource('recording-path', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'recording-path',
+            type: 'line',
+            source: 'recording-path',
+            paint: {
+              'line-color': '#ef4444',
+              'line-width': 4
+            }
+          });
+        }
+      });
+      mapRef.current = map;
+      sellerMarkerRef.current = new mapboxgl.Marker({ color: '#4f46e5' })
+        .setLngLat([lng as number, lat as number])
+        .addTo(map);
+    }
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+          setUserCoords(coords);
+          if (mapRef.current) {
+            userMarkerRef.current?.remove();
+            userMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
+              .setLngLat([coords.lng, coords.lat])
+              .addTo(mapRef.current);
+          }
+        },
+        () => {}
+      );
+    }
+    (async () => {
+      try {
+        const pad = 0.05;
+        const bbox = [
+          Number(lng) - pad,
+          Number(lat) - pad,
+          Number(lng) + pad,
+          Number(lat) + pad
+        ].join(',');
+        let paths: RecordedPath[] = [];
+        const sellerPathsList = sellerId ? await listSellerPaths(sellerId) : [];
+        if (sellerPathsList.length > 0) {
+          paths = sellerPathsList;
+          setPopularPaths(sellerPathsList);
+          if (!preferredPathId) {
+            const primary = sellerPathsList.find((path) => path.is_primary);
+            if (primary?.id) {
+              setPreferredPathId(primary.id);
+            } else if (sellerPathsList[0]?.id) {
+              setPreferredPathId(sellerPathsList[0].id);
+            }
+          }
+        } else {
+          paths = await listPopularPaths({ bbox, limit: 30 });
+          setPopularPaths(paths);
+          if (!preferredPathId) {
+            const best = paths.sort((a, b) => (b.usage_count || 0) - (a.usage_count || 0))[0];
+            if (best?.id) {
+              setPreferredPathId(best.id);
+            }
+          }
+        }
+        const source = mapRef.current?.getSource('popular-paths') as mapboxgl.GeoJSONSource | undefined;
+        if (source) {
+          const features = paths
+            .map((path) => path.line_geojson ? ({
+              type: 'Feature',
+              geometry: path.line_geojson,
+              properties: { id: path.id, name: path.name, usage_count: path.usage_count || 0 }
+            }) : null)
+            .filter(Boolean);
+          source.setData({ type: 'FeatureCollection', features } as any);
+        }
+      } catch {}
+    })();
+  }, [activeProduct.location, mapboxToken, sellerId, sellerProfile?.location, showMapModal]);
+
+  React.useEffect(() => {
+    if (!showMapModal || !mapReadyRef.current || !mapRef.current) return;
+    const source = mapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    if (recordingPoints.length < 2) {
+      source.setData({ type: 'FeatureCollection', features: [] } as any);
+      return;
+    }
+    const line = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: recordingPoints.map((p) => [p.lng, p.lat])
+          },
+          properties: {}
+        }
+      ]
+    };
+    source.setData(line as any);
+  }, [recordingPoints, showMapModal]);
+
+  React.useEffect(() => {
+    if (!showMapModal || !mapReadyRef.current || !mapRef.current || !userCoords) return;
+    const loc = activeProduct.location || sellerProfile?.location;
+    const lat = loc?.lat;
+    const lng = loc?.lng;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const fromLng = userCoords.lng;
+    const fromLat = userCoords.lat;
+    const toLng = Number(lng);
+    const toLat = Number(lat);
+    const fetchRoute = async () => {
+      try {
+        const profile = toMapboxProfile(routeProfile);
+        let data: any = null;
+        if (preferredPathId && navigationMode === 'silent') {
+          data = await getCustomNavigation({
+            path_id: preferredPathId,
+            from_lng: fromLng,
+            from_lat: fromLat,
+            to_lng: toLng,
+            to_lat: toLat,
+            profile
+          });
+        } else {
+          const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+          const res = await fetch(url);
+          if (!res.ok) return;
+          data = await res.json();
+        }
+        const route = data?.routes?.[0];
+        if (!route) return;
+        const geojson = {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: route.geometry,
+              properties: {}
+            }
+          ]
+        };
+        const source = mapRef.current?.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+        source?.setData(geojson as any);
+        const steps = route.legs?.[0]?.steps || [];
+        const cityKey = detectCityKey(activeProduct.location?.address || sellerProfile?.location?.address);
+        const cityMultiplier = getCityMultiplier(routeConfig, cityKey, routeProfile);
+        const profileMultiplier = getProfileMultiplier(routeConfig, routeProfile);
+        const adjustedSteps = steps.map((step: any) => ({
+          instruction: step.maneuver?.instruction || 'Continue',
+          distance: Math.round(step.distance || 0),
+          duration: Math.round((step.duration || 0) * profileMultiplier * cityMultiplier * getStepRoadMultiplier(routeConfig, step))
+        }));
+        const adjustedDuration = adjustedSteps.reduce((sum, step) => sum + (step.duration || 0), 0);
+        setRouteInfo({
+          distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+          durationMin: Math.max(1, Math.round(adjustedDuration / 60))
+        });
+        setRouteSteps(adjustedSteps);
+        routeTelemetry({
+          profile: routeProfile,
+          city: cityKey,
+          distance_km: Math.round((route.distance / 1000) * 10) / 10,
+          duration_min: Math.max(1, Math.round(adjustedDuration / 60)),
+          path_id: preferredPathId,
+          seller_id: sellerId || null,
+          product_id: productId || null
+        });
+        routeManeuversRef.current = steps
+          .map((step: any) => ({
+            instruction: step.maneuver?.instruction || 'Continue',
+            location: step.maneuver?.location as [number, number]
+          }))
+          .filter((item: any) => Array.isArray(item.location) && item.location.length === 2);
+        routeStepIndexRef.current = 0;
+        routeStepMarkersRef.current.forEach((marker) => marker.remove());
+        routeStepMarkersRef.current = [];
+        routeManeuversRef.current.slice(0, 8).forEach((step, idx) => {
+          const el = document.createElement('div');
+          el.className = 'w-6 h-6 rounded-full bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center shadow';
+          el.textContent = String(idx + 1);
+          const marker = new mapboxgl.Marker({ element: el })
+            .setLngLat(step.location)
+            .addTo(mapRef.current!);
+          routeStepMarkersRef.current.push(marker);
+        });
+      } catch {}
+    };
+    fetchRoute();
+  }, [activeProduct.location, mapboxToken, navigationMode, preferredPathId, routeProfile, sellerProfile?.location, showMapModal, userCoords]);
+
+  React.useEffect(() => {
+    if (!showMapModal && mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+      userMarkerRef.current = null;
+      sellerMarkerRef.current = null;
+      routeStepMarkersRef.current.forEach((marker) => marker.remove());
+      routeStepMarkersRef.current = [];
+      landmarkMarkersRef.current.forEach((marker) => marker.remove());
+      landmarkMarkersRef.current = [];
+      mapReadyRef.current = false;
+      setRouteInfo(null);
+      setRouteSteps([]);
+      if (navWatchIdRef.current) {
+        navigator.geolocation.clearWatch(navWatchIdRef.current);
+        navWatchIdRef.current = null;
+      }
+      if (recordingWatchIdRef.current) {
+        navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+        recordingWatchIdRef.current = null;
+      }
+      setIsRecording(false);
+      setRecordingPaused(false);
+      setShowRecordingPanel(false);
+      setRecordingPoints([]);
+      setRecordingDistance(0);
+      setRecordingStart(null);
+    }
+  }, [showMapModal]);
+
+  const stopNavWatch = () => {
+    if (navWatchIdRef.current) {
+      navigator.geolocation.clearWatch(navWatchIdRef.current);
+      navWatchIdRef.current = null;
+    }
+  };
+
+  const beginNavWatch = () => {
+    if (!navigator.geolocation || navWatchIdRef.current) return;
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserCoords(point);
+        if (userMarkerRef.current && mapRef.current) {
+          userMarkerRef.current.setLngLat([point.lng, point.lat]);
+        }
+        if (routeManeuversRef.current.length > 0) {
+          const idx = routeStepIndexRef.current;
+          const next = routeManeuversRef.current[idx];
+          if (next?.location) {
+            const dist = haversine({ lat: point.lat, lng: point.lng }, { lat: next.location[1], lng: next.location[0] });
+            if (dist < 25 && idx < routeManeuversRef.current.length - 1) {
+              routeStepIndexRef.current = idx + 1;
+              speak(next.instruction);
+            }
+          }
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    navWatchIdRef.current = id;
+  };
+
+  React.useEffect(() => {
+    if (!voiceDirectionsEnabled || !showMapModal || !mapReadyRef.current || isRecording) {
+      stopNavWatch();
+      return;
+    }
+    if (!routeManeuversRef.current.length) {
+      stopNavWatch();
+      return;
+    }
+    beginNavWatch();
+    return () => stopNavWatch();
+  }, [isRecording, routeSteps.length, showMapModal, voiceDirectionsEnabled]);
+
+  const beginRecordingWatch = () => {
+    if (!navigator.geolocation) {
+      setRecordingStatus('Geolocation not supported.');
+      return;
+    }
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+    }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, recorded_at: new Date().toISOString() };
+        setRecordingPoints((prev) => {
+          if (prev.length > 0) {
+            const last = prev[prev.length - 1];
+            const segment = haversine({ lat: last.lat, lng: last.lng }, { lat: point.lat, lng: point.lng });
+            setRecordingDistance((dist) => dist + segment);
+          }
+          return [...prev, point];
+        });
+        if (mapRef.current) {
+          mapRef.current.easeTo({ center: [point.lng, point.lat], duration: 500 });
+        }
+      },
+      () => {
+        setRecordingStatus('Unable to read GPS location.');
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    recordingWatchIdRef.current = id;
+  };
+
+  const startRecording = () => {
+    setRecordingPoints([]);
+    setRecordingDistance(0);
+    setRecordingStart(Date.now());
+    setIsRecording(true);
+    setRecordingPaused(false);
+    setRecordingStatus(null);
+    beginRecordingWatch();
+  };
+
+  const pauseRecording = () => {
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+      recordingWatchIdRef.current = null;
+    }
+    setRecordingPaused(true);
+  };
+
+  const resumeRecording = () => {
+    if (!isRecording) return;
+    setRecordingPaused(false);
+    beginRecordingWatch();
+  };
+
+  const stopRecording = () => {
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+      recordingWatchIdRef.current = null;
+    }
+    setRecordingPaused(false);
+    setIsRecording(false);
+    setShowRecordingPanel(true);
+  };
+
+  const saveRecording = async () => {
+    if (recordingPoints.length < 2) {
+      setRecordingStatus('Record at least two points.');
+      return;
+    }
+    try {
+      const saved = await recordPath({
+        name: recordingName || 'Recorded path',
+        shared: recordingShared,
+        seller_id: sellerId || undefined,
+        points: recordingPoints
+      });
+      if (saved?.id) {
+        precomputePathWaypoints(saved.id).catch(() => {});
+      }
+      setRecordingStatus(saved?.id ? 'Path saved.' : 'Path saved.');
+      setShowRecordingPanel(false);
+      setRecordingName('');
+      setRecordingShared(true);
+      setRecordingPoints([]);
+      setRecordingDistance(0);
+      setRecordingStart(null);
+    } catch (err: any) {
+      setRecordingStatus(err?.message || 'Unable to save path.');
+    }
+  };
+
+  const sellerPaths = React.useMemo(
+    () => popularPaths.filter((path) => path.seller_id && sellerId && path.seller_id === sellerId),
+    [popularPaths, sellerId]
+  );
+  const availablePaths = sellerPaths.length > 0 ? sellerPaths : popularPaths;
+  const selectedPath = React.useMemo(
+    () => availablePaths.find((path) => path.id === preferredPathId) || availablePaths[0],
+    [availablePaths, preferredPathId]
+  );
+
+  React.useEffect(() => {
+    if (availablePaths.length === 0) return;
+    if (!preferredPathId || !availablePaths.find((path) => path.id === preferredPathId)) {
+      setPreferredPathId(availablePaths[0].id);
+    }
+  }, [availablePaths, preferredPathId]);
+
+  React.useEffect(() => {
+    if (!preferredPathId) {
+      setPathLandmarks([]);
+      return;
+    }
+    let ignore = false;
+    listPathLandmarks(preferredPathId)
+      .then((items) => {
+        if (!ignore) setPathLandmarks(items);
+      })
+      .catch(() => {
+        if (!ignore) setPathLandmarks([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [preferredPathId]);
+
+  React.useEffect(() => {
+    if (!mapRef.current || !mapReadyRef.current) return;
+    landmarkMarkersRef.current.forEach((marker) => marker.remove());
+    landmarkMarkersRef.current = [];
+    if (pathLandmarks.length === 0) return;
+    pathLandmarks
+      .filter((landmark) => Number.isFinite(landmark.lat) && Number.isFinite(landmark.lng))
+      .forEach((landmark, idx) => {
+        const el = document.createElement('div');
+        el.className = 'w-9 h-9 rounded-full bg-white shadow-lg border border-white/70 flex items-center justify-center';
+        const thumb = document.createElement('div');
+        thumb.className = 'w-8 h-8 rounded-full bg-zinc-200 bg-center bg-cover border border-white';
+        thumb.style.backgroundImage = `url(${landmark.image_url})`;
+        const badge = document.createElement('div');
+        badge.className = 'absolute -top-2 -right-1 w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center shadow';
+        badge.textContent = String(idx + 1);
+        el.style.position = 'relative';
+        el.appendChild(thumb);
+        el.appendChild(badge);
+        const marker = new mapboxgl.Marker({ element: el })
+          .setLngLat([landmark.lng as number, landmark.lat as number])
+          .addTo(mapRef.current!);
+        landmarkMarkersRef.current.push(marker);
+      });
+  }, [pathLandmarks, showMapModal]);
 
   return (
     <motion.div
@@ -1462,19 +2079,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
                   {uploading && (
                     <p className="text-[10px] font-bold text-indigo-600">Uploading...</p>
                   )}
+                  {evidenceErrors.s3Key && (
+                    <p className="text-[10px] font-bold text-red-600">{evidenceErrors.s3Key}</p>
+                  )}
                 </div>
-                <input
-                  className={`w-full p-2.5 rounded-xl text-[10px] font-bold ${evidenceErrors.s3Key ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
-                  placeholder="S3 Key"
-                  value={evidenceForm.s3Key}
-                  onChange={(e) => {
-                    setEvidenceForm(prev => ({ ...prev, s3Key: e.target.value }));
-                    setEvidenceErrors(prev => ({ ...prev, s3Key: '' }));
-                  }}
-                />
-                {evidenceErrors.s3Key && (
-                  <p className="text-[10px] font-bold text-red-600">{evidenceErrors.s3Key}</p>
-                )}
                 <input
                   className={`w-full p-2.5 rounded-xl text-[10px] font-bold ${evidenceErrors.fileName ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
                   placeholder="File Name"
@@ -1570,6 +2178,271 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product, onClose, 
               <ProductAIChat product={activeProduct} onClose={() => setShowAIChat(false)} />
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMapModal && (
+          <motion.div
+            className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl"
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 20, opacity: 0 }}
+            >
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-100 rounded-xl">
+                    <MapPin className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-zinc-900">Pickup Directions</p>
+                    {routeInfo && (
+                      <p className="text-[10px] text-zinc-500 font-bold">
+                        {routeInfo.distanceKm} km • {routeInfo.durationMin} min
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowMapModal(false)}
+                  className="p-2 rounded-full hover:bg-zinc-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              {availablePaths.length > 0 && (
+                <div className="px-4 py-3 border-b bg-zinc-50/70 flex flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-600">
+                  <span className="uppercase tracking-wider text-zinc-400">Preferred Route</span>
+                  <select
+                    className="px-3 py-2 rounded-2xl border border-zinc-200 bg-white text-zinc-700 text-[10px] font-bold"
+                    value={preferredPathId || availablePaths[0]?.id || ''}
+                    onChange={(e) => {
+                      const next = e.target.value || null;
+                      setPreferredPathId(next);
+                      setNavigationMode(next ? 'silent' : 'mapbox');
+                    }}
+                  >
+                    {availablePaths.map((path) => (
+                      <option key={path.id} value={path.id}>
+                        {path.name || 'Recorded path'} · {path.usage_count || 0} uses · {path.start_label ? `From ${path.start_label}` : path.start_lat ? `From ${path.start_lat.toFixed(3)}, ${path.start_lng?.toFixed(3)}` : 'Custom start'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {(selectedPath || pathLandmarks.length > 0) && (
+                <div className="px-4 py-3 border-b bg-white">
+                  {shopFrontImage && (
+                    <div className="mb-3 overflow-hidden rounded-2xl border border-zinc-100">
+                      <img src={shopFrontImage} alt="Shop front" className="h-40 w-full object-cover" />
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-3 text-[10px] font-bold text-zinc-600">
+                    {selectedPath?.start_label && (
+                      <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                        Start: {selectedPath.start_label}
+                      </span>
+                    )}
+                    {selectedPath?.end_label && (
+                      <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">
+                        End: {selectedPath.end_label}
+                      </span>
+                    )}
+                    {!selectedPath?.start_label && selectedPath?.start_lat && (
+                      <span className="px-2 py-1 rounded-full bg-zinc-100 text-zinc-600">
+                        Start: {selectedPath.start_lat.toFixed(3)}, {selectedPath.start_lng?.toFixed(3)}
+                      </span>
+                    )}
+                  </div>
+                  {pathLandmarks.length > 0 && (
+                    <div className="mt-3 overflow-x-auto">
+                      <div className="flex gap-3 min-w-max">
+                        {pathLandmarks.map((landmark) => (
+                          <div key={landmark.id || landmark.image_url} className="w-40 bg-zinc-50 rounded-2xl border border-zinc-100 overflow-hidden">
+                            <img src={landmark.image_url} alt={landmark.label} className="h-24 w-full object-cover" />
+                            <div className="p-2">
+                              <p className="text-[10px] font-black text-zinc-800">{landmark.label}</p>
+                              <p className="text-[9px] text-zinc-500 uppercase">{landmark.type || 'Landmark'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="relative h-[360px] bg-zinc-100">
+                <div ref={mapContainerRef} className="absolute inset-0" />
+                {!mapboxToken && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
+                    Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                  </div>
+                )}
+                <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
+                  <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex flex-wrap gap-1 text-[9px] font-bold text-zinc-700">
+                    {[
+                      { label: 'Drive', value: 'driving' },
+                      { label: 'Motorbike', value: 'motorbike' },
+                      { label: 'Scooter', value: 'scooter' },
+                      { label: 'TukTuk', value: 'tuktuk' },
+                      { label: 'Cycle', value: 'cycling' },
+                      { label: 'Walk', value: 'walking' }
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setRouteProfile(opt.value as any)}
+                        className={`px-2 py-1 rounded-full ${routeProfile === opt.value ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {preferredPathId && (
+                    <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex items-center gap-1 text-[9px] font-bold text-zinc-700">
+                      <button
+                        onClick={() => setNavigationMode('silent')}
+                        className={`px-2 py-1 rounded-full ${navigationMode === 'silent' ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        Seller Path
+                      </button>
+                      <button
+                        onClick={() => setNavigationMode('mapbox')}
+                        className={`px-2 py-1 rounded-full ${navigationMode === 'mapbox' ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        Standard
+                      </button>
+                    </div>
+                  )}
+                  <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex items-center gap-1 text-[9px] font-bold text-zinc-700">
+                    <button
+                      onClick={() => {
+                        const next = !voiceDirectionsEnabled;
+                        setVoiceDirectionsEnabled(next);
+                        try {
+                          localStorage.setItem('soko:voice_directions', String(next));
+                        } catch {}
+                      }}
+                      className={`px-3 py-1 rounded-full ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
+                    >
+                      {voiceDirectionsEnabled ? 'Voice On' : 'Voice Off'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (isRecording) {
+                          stopRecording();
+                        } else {
+                          startRecording();
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-full ${isRecording ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}
+                    >
+                      {isRecording ? 'Stop' : 'Record'}
+                    </button>
+                    {isRecording && (
+                      <button
+                        onClick={recordingPaused ? resumeRecording : pauseRecording}
+                        className="px-3 py-1 rounded-full bg-zinc-100 text-zinc-700"
+                      >
+                        {recordingPaused ? 'Resume' : 'Pause'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {isRecording && (
+                  <div className="absolute top-12 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                    <div>
+                      Recording… {Math.round(recordingDistance)}m · {Math.floor((recordingStart ? (Date.now() - recordingStart) : 0) / 60000)}m
+                    </div>
+                    <div className="text-[9px] text-white/80">Points: {recordingPoints.length} / 10</div>
+                  </div>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 pb-3 px-3">
+                  <div className="bg-white/95 backdrop-blur-md rounded-t-3xl border border-white shadow-2xl p-4 max-h-[40vh] overflow-hidden">
+                    {routeSteps.length > 0 && (
+                      <div className="max-h-28 overflow-auto text-[10px] text-zinc-700 space-y-1">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Directions</div>
+                        {routeSteps.slice(0, 5).map((step, idx) => (
+                          <div key={`pd-route-step-${idx}`} className="flex items-center justify-between gap-2">
+                            <span className="font-bold">{step.instruction}</span>
+                            <span className="text-[9px] text-zinc-500">
+                              {Math.max(1, Math.round(step.distance / 10) * 10)}m · {Math.max(1, Math.round(step.duration / 60))}m
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {routeSteps.length === 0 && routeInfo && (
+                      <div className="text-[10px] font-bold text-zinc-600">
+                        Directions unavailable. Enable location services and try again.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {showRecordingPanel && (
+                <div className="p-4 border-t bg-white">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-black text-zinc-900">Save Recorded Path</div>
+                    <button
+                      onClick={() => {
+                        setShowRecordingPanel(false);
+                        setRecordingPoints([]);
+                        setRecordingDistance(0);
+                        setRecordingStart(null);
+                      }}
+                      className="text-[10px] font-bold text-zinc-400"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <input
+                      value={recordingName}
+                      onChange={(e) => setRecordingName(e.target.value)}
+                      placeholder="Name this path"
+                      className="w-full px-3 py-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                    />
+                    <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                      <input
+                        type="checkbox"
+                        checked={recordingShared}
+                        onChange={(e) => setRecordingShared(e.target.checked)}
+                      />
+                      Share with community
+                    </label>
+                  </div>
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between text-[9px] font-bold text-zinc-500">
+                      <span>Recording progress</span>
+                      <span>{recordingPoints.length} / 10 points</span>
+                    </div>
+                    <div className="mt-2 h-2 bg-zinc-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full"
+                        style={{ width: `${Math.min(100, Math.round((recordingPoints.length / 10) * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={saveRecording}
+                    disabled={recordingPoints.length < 2}
+                    className="w-full py-2 rounded-xl bg-indigo-600 text-white text-xs font-black"
+                  >
+                    Save Path
+                  </button>
+                  {recordingStatus && (
+                    <div className="mt-2 text-[10px] font-bold text-zinc-500">{recordingStatus}</div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

@@ -11,6 +11,7 @@ interface AuthOnboardingProps {
 
 export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish }) => {
   const [intent, setIntent] = React.useState<'buyer' | 'seller' | null>(null);
+  const [sellerShopType, setSellerShopType] = React.useState<'physical' | 'online' | 'hybrid' | 'marketplace'>('physical');
   const [checklist, setChecklist] = React.useState({
     profile: false,
     favorites: false,
@@ -47,16 +48,21 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
     try {
       localStorage.setItem('soko:account_intent', intent);
       localStorage.setItem('soko:onboarding_checklist', JSON.stringify(checklist));
+      if (intent === 'seller') {
+        localStorage.setItem('soko:shop_type', sellerShopType);
+      }
     } catch {}
     trackEvent({
       action: 'complete',
       intent,
       checklist,
+      shop_type: intent === 'seller' ? sellerShopType : undefined,
     });
     trackAnalytics({
       action: 'complete',
       intent,
       checklist,
+      shop_type: intent === 'seller' ? sellerShopType : undefined,
     });
     onFinish?.(intent);
   };
@@ -130,6 +136,37 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
             </div>
           </div>
         </button>
+
+        {intent === 'seller' && (
+          <div className="bg-white border border-zinc-100 rounded-3xl p-6 shadow-sm">
+            <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Shop Type</p>
+            <p className="text-sm font-bold text-zinc-900 mt-1">How do you sell today?</p>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-[10px] font-bold">
+              {[
+                { id: 'physical', label: 'Physical' },
+                { id: 'online', label: 'Online' },
+                { id: 'hybrid', label: 'Hybrid' },
+                { id: 'marketplace', label: 'Marketplace' },
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  onClick={() => {
+                    setSellerShopType(option.id as typeof sellerShopType);
+                    trackEvent({ action: 'select_shop_type', shop_type: option.id });
+                    trackAnalytics({ action: 'select_shop_type', shop_type: option.id });
+                  }}
+                  className={`px-3 py-2 rounded-2xl border ${
+                    sellerShopType === option.id
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="bg-white border border-zinc-100 rounded-3xl p-6 shadow-sm">
           <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Welcome Checklist</p>

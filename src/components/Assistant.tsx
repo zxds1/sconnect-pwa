@@ -1,37 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Camera, Video, Plus, BadgeCheck, TrendingUp } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Plus, BadgeCheck, TrendingUp } from 'lucide-react';
 import { Product } from '../types';
-import { SELLERS } from '../mockData';
 import {
-  createAttachment,
-  createMemory,
   createMessage,
   createThread,
-  createUpload,
-  deleteMemory,
   deleteThread,
-  executeTool,
-  getAssistantMetrics,
-  getOCRStatus,
-  listAttachments,
-  listMemory,
   listMessages,
   listSuggestions,
   listThreads,
-  listToolHistory,
-  postAssistantEvent,
-  postModeration,
-  postReport,
   runOCR,
   runVisionSearch,
   streamThreadMessage,
-  transcribeAudio,
-  updateMemory,
-  updateThread,
-  AssistantMemory,
-  AssistantToolHistory,
-  AssistantAttachment
+  updateThread
 } from '../lib/assistantApi';
+import { requestUploadPresign } from '../lib/uploadsApi';
 import {
   getSellerBuyerInsight,
   getSellerFunnel,
@@ -61,6 +43,7 @@ import {
   searchTrending,
   searchRecommendations
 } from '../lib/searchApi';
+import { searchShops } from '../lib/shopDirectoryApi';
 import { getCartInsights, getCartSummary, getCartRecommendations, getCartAlerts } from '../lib/cartApi';
 import { getCompareList } from '../lib/compareApi';
 import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
@@ -77,6 +60,12 @@ type AssistantMessage = {
   content: string;
   metadata?: Record<string, any>;
   actions?: AssistantAction[];
+};
+
+type AssistantReference = {
+  label: string;
+  detail?: string;
+  data?: Record<string, any>;
 };
 
 type AssistantChat = {
@@ -97,6 +86,7 @@ interface AssistantProps {
   onAddToBag: (product: Product) => void;
   onAddToComparison: (product: Product) => void;
   onOpenSeller: (sellerId: string) => void;
+  onStartNavigation: (payload: Record<string, any>) => void;
   onOpenRewards: () => void;
   onOpenProfile: () => void;
   onOpenSellerStudio: () => void;
@@ -119,6 +109,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   onAddToBag,
   onAddToComparison,
   onOpenSeller,
+  onStartNavigation,
   onOpenRewards,
   onOpenProfile,
   onOpenSellerStudio,
@@ -136,25 +127,27 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [activeChatId, setActiveChatId] = useState('');
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [showMediaTray, setShowMediaTray] = useState(false);
-  const [showOpsPanel, setShowOpsPanel] = useState(false);
-  const [attachments, setAttachments] = useState<AssistantAttachment[]>([]);
-  const [memoryItems, setMemoryItems] = useState<AssistantMemory[]>([]);
-  const [toolHistory, setToolHistory] = useState<AssistantToolHistory[]>([]);
-  const [metricsPayload, setMetricsPayload] = useState<string>('');
-  const [opsStatus, setOpsStatus] = useState<string | null>(null);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const [isSellerAccount, setIsSellerAccount] = useState<boolean | null>(null);
-  const [uploadForm, setUploadForm] = useState({ file_url: '', mime_type: '', expires_at: '' });
-  const [attachmentForm, setAttachmentForm] = useState({ message_id: '', file_url: '', mime_type: '', type: 'image', expires_at: '' });
-  const [asrForm, setAsrForm] = useState({ audio_url: '', job_id: '' });
-  const [ocrForm, setOcrForm] = useState({ image_url: '', job_id: '' });
-  const [visionForm, setVisionForm] = useState({ image_url: '', query: '' });
-  const [toolForm, setToolForm] = useState({ tool: '', params: '{}' });
-  const [memoryForm, setMemoryForm] = useState({ key: '', value: '', source: 'manual', confidence: '0.8', consent_given: true });
-  const [memoryUpdateForm, setMemoryUpdateForm] = useState({ id: '', value: '', consent_given: true });
-  const [moderationText, setModerationText] = useState('');
-  const [reportText, setReportText] = useState('');
-  const [eventPayload, setEventPayload] = useState('{"event":"assistant_action"}');
+  const [usageTick, setUsageTick] = useState(0);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [llmModel, setLlmModel] = useState(() => {
+    try {
+      return localStorage.getItem('soko:llm_model') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [llmProvider, setLlmProvider] = useState(() => {
+    try {
+      return localStorage.getItem('soko:llm_provider') || '';
+    } catch {
+      return '';
+    }
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     try {
       const raw = localStorage.getItem('soko:assistant_sidebar');
@@ -574,13 +567,370 @@ export const Assistant: React.FC<AssistantProps> = ({
     pinned: !!thread.pinned
   });
 
+  const agentStatusLabels: Record<string, string> = {
+    orchestrator: 'Orchestrator: Coordinating agents…',
+    discovery: 'Discovery: Comparing offers…',
+    negotiation: 'Negotiation: Checking deals…',
+    purchase: 'Purchase: Optimizing checkout…',
+    insight: 'Insight: Pulling market signals…',
+    routing: 'Routing: Comparing routes…'
+  };
+
+  const findProductById = (productId?: string) =>
+    products.find((product) => product.id === productId || product.productId === productId);
+
+  const getActionUsage = (label: string) => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const raw = localStorage.getItem('soko:assistant_action_usage');
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw) as Record<string, number>;
+      return parsed[label] ?? 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const bumpActionUsage = (label: string) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem('soko:assistant_action_usage');
+      const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      parsed[label] = (parsed[label] ?? 0) + 1;
+      localStorage.setItem('soko:assistant_action_usage', JSON.stringify(parsed));
+      setUsageTick((prev) => prev + 1);
+    } catch {}
+  };
+
+  const sortActionsByUsage = (items: AssistantAction[]) =>
+    [...items].sort((a, b) => {
+      const usageDiff = getActionUsage(b.label) - getActionUsage(a.label);
+      if (usageDiff !== 0) return usageDiff;
+      return a.label.localeCompare(b.label);
+    });
+
+  const sortedSuggestionChips = useMemo(() => {
+    return [...suggestionChips].sort((a, b) => {
+      const usageDiff = getActionUsage(b.label) - getActionUsage(a.label);
+      if (usageDiff !== 0) return usageDiff;
+      return a.label.localeCompare(b.label);
+    });
+  }, [suggestionChips, usageTick]);
+
+  const buildActionsFromMetadata = (metadata?: Record<string, any>): AssistantAction[] => {
+    const rawActions = Array.isArray(metadata?.actions) ? metadata.actions : [];
+    const mapped = rawActions
+      .map((action: any) => {
+        const type = String(action?.type || '').toLowerCase();
+        const label = action?.label || 'Take action';
+        const payload = action?.payload || {};
+        if (!type) return null;
+        switch (type) {
+          case 'add_to_cart': {
+            const productId = payload.product_id || payload.id;
+            const product = findProductById(productId);
+            if (!product) {
+              const fallbackQuery = payload.name || payload.product_name || payload.query || '';
+              return {
+                label: label || 'Open search',
+                onClick: () => {
+                  if (fallbackQuery) {
+                    onOpenSearch(fallbackQuery);
+                  } else {
+                    onToast('Open the product to add it to cart.');
+                  }
+                }
+              };
+            }
+            return {
+              label: label || `Add ${product.name}`,
+              onClick: () => onAddToBag(product)
+            };
+          }
+          case 'open_compare': {
+            const productId = payload.product_id || payload.id;
+            const product = findProductById(productId);
+            if (!product) {
+              return {
+                label: label || 'Open compare',
+                onClick: () => onToast('Open a product to compare offers.')
+              };
+            }
+            return {
+              label: label || 'Compare offers',
+              onClick: () => onAddToComparison(product)
+            };
+          }
+          case 'open_search': {
+            const query = payload.query || payload.text || payload.value || '';
+            return {
+              label: label || 'Open search',
+              onClick: () => onOpenSearch(query || input)
+            };
+          }
+          case 'open_supplier': {
+            const sellerId = payload.seller_id || payload.id;
+            return {
+              label: label || 'View supplier',
+              onClick: () => {
+                if (sellerId) {
+                  onOpenSeller(sellerId);
+                } else {
+                  onToast('Supplier details unavailable.');
+                }
+              }
+            };
+          }
+          case 'show_paths':
+          case 'start_navigation': {
+            const sellerId = payload.seller_id || payload.destination_seller_id;
+            return {
+              label: label || (type === 'start_navigation' ? 'Start Navigation' : 'Show Paths'),
+              onClick: () => {
+                if (type === 'start_navigation') {
+                  onStartNavigation(payload);
+                  return;
+                }
+                if (sellerId) {
+                  onOpenSeller(sellerId);
+                  return;
+                }
+                onToast('Open the seller to view directions.');
+              }
+            };
+          }
+          case 'open_rfq':
+          case 'start_rfq':
+            return {
+              label: label || 'Open RFQ',
+              onClick: () => onOpenRFQ()
+            };
+          case 'join_group_buy':
+            return {
+              label: label || 'Join Group Buy',
+              onClick: () => {
+                onOpenFeed();
+                onToast('Opening group buy opportunities.');
+              }
+            };
+          case 'open_cart':
+            return {
+              label: label || 'View cart',
+              onClick: () => onOpenBag()
+            };
+          case 'view_insights':
+            return {
+              label: label || 'View insights',
+              onClick: () => onOpenSellerStudio()
+            };
+          case 'open_seller_studio':
+            return {
+              label: label || 'Open Seller Studio',
+              onClick: () => onOpenSellerStudio()
+            };
+          case 'open_rewards':
+            return {
+              label: label || 'Open Rewards',
+              onClick: () => onOpenRewards()
+            };
+          case 'open_subscriptions':
+            return {
+              label: label || 'Open Subscriptions',
+              onClick: () => onOpenSubscriptions()
+            };
+          case 'open_partnerships':
+            return {
+              label: label || 'Open Partnerships',
+              onClick: () => onOpenPartnerships()
+            };
+          case 'open_whatsapp':
+            return {
+              label: label || 'Open WhatsApp',
+              onClick: () => onOpenWhatsApp()
+            };
+          case 'open_feed':
+            return {
+              label: label || 'Open Feed',
+              onClick: () => onOpenFeed()
+            };
+          case 'open_qr_scan':
+            return {
+              label: label || 'Scan QR',
+              onClick: () => onOpenQrScan()
+            };
+          case 'open_profile':
+            return {
+              label: label || 'Open Profile',
+              onClick: () => onOpenProfile()
+            };
+          default:
+            return {
+              label,
+              onClick: () => onToast('Action not available yet.')
+            };
+        }
+      })
+      .filter(Boolean) as AssistantAction[];
+    return sortActionsByUsage(mapped).map((action) => ({
+      label: action.label,
+      onClick: () => {
+        bumpActionUsage(action.label);
+        action.onClick();
+      }
+    }));
+  };
+
   const toAssistantMessages = (items: any[]): AssistantMessage[] =>
     (items || []).map((msg) => ({
       id: msg.id,
       role: msg.role === 'assistant' ? 'assistant' : 'user',
       content: msg.content || '',
-      metadata: msg.metadata || {}
+      metadata: msg.metadata || {},
+      actions: buildActionsFromMetadata(msg.metadata)
     }));
+
+  const guessMediaType = (url: string): 'image' | 'video' | 'audio' | 'file' => {
+    const lower = url.toLowerCase();
+    if (lower.match(/\.(png|jpe?g|gif|webp|bmp|svg)$/)) return 'image';
+    if (lower.match(/\.(mp4|webm|mov|m4v|avi)$/)) return 'video';
+    if (lower.match(/\.(mp3|wav|m4a|aac|ogg)$/)) return 'audio';
+    return 'file';
+  };
+
+  const mediaFromMetadata = (metadata?: Record<string, any>) => {
+    const media: Array<{ url: string; type: 'image' | 'video' | 'audio' | 'file' }> = [];
+    const candidates = [
+      metadata?.media_url,
+      metadata?.file_url,
+      metadata?.image_url,
+      metadata?.video_url,
+      metadata?.audio_url
+    ].filter(Boolean) as string[];
+    for (const url of candidates) {
+      media.push({ url, type: guessMediaType(url) });
+    }
+    const attachments = Array.isArray(metadata?.attachments) ? metadata?.attachments : [];
+    for (const att of attachments) {
+      const url = att?.url || att?.file_url || att?.media_url;
+      if (!url) continue;
+      const type = att?.type || guessMediaType(url);
+      media.push({ url, type });
+    }
+    return media;
+  };
+
+  const extractUrls = (text?: string) => {
+    if (!text) return [];
+    const matches = text.match(/https?:\/\/[^\s]+/g) || [];
+    return matches.map((url) => url.replace(/[),.]+$/, ''));
+  };
+
+  const renderMedia = (metadata?: Record<string, any>, content?: string) => {
+    const media = mediaFromMetadata(metadata);
+    const contentUrls = extractUrls(content);
+    for (const url of contentUrls) {
+      media.push({ url, type: guessMediaType(url) });
+    }
+    const deduped = media.filter(
+      (item, idx) => media.findIndex((m) => m.url === item.url) === idx
+    );
+    if (!deduped.length) return null;
+    return (
+      <div className="mt-2 grid grid-cols-1 gap-2">
+        {deduped.map((item, idx) => {
+          if (item.type === 'image') {
+            return (
+              <img
+                key={`${item.url}-${idx}`}
+                src={item.url}
+                alt="assistant response"
+                className="rounded-2xl border border-white/10 max-h-72 object-cover"
+                loading="lazy"
+              />
+            );
+          }
+          if (item.type === 'video') {
+            return (
+              <video
+                key={`${item.url}-${idx}`}
+                src={item.url}
+                controls
+                className="rounded-2xl border border-white/10 max-h-72 w-full"
+              />
+            );
+          }
+          if (item.type === 'audio') {
+            return (
+              <audio key={`${item.url}-${idx}`} src={item.url} controls className="w-full" />
+            );
+          }
+          return (
+            <a
+              key={`${item.url}-${idx}`}
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-emerald-200 underline"
+            >
+              Open attachment
+            </a>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const uploadToPresignedUrl = async (file: File, presign: any) => {
+    const uploadUrl = presign?.upload_url || presign?.url;
+    if (!uploadUrl) throw new Error('Missing upload URL');
+    const method = (presign?.method || (presign?.fields ? 'POST' : 'PUT')).toUpperCase();
+    if (presign?.fields) {
+      const form = new FormData();
+      Object.entries(presign.fields).forEach(([key, value]) => form.append(key, value as string));
+      form.append('file', file);
+      const res = await fetch(uploadUrl, { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+      return presign.fields.key || presign.s3_key || presign.key || '';
+    }
+    const headers: Record<string, string> = { ...(presign?.headers || {}) };
+    if (!headers['Content-Type'] && file.type) headers['Content-Type'] = file.type;
+    const res = await fetch(uploadUrl, { method, headers, body: file });
+    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+    return presign?.s3_key || presign?.key || '';
+  };
+
+  const uploadAssistantMedia = async (file: File) => {
+    const presign = await requestUploadPresign({
+      file_name: file.name,
+      mime_type: file.type || 'application/octet-stream',
+      content_length: file.size,
+      context: 'assistant_media'
+    });
+    const mediaKey = await uploadToPresignedUrl(file, presign);
+    return {
+      mediaKey,
+      mediaUrl: presign?.url
+    };
+  };
+
+  const saveModelPreferences = () => {
+    try {
+      if (llmModel) {
+        localStorage.setItem('soko:llm_model', llmModel.trim());
+      } else {
+        localStorage.removeItem('soko:llm_model');
+      }
+      if (llmProvider) {
+        localStorage.setItem('soko:llm_provider', llmProvider.trim());
+      } else {
+        localStorage.removeItem('soko:llm_provider');
+      }
+      onToast('AI model preferences updated.');
+      setShowModelPicker(false);
+    } catch {
+      onToast('Unable to save AI model preferences.');
+    }
+  };
 
   const syncMessages = async (threadId: string) => {
     try {
@@ -593,9 +943,9 @@ export const Assistant: React.FC<AssistantProps> = ({
     } catch {}
   };
 
-  const sendStreamMessage = async (threadId: string, content: string) => {
+  const sendStreamMessage = async (threadId: string, content: string, metadata?: Record<string, any>) => {
     try {
-      await streamThreadMessage(threadId, { content });
+      await streamThreadMessage(threadId, { content, metadata });
       await syncMessages(threadId);
       return true;
     } catch {
@@ -613,189 +963,68 @@ export const Assistant: React.FC<AssistantProps> = ({
     }
   };
 
-  const refreshOps = async () => {
+  const handleAssistantMedia = React.useCallback(async (file: File) => {
     if (!activeChatId) return;
-    const [mem, history, att] = await Promise.all([
-      listMemory(),
-      listToolHistory(),
-      listAttachments(activeChatId)
-    ]);
-    setMemoryItems(mem);
-    setToolHistory(history);
-    setAttachments(att);
-  };
-
-  const handleUpload = async () => {
-    setOpsStatus(null);
-    try {
-      const resp = await createUpload({
-        file_url: uploadForm.file_url,
-        mime_type: uploadForm.mime_type,
-        expires_at: uploadForm.expires_at || undefined
-      });
-      setOpsStatus(`Upload created: ${resp.upload_id}`);
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Upload failed.');
+    if (mediaUploading) return;
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) {
+      setMediaError('Unsupported media type.');
+      return;
     }
-  };
-
-  const handleCreateAttachment = async () => {
-    if (!activeChatId) return;
-    setOpsStatus(null);
+    setMediaUploading(true);
+    setMediaError(null);
     try {
-      await createAttachment(activeChatId, {
-        message_id: attachmentForm.message_id,
-        file_url: attachmentForm.file_url,
-        mime_type: attachmentForm.mime_type,
-        type: attachmentForm.type,
-        expires_at: attachmentForm.expires_at || undefined
-      });
-      await refreshOps();
-      setOpsStatus('Attachment created.');
+      const uploaded = await uploadAssistantMedia(file);
+      const query = input.trim();
+      let prompt = query || 'Analyze this media and suggest the best next actions.';
+      let metadata: Record<string, any> = {
+        media_url: uploaded.mediaUrl,
+        media_key: uploaded.mediaKey,
+        mime_type: file.type,
+        media_type: isVideo ? 'video' : 'image'
+      };
+      if (isImage) {
+        const [ocrRes, visionRes] = await Promise.allSettled([
+          runOCR({ image_url: uploaded.mediaUrl }),
+          runVisionSearch({ image_url: uploaded.mediaUrl, query: query || undefined })
+        ]);
+        const ocrText =
+          ocrRes.status === 'fulfilled'
+            ? ocrRes.value?.result?.text || ocrRes.value?.text || ''
+            : '';
+        const visionQuery =
+          visionRes.status === 'fulfilled'
+            ? visionRes.value?.result?.query || visionRes.value?.query || ''
+            : '';
+        const hints: string[] = [];
+        if (visionQuery) hints.push(`Image cues: ${visionQuery}`);
+        if (ocrText) hints.push(`Text found: ${ocrText}`);
+        if (!query) {
+          prompt = 'Analyze this image for product discovery, suppliers, and next actions.';
+        }
+        if (hints.length) {
+          prompt = `${prompt}\n\n${hints.join('\n')}`;
+        }
+        metadata = { ...metadata, ocr_text: ocrText, vision_query: visionQuery };
+      } else if (uploaded.mediaUrl) {
+        prompt = `${prompt}\n\nVideo URL: ${uploaded.mediaUrl}`;
+      }
+      setInput('');
+      setIsStreaming(true);
+      const apiOk = await sendStreamMessage(activeChatId, prompt, metadata);
+      if (!apiOk) {
+        setMediaError('Assistant is unavailable right now. Please try again.');
+      }
+      setIsStreaming(false);
     } catch (err: any) {
-      setOpsStatus(err?.message || 'Attachment failed.');
+      setMediaError(err?.message || 'Media upload failed.');
+      setIsStreaming(false);
+    } finally {
+      setMediaUploading(false);
     }
-  };
-
-  const handleTranscribe = async () => {
-    setOpsStatus(null);
-    try {
-      const job = await transcribeAudio({ audio_url: asrForm.audio_url });
-      setAsrForm(prev => ({ ...prev, job_id: job.id || '' }));
-      setOpsStatus(`ASR job queued: ${job.id}`);
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Transcription failed.');
-    }
-  };
-
-  const handleOCR = async () => {
-    setOpsStatus(null);
-    try {
-      const job = await runOCR({ image_url: ocrForm.image_url });
-      setOcrForm(prev => ({ ...prev, job_id: job.id || '' }));
-      setOpsStatus(`OCR job queued: ${job.id}`);
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'OCR failed.');
-    }
-  };
-
-  const handleOCRStatus = async () => {
-    setOpsStatus(null);
-    try {
-      const job = await getOCRStatus(ocrForm.job_id);
-      setOpsStatus(`OCR status: ${job.status || 'unknown'}`);
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'OCR status failed.');
-    }
-  };
-
-  const handleVision = async () => {
-    setOpsStatus(null);
-    try {
-      const job = await runVisionSearch({ image_url: visionForm.image_url, query: visionForm.query || undefined });
-      setOpsStatus(`Vision job queued: ${job.id}`);
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Vision failed.');
-    }
-  };
-
-  const handleToolExecute = async () => {
-    setOpsStatus(null);
-    try {
-      const params = toolForm.params ? JSON.parse(toolForm.params) : {};
-      await executeTool({ tool: toolForm.tool, params, thread_id: activeChatId });
-      await refreshOps();
-      setOpsStatus('Tool executed.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Tool execution failed.');
-    }
-  };
-
-  const handleCreateMemory = async () => {
-    setOpsStatus(null);
-    try {
-      await createMemory({
-        key: memoryForm.key,
-        value: memoryForm.value,
-        source: memoryForm.source,
-        confidence: Number(memoryForm.confidence || 0),
-        consent_given: memoryForm.consent_given
-      });
-      await refreshOps();
-      setOpsStatus('Memory saved.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Memory save failed.');
-    }
-  };
-
-  const handleUpdateMemory = async () => {
-    setOpsStatus(null);
-    try {
-      await updateMemory(memoryUpdateForm.id, {
-        value: memoryUpdateForm.value,
-        consent_given: memoryUpdateForm.consent_given
-      });
-      await refreshOps();
-      setOpsStatus('Memory updated.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Memory update failed.');
-    }
-  };
-
-  const handleDeleteMemory = async (id: string) => {
-    setOpsStatus(null);
-    try {
-      await deleteMemory(id);
-      await refreshOps();
-      setOpsStatus('Memory deleted.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Memory delete failed.');
-    }
-  };
-
-  const handleModerate = async () => {
-    setOpsStatus(null);
-    try {
-      await postModeration({ content: moderationText });
-      setOpsStatus('Moderation queued.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Moderation failed.');
-    }
-  };
-
-  const handleReport = async () => {
-    setOpsStatus(null);
-    try {
-      await postReport({ content: reportText });
-      setOpsStatus('Report queued.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Report failed.');
-    }
-  };
-
-  const handlePostEvent = async () => {
-    setOpsStatus(null);
-    try {
-      const payload = eventPayload ? JSON.parse(eventPayload) : {};
-      await postAssistantEvent(payload);
-      setOpsStatus('Event accepted.');
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Event failed.');
-    }
-  };
-
-  const handleMetrics = async () => {
-    setOpsStatus(null);
-    try {
-      const payload = await getAssistantMetrics();
-      setMetricsPayload(JSON.stringify(payload, null, 2));
-    } catch (err: any) {
-      setOpsStatus(err?.message || 'Metrics failed.');
-    }
-  };
-
-
-    useEffect(() => {
+  }, [activeChatId, input, mediaUploading, sendStreamMessage, uploadAssistantMedia]);
+  useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
@@ -1023,25 +1252,6 @@ export const Assistant: React.FC<AssistantProps> = ({
     syncMessages(activeChatId);
   }, [activeChatId]);
 
-  useEffect(() => {
-    if (!showOpsPanel || !activeChatId) return;
-    const loadOps = async () => {
-      try {
-        const [mem, history, att] = await Promise.all([
-          listMemory(),
-          listToolHistory(),
-          listAttachments(activeChatId)
-        ]);
-        setMemoryItems(mem);
-        setToolHistory(history);
-        setAttachments(att);
-      } catch (err: any) {
-        setOpsStatus(err?.message || 'Unable to load assistant ops.');
-      }
-    };
-    loadOps();
-  }, [showOpsPanel, activeChatId]);
-
 useEffect(() => {
     if (!activeChatId && chats[0]) {
       setActiveChatId(chats[0].id);
@@ -1051,6 +1261,21 @@ useEffect(() => {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chats, isStreaming]);
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      if (!event.clipboardData) return;
+      const items = Array.from(event.clipboardData.items || []);
+      const fileItem = items.find((item) => item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/')));
+      if (!fileItem) return;
+      const file = fileItem.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      handleAssistantMedia(file);
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [handleAssistantMedia]);
 
   useEffect(() => {
     try {
@@ -1064,12 +1289,19 @@ useEffect(() => {
       products.find(p => lower.split(' ').some(t => p.name.toLowerCase().includes(t)));
   };
 
-  const matchedSeller = (text: string) => {
-    const lower = text.toLowerCase();
-    return SELLERS.find(s => s.name.toLowerCase().includes(lower));
+  const matchedSeller = async (text: string) => {
+    const query = text.trim();
+    if (!query) return null;
+    try {
+      const shops = await searchShops({ query });
+      const lower = query.toLowerCase();
+      return shops.find(s => (s.name || '').toLowerCase().includes(lower)) || shops[0] || null;
+    } catch {
+      return null;
+    }
   };
 
-  const handleCommand = (text: string) => {
+  const handleCommand = async (text: string) => {
     const parts = text.trim().split(' ');
     const cmd = parts[0].toLowerCase();
     const arg = parts.slice(1).join(' ').trim();
@@ -1111,14 +1343,17 @@ useEffect(() => {
     }
     if (cmd === '/open') {
       const product = matchedProduct(arg);
-      const seller = matchedSeller(arg);
+      const seller = product ? null : await matchedSeller(arg);
       if (product) {
         onOpenProduct(product);
         return `Opening ${product.name}.`;
       }
       if (seller) {
-        onOpenSeller(seller.id);
-        return `Opening ${seller.name}.`;
+        const sellerId = seller.id || seller.seller_id || '';
+        if (sellerId) {
+          onOpenSeller(sellerId);
+          return `Opening ${seller.name || 'seller'}.`;
+        }
       }
       return 'I could not find that product or seller.';
     }
@@ -1177,7 +1412,7 @@ useEffect(() => {
     setInput('');
 
     if (text.startsWith('/')) {
-      const response = handleCommand(text);
+      const response = await handleCommand(text);
       setChats(prev => prev.map(chat => {
         if (chat.id !== activeChatId) return chat;
         return {
@@ -1199,8 +1434,28 @@ useEffect(() => {
   };
 
   return (
-    <div className="h-[100dvh] min-h-[100dvh] bg-slate-950 text-white flex overflow-hidden">
-            {/* Sidebar (desktop) */}
+    <div
+      className="h-[100dvh] min-h-[100dvh] bg-slate-950 text-white flex overflow-hidden relative"
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragActive(true);
+      }}
+      onDragLeave={() => setIsDragActive(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setIsDragActive(false);
+        const file = event.dataTransfer?.files?.[0];
+        if (file) handleAssistantMedia(file);
+      }}
+    >
+      {isDragActive && (
+        <div className="absolute inset-0 z-[90] flex items-center justify-center bg-emerald-500/10 border-2 border-dashed border-emerald-400">
+          <div className="px-4 py-2 bg-black/80 rounded-full text-xs font-bold text-emerald-200">
+            Drop an image or video to analyze
+          </div>
+        </div>
+      )}
+      {/* Sidebar (desktop) */}
       <div className={`bg-black/60 border-r border-white/10 shrink-0 transition-all duration-200 ${isSidebarOpen ? 'w-72 p-4' : 'w-16 p-2'} hidden lg:flex lg:flex-col h-full min-h-0`}>
         <div className={`flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} mb-4`}>
           {isSidebarOpen && (
@@ -1484,6 +1739,7 @@ useEffect(() => {
 
         {/* Header */}
         <div className="fixed top-0 left-0 right-0 px-4 pt-4 pb-3 sm:px-5 sm:pt-5 sm:pb-4 border-b border-white/10 flex items-center justify-between z-40 bg-slate-950/95 backdrop-blur">
+          <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsSidebarOpen(true)}
@@ -1504,11 +1760,11 @@ useEffect(() => {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowOpsPanel(true)}
+              onClick={() => setShowModelPicker(true)}
               className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-              aria-label="Open assistant ops"
+              aria-label="Choose AI model"
             >
-              <Plug className="w-5 h-5" />
+              <Sparkles className="w-5 h-5" />
             </button>
             <button
               onClick={onOpenProfile}
@@ -1518,10 +1774,11 @@ useEffect(() => {
               <User className="w-5 h-5" />
             </button>
           </div>
+          </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-h-0 px-4 pt-24 pb-28 sm:px-5 sm:pt-24 sm:pb-40 flex flex-col gap-4 sm:gap-5">
+        <div className="flex-1 min-h-0 px-4 pt-24 pb-28 sm:px-5 sm:pt-24 sm:pb-40 flex flex-col gap-4 sm:gap-5 max-w-5xl mx-auto w-full">
           {showIntroCards && (
             <>
               {showNewMemberIntro && (
@@ -1627,422 +1884,217 @@ useEffect(() => {
           {/* Quick Actions + More moved to sidebar navigation */}
 
           <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
-            {activeMessages.map((msg, i) => (
-              <div key={msg.id || `msg_${i}`} className={`max-w-[90%] ${msg.role === 'user' ? 'ml-auto text-right' : ''}`}>
-                <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
-                  {msg.content}
-                </div>
-                {msg.actions && msg.actions.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {msg.actions.map((action, idx) => (
-                      <button
-                        key={idx}
-                        onClick={action.onClick}
-                        className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
-                      >
-                        {action.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+            {isStreaming && (
+              <div className="flex items-center gap-2 text-[10px] text-white/60">
+                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="uppercase tracking-[0.3em]">Agents working</span>
               </div>
-            ))}
+            )}
+            {activeMessages.map((msg, i) => {
+              const isUser = msg.role === 'user';
+              return (
+                <div
+                  key={msg.id || `msg_${i}`}
+                  className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse ml-auto text-right' : ''}`}
+                >
+                  <div className={`h-9 w-9 rounded-2xl flex items-center justify-center text-[9px] font-black ${isUser ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/80'}`}>
+                    {isUser ? 'You' : 'AI'}
+                  </div>
+                  <div className="max-w-[85%] space-y-2">
+                    <div className={`text-[10px] font-bold ${isUser ? 'text-white/60' : 'text-white/70'}`}>
+                      {isUser ? 'You' : 'Soko AI'}
+                    </div>
+                    {msg.role === 'assistant' && Array.isArray(msg.metadata?.agent_status) && msg.metadata.agent_status.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {msg.metadata.agent_status.map((status: string) => {
+                          const key = String(status || '').toLowerCase();
+                          const label = agentStatusLabels[key] || status;
+                          return (
+                            <span
+                              key={`${msg.id || i}-${status}`}
+                              className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-white/10 text-white/70"
+                            >
+                              {label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${isUser ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
+                      {msg.content}
+                    </div>
+                    {msg.role === 'assistant' && renderMedia(msg.metadata, msg.content)}
+                    {msg.role === 'assistant' && Array.isArray(msg.metadata?.references) && msg.metadata.references.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                          {(msg.metadata.references as AssistantReference[]).map((ref, idx) => (
+                            <span
+                              key={`${msg.id || i}-ref-${idx}`}
+                              className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-emerald-500/10 text-emerald-200"
+                            >
+                              {ref.label}{ref.detail ? ` · ${ref.detail}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="space-y-1">
+                          {(msg.metadata.references as AssistantReference[]).map((ref, idx) => {
+                            const items = (ref.data as any)?.items;
+                            if (!Array.isArray(items) || items.length === 0) return null;
+                            return (
+                              <div key={`${msg.id || i}-ref-detail-${idx}`} className="text-[10px] text-white/70 space-y-1">
+                                {items.slice(0, 3).map((item: any, itemIdx: number) => (
+                                  <div key={`${msg.id || i}-ref-item-${idx}-${itemIdx}`} className="flex flex-wrap gap-2">
+                                    {Object.entries(item).map(([key, value]) => (
+                                      <span key={key} className="px-2 py-1 rounded-full bg-white/5">
+                                        {key}: {String(value ?? '')}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {msg.actions && msg.actions.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {msg.actions.map((action, idx) => (
+                          <button
+                            key={idx}
+                            onClick={action.onClick}
+                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
             <div ref={endRef} />
           </div>
         </div>
 
         {/* Sticky Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-4 sm:pb-5 z-40">
-          {suggestionChips.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
-              {suggestionChips.map(chip => (
-                <button
-                  key={chip.label}
-                  onClick={() => setInput(chip.value)}
-                  className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold whitespace-nowrap"
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="w-full max-w-5xl mx-auto">
+            {sortedSuggestionChips.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                {sortedSuggestionChips.map(chip => (
+                  <button
+                    key={chip.label}
+                    onClick={() => {
+                      bumpActionUsage(chip.label);
+                      setInput(chip.value);
+                    }}
+                    className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold whitespace-nowrap"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
-          {showMediaTray && (
-            <div className="flex gap-2 mb-3">
+            {(mediaUploading || mediaError) && (
+              <div className="mb-3 text-[10px] font-bold text-amber-200">
+                {mediaUploading ? 'Uploading media...' : mediaError}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => onOpenSearchAction('photo search', 'photo')}
-                className="flex-1 h-11 rounded-2xl bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold"
+                onClick={() => onOpenSearchAction('voice search', 'voice')}
+                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
+                aria-label="Voice search"
               >
-                <Camera className="w-4 h-4" /> Photo
+                <Mic className="w-5 h-5" />
+              </button>
+              <input
+                className="flex-1 min-w-0 h-11 bg-white/10 rounded-full px-4 text-sm outline-none focus:ring-2 focus:ring-emerald-400/40 placeholder:text-white/40"
+                placeholder="Ask Sconnect to search, compare, or buy..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              />
+              <input
+                ref={mediaInputRef}
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) handleAssistantMedia(file);
+                }}
+              />
+              <button
+                onClick={() => mediaInputRef.current?.click()}
+                className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10"
+                aria-label="Add media"
+              >
+                <Plus className="w-5 h-5" />
               </button>
               <button
-                onClick={() => onOpenSearchAction('video search', 'video')}
-                className="flex-1 h-11 rounded-2xl bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold"
+                onClick={handleSend}
+                className="h-11 w-11 rounded-full bg-emerald-500 flex items-center justify-center text-white"
+                aria-label="Send"
               >
-                <Video className="w-4 h-4" /> Video
-              </button>
-              <button
-                onClick={() => onOpenSearchAction('hybrid search', 'hybrid')}
-                className="flex-1 h-11 rounded-2xl bg-white/10 flex items-center justify-center gap-2 text-[10px] font-bold"
-              >
-                <Sparkles className="w-4 h-4" /> Hybrid
+                <Send className="w-5 h-5" />
               </button>
             </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onOpenSearchAction('voice search', 'voice')}
-              className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-              aria-label="Voice search"
-            >
-              <Mic className="w-5 h-5" />
-            </button>
-            <input
-              className="flex-1 min-w-0 h-11 bg-white/10 rounded-full px-4 text-sm outline-none"
-              placeholder="Ask Sconnect to search, compare, or buy..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            />
-            <button
-              onClick={() => setShowMediaTray(prev => !prev)}
-              className={`h-11 w-11 rounded-full flex items-center justify-center ${showMediaTray ? 'bg-white/20' : 'bg-white/10'}`}
-              aria-label="Open media options"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-            <button
-              onClick={handleSend}
-              className="h-11 w-11 rounded-full bg-emerald-500 flex items-center justify-center text-white"
-              aria-label="Send"
-            >
-              <Send className="w-5 h-5" />
-            </button>
           </div>
         </div>
       </div>
 
-      {showOpsPanel && (
+      {showModelPicker && (
         <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-4xl bg-slate-950 text-white border border-white/10 rounded-3xl overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="w-full max-w-md bg-slate-950 text-white border border-white/10 rounded-3xl overflow-hidden">
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <div>
-                <p className="text-sm font-black">Assistant Ops</p>
-                <p className="text-[10px] text-white/60">Live tools, memory, uploads, and moderation</p>
+                <p className="text-sm font-black">AI Model Preferences</p>
+                <p className="text-[10px] text-white/60">Choose provider + model (optional)</p>
               </div>
               <button
-                onClick={() => setShowOpsPanel(false)}
+                onClick={() => setShowModelPicker(false)}
                 className="h-10 w-10 rounded-full bg-white/10 flex items-center justify-center"
-                aria-label="Close assistant ops"
+                aria-label="Close model picker"
               >
                 ✕
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {opsStatus && (
-                <div className="text-[10px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
-                  {opsStatus}
-                </div>
-              )}
-
-              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Uploads</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="File URL"
-                    value={uploadForm.file_url}
-                    onChange={(e) => setUploadForm(prev => ({ ...prev, file_url: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="MIME type"
-                    value={uploadForm.mime_type}
-                    onChange={(e) => setUploadForm(prev => ({ ...prev, mime_type: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Expires at (RFC3339)"
-                    value={uploadForm.expires_at}
-                    onChange={(e) => setUploadForm(prev => ({ ...prev, expires_at: e.target.value }))}
-                  />
-                </div>
-                <button onClick={handleUpload} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
-                  Create Upload
+            <div className="p-4 space-y-3">
+              <input
+                className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px]"
+                placeholder="Provider (e.g., openrouter, azure, anthropic)"
+                value={llmProvider}
+                onChange={(e) => setLlmProvider(e.target.value)}
+              />
+              <input
+                className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px]"
+                placeholder="Model (e.g., gpt-4o-mini, claude-3.5-sonnet)"
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+              />
+              <div className="text-[10px] text-white/60">
+                Leave blank to use the default configured on the server.
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={saveModelPreferences}
+                  className="px-4 py-2 bg-emerald-500 rounded-xl text-[10px] font-black text-white"
+                >
+                  Save
                 </button>
-              </section>
-
-              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Attachments</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <select
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    value={attachmentForm.message_id}
-                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, message_id: e.target.value }))}
-                  >
-                    <option value="">Select message</option>
-                    {activeMessages.filter(m => m.id).map((msg) => (
-                      <option key={msg.id} value={msg.id}>
-                        {msg.role}: {msg.content.slice(0, 24)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    value={attachmentForm.type}
-                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, type: e.target.value }))}
-                  >
-                    <option value="image">image</option>
-                    <option value="audio">audio</option>
-                    <option value="video">video</option>
-                    <option value="file">file</option>
-                  </select>
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="File URL"
-                    value={attachmentForm.file_url}
-                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, file_url: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="MIME type"
-                    value={attachmentForm.mime_type}
-                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, mime_type: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Expires at (RFC3339)"
-                    value={attachmentForm.expires_at}
-                    onChange={(e) => setAttachmentForm(prev => ({ ...prev, expires_at: e.target.value }))}
-                  />
-                </div>
-                <button onClick={handleCreateAttachment} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
-                  Attach to Message
+                <button
+                  onClick={() => setShowModelPicker(false)}
+                  className="px-4 py-2 bg-white/10 rounded-xl text-[10px] font-black"
+                >
+                  Cancel
                 </button>
-                {attachments.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {attachments.map(att => (
-                      <div key={att.id} className="p-3 bg-white/10 rounded-xl text-[10px] font-bold">
-                        {att.type || 'file'} • {att.mime_type || 'mime'} • {att.file_url || 'url'}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Audio + OCR + Vision</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Audio URL"
-                    value={asrForm.audio_url}
-                    onChange={(e) => setAsrForm(prev => ({ ...prev, audio_url: e.target.value }))}
-                  />
-                  <button onClick={handleTranscribe} className="px-3 py-2 bg-emerald-600 rounded-xl text-[10px] font-black">
-                    Transcribe
-                  </button>
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="ASR job id"
-                    value={asrForm.job_id}
-                    onChange={(e) => setAsrForm(prev => ({ ...prev, job_id: e.target.value }))}
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Image URL (OCR)"
-                    value={ocrForm.image_url}
-                    onChange={(e) => setOcrForm(prev => ({ ...prev, image_url: e.target.value }))}
-                  />
-                  <button onClick={handleOCR} className="px-3 py-2 bg-emerald-600 rounded-xl text-[10px] font-black">
-                    OCR
-                  </button>
-                  <div className="flex gap-2">
-                    <input
-                      className="h-10 flex-1 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                      placeholder="OCR job id"
-                      value={ocrForm.job_id}
-                      onChange={(e) => setOcrForm(prev => ({ ...prev, job_id: e.target.value }))}
-                    />
-                    <button onClick={handleOCRStatus} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
-                      Status
-                    </button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Image URL (Vision)"
-                    value={visionForm.image_url}
-                    onChange={(e) => setVisionForm(prev => ({ ...prev, image_url: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Query"
-                    value={visionForm.query}
-                    onChange={(e) => setVisionForm(prev => ({ ...prev, query: e.target.value }))}
-                  />
-                  <button onClick={handleVision} className="px-3 py-2 bg-emerald-600 rounded-xl text-[10px] font-black">
-                    Vision Search
-                  </button>
-                </div>
-              </section>
-
-              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Tool Calls</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Tool name"
-                    value={toolForm.tool}
-                    onChange={(e) => setToolForm(prev => ({ ...prev, tool: e.target.value }))}
-                  />
-                  <textarea
-                    className="min-h-[40px] rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold"
-                    placeholder='Params JSON'
-                    value={toolForm.params}
-                    onChange={(e) => setToolForm(prev => ({ ...prev, params: e.target.value }))}
-                  />
-                </div>
-                <button onClick={handleToolExecute} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
-                  Execute Tool
-                </button>
-                {toolHistory.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {toolHistory.map(item => (
-                      <div key={item.id} className="p-3 bg-white/10 rounded-xl text-[10px] font-bold">
-                        {item.tool || 'tool'} • {item.created_at || ''}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Memory</p>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Key"
-                    value={memoryForm.key}
-                    onChange={(e) => setMemoryForm(prev => ({ ...prev, key: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Value"
-                    value={memoryForm.value}
-                    onChange={(e) => setMemoryForm(prev => ({ ...prev, value: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Source"
-                    value={memoryForm.source}
-                    onChange={(e) => setMemoryForm(prev => ({ ...prev, source: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Confidence"
-                    value={memoryForm.confidence}
-                    onChange={(e) => setMemoryForm(prev => ({ ...prev, confidence: e.target.value }))}
-                  />
-                </div>
-                <label className="text-[10px] font-bold text-white/70 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={memoryForm.consent_given}
-                    onChange={(e) => setMemoryForm(prev => ({ ...prev, consent_given: e.target.checked }))}
-                  />
-                  Consent given
-                </label>
-                <button onClick={handleCreateMemory} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
-                  Save Memory
-                </button>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Memory ID"
-                    value={memoryUpdateForm.id}
-                    onChange={(e) => setMemoryUpdateForm(prev => ({ ...prev, id: e.target.value }))}
-                  />
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="New value"
-                    value={memoryUpdateForm.value}
-                    onChange={(e) => setMemoryUpdateForm(prev => ({ ...prev, value: e.target.value }))}
-                  />
-                  <label className="text-[10px] font-bold text-white/70 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={memoryUpdateForm.consent_given}
-                      onChange={(e) => setMemoryUpdateForm(prev => ({ ...prev, consent_given: e.target.checked }))}
-                    />
-                    Consent
-                  </label>
-                </div>
-                <button onClick={handleUpdateMemory} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
-                  Update Memory
-                </button>
-
-                {memoryItems.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {memoryItems.map(mem => (
-                      <div key={mem.id} className="p-3 bg-white/10 rounded-xl text-[10px] font-bold flex items-center justify-between gap-2">
-                        <div>
-                          {mem.key}: {mem.value}
-                        </div>
-                        <button onClick={() => handleDeleteMemory(mem.id)} className="px-2 py-1 bg-red-500/20 rounded-lg text-[9px] font-black">
-                          Delete
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Safety + Events + Metrics</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Moderation text"
-                    value={moderationText}
-                    onChange={(e) => setModerationText(e.target.value)}
-                  />
-                  <button onClick={handleModerate} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
-                    Moderate
-                  </button>
-                  <input
-                    className="h-10 rounded-xl bg-white/10 px-3 text-[10px] font-bold"
-                    placeholder="Report text"
-                    value={reportText}
-                    onChange={(e) => setReportText(e.target.value)}
-                  />
-                  <button onClick={handleReport} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
-                    Report
-                  </button>
-                </div>
-                <textarea
-                  className="min-h-[60px] rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold"
-                  placeholder='Event payload JSON'
-                  value={eventPayload}
-                  onChange={(e) => setEventPayload(e.target.value)}
-                />
-                <div className="flex items-center gap-2">
-                  <button onClick={handlePostEvent} className="px-3 py-2 bg-indigo-600 rounded-xl text-[10px] font-black">
-                    Send Event
-                  </button>
-                  <button onClick={handleMetrics} className="px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black">
-                    Fetch Metrics
-                  </button>
-                </div>
-                {metricsPayload && (
-                  <pre className="text-[10px] bg-black/40 rounded-xl p-3 overflow-x-auto">{metricsPayload}</pre>
-                )}
-              </section>
+              </div>
             </div>
           </div>
         </div>

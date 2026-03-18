@@ -9,7 +9,7 @@ import {
   listChatMessages
 } from '../lib/supportApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
-import { createThread, streamThreadMessage, transcribeAudio } from '../lib/assistantApi';
+import { createThread, listMessages, streamThreadMessage, transcribeAudio } from '../lib/assistantApi';
 
 type SupportMode = 'duka' | 'seller-ai' | 'brand';
 
@@ -17,6 +17,7 @@ type SupportMessage = {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  metadata?: Record<string, any>;
 };
 
 const MODE_COPY: Record<SupportMode, { title: string; subtitle: string; starter: string; badge: string }> = {
@@ -81,6 +82,7 @@ export const SupportChat: React.FC<{
   const [transcribing, setTranscribing] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
+  const [assistantMetaByContent, setAssistantMetaByContent] = useState<Record<string, any>>({});
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -114,11 +116,16 @@ export const SupportChat: React.FC<{
           const items = await listChatMessages(thread.id);
           if (ignore) return;
           setMessages(
-            items.map((item: any, index: number) => ({
-              id: item?.id ?? `msg_${index}`,
-              role: item?.role === 'user' ? 'user' : 'assistant',
-              content: String(item?.content ?? '')
-            }))
+            items.map((item: any, index: number) => {
+              const content = String(item?.content ?? '');
+              const meta = assistantMetaByContent[content];
+              return {
+                id: item?.id ?? `msg_${index}`,
+                role: item?.role === 'user' ? 'user' : 'assistant',
+                content,
+                metadata: meta
+              };
+            })
           );
         }
       } catch (err: any) {
@@ -166,6 +173,99 @@ export const SupportChat: React.FC<{
     };
   }, []);
 
+  const agentStatusLabels: Record<string, string> = {
+    orchestrator: 'Orchestrator: Coordinating…',
+    discovery: 'Discovery: Comparing offers…',
+    negotiation: 'Negotiation: Checking deals…',
+    purchase: 'Purchase: Optimizing checkout…',
+    insight: 'Insight: Pulling market signals…',
+    routing: 'Routing: Comparing routes…'
+  };
+
+  const extractUrls = (text?: string) => {
+    if (!text) return [];
+    const matches = text.match(/https?:\/\/[^\s]+/g) || [];
+    return matches.map((url) => url.replace(/[),.]+$/, ''));
+  };
+
+  const guessMediaType = (url: string): 'image' | 'video' | 'audio' | 'file' => {
+    const lower = url.toLowerCase();
+    if (lower.match(/\.(png|jpe?g|gif|webp|bmp|svg)$/)) return 'image';
+    if (lower.match(/\.(mp4|webm|mov|m4v|avi)$/)) return 'video';
+    if (lower.match(/\.(mp3|wav|m4a|aac|ogg)$/)) return 'audio';
+    return 'file';
+  };
+
+  const mediaFromMetadata = (metadata?: Record<string, any>) => {
+    const media: Array<{ url: string; type: 'image' | 'video' | 'audio' | 'file' }> = [];
+    const candidates = [
+      metadata?.media_url,
+      metadata?.file_url,
+      metadata?.image_url,
+      metadata?.video_url,
+      metadata?.audio_url
+    ].filter(Boolean) as string[];
+    for (const url of candidates) {
+      media.push({ url, type: guessMediaType(url) });
+    }
+    return media;
+  };
+
+  const renderMedia = (metadata?: Record<string, any>, content?: string) => {
+    const media = mediaFromMetadata(metadata);
+    const contentUrls = extractUrls(content);
+    for (const url of contentUrls) {
+      media.push({ url, type: guessMediaType(url) });
+    }
+    const deduped = media.filter(
+      (item, idx) => media.findIndex((m) => m.url === item.url) === idx
+    );
+    if (!deduped.length) return null;
+    return (
+      <div className="mt-2 grid grid-cols-1 gap-2">
+        {deduped.map((item, idx) => {
+          if (item.type === 'image') {
+            return (
+              <img
+                key={`${item.url}-${idx}`}
+                src={item.url}
+                alt="assistant response"
+                className="rounded-2xl border border-zinc-200 max-h-56 object-cover"
+                loading="lazy"
+              />
+            );
+          }
+          if (item.type === 'video') {
+            return (
+              <video
+                key={`${item.url}-${idx}`}
+                src={item.url}
+                controls
+                className="rounded-2xl border border-zinc-200 max-h-56 w-full"
+              />
+            );
+          }
+          if (item.type === 'audio') {
+            return (
+              <audio key={`${item.url}-${idx}`} src={item.url} controls className="w-full" />
+            );
+          }
+          return (
+            <a
+              key={`${item.url}-${idx}`}
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-indigo-600 underline"
+            >
+              Open attachment
+            </a>
+          );
+        })}
+      </div>
+    );
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !threadId || loading) return;
     const text = input.trim();
@@ -183,11 +283,16 @@ export const SupportChat: React.FC<{
       await createChatMessage(threadId, { role: 'user', content: text });
       const items = await listChatMessages(threadId);
       setMessages(
-        items.map((item: any, index: number) => ({
-          id: item?.id ?? `msg_${index}`,
-          role: item?.role === 'user' ? 'user' : 'assistant',
-          content: String(item?.content ?? '')
-        }))
+        items.map((item: any, index: number) => {
+          const content = String(item?.content ?? '');
+          const meta = assistantMetaByContent[content];
+          return {
+            id: item?.id ?? `msg_${index}`,
+            role: item?.role === 'user' ? 'user' : 'assistant',
+            content,
+            metadata: meta
+          };
+        })
       );
       if (assistantThreadId) {
         setAssistantLoading(true);
@@ -198,13 +303,26 @@ export const SupportChat: React.FC<{
           });
           if (aiText?.trim()) {
             await createChatMessage(threadId, { role: 'assistant', content: aiText.trim() });
+            const aiMessages = await listMessages(assistantThreadId);
+            const lastAssistant = [...aiMessages].reverse().find((msg) => msg.role === 'assistant');
+            if (lastAssistant?.content) {
+              setAssistantMetaByContent((prev) => ({
+                ...prev,
+                [lastAssistant.content]: lastAssistant.metadata || {}
+              }));
+            }
             const refreshed = await listChatMessages(threadId);
             setMessages(
-              refreshed.map((item: any, index: number) => ({
-                id: item?.id ?? `msg_${index}`,
-                role: item?.role === 'user' ? 'user' : 'assistant',
-                content: String(item?.content ?? '')
-              }))
+              refreshed.map((item: any, index: number) => {
+                const content = String(item?.content ?? '');
+                const meta = assistantMetaByContent[content] || (lastAssistant?.content === content ? lastAssistant.metadata : undefined);
+                return {
+                  id: item?.id ?? `msg_${index}`,
+                  role: item?.role === 'user' ? 'user' : 'assistant',
+                  content,
+                  metadata: meta
+                };
+              })
             );
           }
         } catch (err: any) {
@@ -463,17 +581,80 @@ export const SupportChat: React.FC<{
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#f7faff]">
-        {messages.map((m, i) => (
-          <div key={m.id ?? i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] p-3 rounded-2xl ${
-              m.role === 'user'
-                ? 'bg-[#1976D2] text-white rounded-tr-none'
-                : 'bg-white border border-[#d6e6fa] rounded-tl-none text-zinc-800 shadow-sm'
-            }`}>
-              <span className="text-sm">{m.content}</span>
+        {messages.map((m, i) => {
+          const isUser = m.role === 'user';
+          return (
+            <div key={m.id ?? i} className={`flex items-start gap-3 ${isUser ? 'justify-end flex-row-reverse' : 'justify-start'}`}>
+              <div className={`h-8 w-8 rounded-2xl flex items-center justify-center text-[9px] font-black ${
+                isUser ? 'bg-[#1976D2] text-white' : 'bg-white border border-[#d6e6fa] text-[#1976D2]'
+              }`}>
+                {isUser ? 'You' : 'AI'}
+              </div>
+              <div className="max-w-[82%] space-y-2">
+                <div className={`text-[10px] font-bold ${isUser ? 'text-[#1976D2]' : 'text-zinc-500'}`}>
+                  {isUser ? 'You' : MODE_COPY[mode].title}
+                </div>
+                <div className={`p-3 rounded-2xl ${
+                  isUser
+                    ? 'bg-[#1976D2] text-white rounded-tr-none'
+                    : 'bg-white border border-[#d6e6fa] rounded-tl-none text-zinc-800 shadow-sm'
+                }`}>
+                  <span className="text-sm leading-relaxed">{m.content}</span>
+                  {m.role === 'assistant' && renderMedia(m.metadata, m.content)}
+                  {m.role === 'assistant' && Array.isArray(m.metadata?.agent_status) && m.metadata.agent_status.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {m.metadata.agent_status.map((status: string, idx: number) => {
+                        const key = String(status || '').toLowerCase();
+                        const label = agentStatusLabels[key] || status;
+                        return (
+                          <span
+                            key={`${m.id ?? i}-agent-${idx}`}
+                            className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-indigo-50 text-indigo-600"
+                          >
+                            {label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {m.role === 'assistant' && Array.isArray(m.metadata?.references) && m.metadata.references.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {m.metadata.references.map((ref: any, idx: number) => (
+                          <span
+                            key={`${m.id ?? i}-ref-${idx}`}
+                            className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-emerald-50 text-emerald-700"
+                          >
+                            {ref.label}{ref.detail ? ` · ${ref.detail}` : ''}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="space-y-1">
+                        {m.metadata.references.map((ref: any, idx: number) => {
+                          const items = ref?.data?.items;
+                          if (!Array.isArray(items) || items.length === 0) return null;
+                          return (
+                            <div key={`${m.id ?? i}-ref-items-${idx}`} className="text-[10px] text-zinc-500 space-y-1">
+                              {items.slice(0, 3).map((item: any, itemIdx: number) => (
+                                <div key={`${m.id ?? i}-ref-item-${idx}-${itemIdx}`} className="flex flex-wrap gap-2">
+                                  {Object.entries(item).map(([key, value]) => (
+                                    <span key={key} className="px-2 py-1 rounded-full bg-zinc-50">
+                                      {key}: {String(value ?? '')}
+                                    </span>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {(loading || booting) && (
           <div className="flex justify-start">
             <div className="bg-white border border-[#d6e6fa] rounded-2xl rounded-tl-none p-3 shadow-sm flex items-center gap-2">
@@ -555,7 +736,7 @@ export const SupportChat: React.FC<{
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Type a message..."
-            className="flex-1 px-4 py-3 bg-[#f1f6ff] rounded-full focus:outline-none focus:ring-2 focus:ring-[#1976D2] text-sm"
+            className="flex-1 px-4 py-3 bg-[#f1f6ff] rounded-full focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40 text-sm"
           />
           <button
             onClick={handleSend}

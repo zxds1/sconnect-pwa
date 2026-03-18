@@ -15,6 +15,9 @@ import {
   getTrendingFeed,
   joinLiveSession,
   leaveLiveSession,
+  getLiveSession,
+  listLiveComments,
+  createLiveComment,
   likeFeedItem,
   listLiveSessions,
   reportFeedItem,
@@ -24,6 +27,7 @@ import {
   unlikeFeedItem,
   unsaveFeedItem
 } from '../lib/feedApi';
+import { buildWsUrl } from '../lib/realtime';
 
 interface FeedProps {
   onChatOpen: (product: Product) => void;
@@ -132,6 +136,18 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [followedSellerIds, setFollowedSellerIds] = useState<string[]>([]);
   const [tab, setTab] = useState<'for_you' | 'following' | 'live'>('for_you');
+  const [activeLive, setActiveLive] = useState<LiveItem | null>(null);
+  const [showLiveModal, setShowLiveModal] = useState(false);
+  const [liveComments, setLiveComments] = useState<Array<{ id: string; userId?: string; message: string; createdAt?: string }>>([]);
+  const [liveCommentsLoading, setLiveCommentsLoading] = useState(false);
+  const [liveCommentInput, setLiveCommentInput] = useState('');
+  const [liveViewerCount, setLiveViewerCount] = useState<number | null>(null);
+  const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  const livePollRef = useRef<number | null>(null);
+  const liveSocketRef = useRef<WebSocket | null>(null);
+  const [liveTypingUsers, setLiveTypingUsers] = useState<string[]>([]);
+  const typingTimeoutRef = useRef<number | null>(null);
+  const [liveModeration, setLiveModeration] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -442,40 +458,166 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
     } catch {}
   };
 
+  const fetchLiveComments = async (liveId: string) => {
+    setLiveCommentsLoading(true);
+    try {
+      const resp = await listLiveComments(liveId, { limit: 50 });
+      const items = Array.isArray(resp?.items) ? resp.items : [];
+      const mapped = items.map((item: any) => ({
+        id: item.id || item?.post?.id || item?.comment_id || Math.random().toString(16).slice(2),
+        userId: item?.seller_id || item?.post?.user_id || item?.user_id,
+        message: item?.post?.content || item?.message || item?.content || '',
+        createdAt: item?.created_at || item?.post?.created_at
+      }));
+      setLiveComments(mapped.reverse());
+    } catch {
+      // ignore
+    } finally {
+      setLiveCommentsLoading(false);
+    }
+  };
+
+  const openLiveSession = async (session: LiveItem) => {
+    setActiveLive(session);
+    setShowLiveModal(true);
+    setLiveComments([]);
+    setLiveCommentInput('');
+    setLiveStatus(session.status || null);
+    setLiveViewerCount(session.viewerCount ?? null);
+    setLiveTypingUsers([]);
+    setLiveModeration(null);
+    try {
+      const resp = await joinLiveSession(session.id);
+      if (resp?.viewer_count !== undefined) {
+        setLiveViewerCount(resp.viewer_count);
+        setLiveSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, viewerCount: resp.viewer_count } : s)));
+      }
+    } catch {}
+    fetchLiveComments(session.id);
+    if (liveSocketRef.current) {
+      liveSocketRef.current.close();
+    }
+    const ws = new WebSocket(buildWsUrl(`/v1/live/${session.id}/ws`));
+    liveSocketRef.current = ws;
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'comment') {
+          setLiveComments((prev) => [...prev, {
+            id: `${payload.user_id || 'user'}-${payload.created_at || Date.now()}`,
+            userId: payload.user_id,
+            message: payload.message || '',
+            createdAt: payload.created_at
+          }]);
+        }
+        if (payload.type === 'typing') {
+          const userId = payload.user_id || 'user';
+          setLiveTypingUsers((prev) => {
+            const next = new Set(prev);
+            if (payload.is_typing) {
+              next.add(userId);
+            } else {
+              next.delete(userId);
+            }
+            return Array.from(next);
+          });
+        }
+        if (payload.type === 'viewer' && typeof payload.viewer_count === 'number') {
+          setLiveViewerCount(payload.viewer_count);
+        }
+        if (payload.type === 'status' && payload.status) {
+          setLiveStatus(payload.status);
+        }
+        if (payload.type === 'moderation') {
+          setLiveModeration(payload.reason || 'Comment blocked by moderation.');
+        }
+      } catch {}
+    };
+  };
+
+  const closeLiveSession = async () => {
+    if (liveSocketRef.current) {
+      liveSocketRef.current.close();
+      liveSocketRef.current = null;
+    }
+    if (activeLive?.id) {
+      try {
+        const resp = await leaveLiveSession(activeLive.id);
+        if (resp?.viewer_count !== undefined) {
+          setLiveViewerCount(resp.viewer_count);
+          setLiveSessions((prev) => prev.map((s) => (s.id === activeLive.id ? { ...s, viewerCount: resp.viewer_count } : s)));
+        }
+      } catch {}
+    }
+    setShowLiveModal(false);
+    setActiveLive(null);
+    setLiveComments([]);
+  };
+
+  const handleSendLiveComment = async () => {
+    if (!activeLive?.id || !liveCommentInput.trim()) return;
+    const message = liveCommentInput.trim();
+    setLiveCommentInput('');
+    setLiveComments((prev) => [...prev, { id: `local-${Date.now()}`, message }]);
+    if (liveSocketRef.current && liveSocketRef.current.readyState === WebSocket.OPEN) {
+      liveSocketRef.current.send(JSON.stringify({ type: 'comment', message }));
+      return;
+    }
+    try {
+      await createLiveComment(activeLive.id, message);
+      fetchLiveComments(activeLive.id);
+    } catch {}
+  };
+
+  const sendTyping = (isTyping: boolean) => {
+    if (!liveSocketRef.current || liveSocketRef.current.readyState !== WebSocket.OPEN) return;
+    liveSocketRef.current.send(JSON.stringify({ type: 'typing', is_typing: isTyping }));
+  };
+
+  useEffect(() => {
+    return () => {
+      if (livePollRef.current) window.clearInterval(livePollRef.current);
+      if (liveSocketRef.current) liveSocketRef.current.close();
+    };
+  }, []);
+
   if (tab === 'live') {
     return (
       <div className="relative h-full w-full bg-black overflow-hidden select-none">
-        <div className="absolute left-0 right-0 top-0 z-30 px-4 py-6 flex items-center justify-between">
-          <button 
-            onClick={() => setShowCreatePost(true)}
-            className="p-2 bg-white/10 rounded-full text-white"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-          <div className="flex gap-6 text-white/60 font-bold text-base mx-auto">
-            <button onClick={() => setTab('for_you')} className="hover:text-white transition-colors">For You</button>
-            <button onClick={() => setTab('following')} className="hover:text-white transition-colors">Following</button>
-            <button className="relative text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full">
-              Live
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
+        <div className="absolute left-0 right-0 top-0 z-30 px-4 py-6">
+          <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
             <button 
-              onClick={() => onSellerOpen('')}
+              onClick={() => setShowCreatePost(true)}
               className="p-2 bg-white/10 rounded-full text-white"
             >
-              <User className="w-5 h-5" />
+              <Plus className="w-5 h-5" />
             </button>
-            <button 
-              onClick={() => setIsMuted(!isMuted)}
-              className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
-            >
-              {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-            </button>
+            <div className="flex gap-6 text-white/60 font-bold text-base mx-auto">
+              <button onClick={() => setTab('for_you')} className="hover:text-white transition-colors">For You</button>
+              <button onClick={() => setTab('following')} className="hover:text-white transition-colors">Following</button>
+              <button className="relative text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full">
+                Live
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => onSellerOpen('')}
+                className="p-2 bg-white/10 rounded-full text-white"
+              >
+                <User className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => setIsMuted(!isMuted)}
+                className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
+              >
+                {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="pt-24 px-4 pb-8 space-y-4 overflow-y-auto h-full">
+          <div className="w-full max-w-3xl mx-auto space-y-4">
           {error && (
             <div className="bg-red-500/20 border border-red-500/40 text-red-100 text-[10px] font-bold rounded-2xl px-4 py-3">
               {error}
@@ -485,7 +627,24 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
             <div className="text-white/70 text-sm font-bold">Loading live sessions...</div>
           )}
           {!loading && liveSessions.length === 0 && (
-            <div className="text-white/70 text-sm font-bold">No live sessions right now.</div>
+            <div className="bg-white/10 border border-white/10 rounded-3xl p-6 text-white">
+              <p className="text-lg font-black">No live sessions right now</p>
+              <p className="text-[11px] text-white/70 mt-2">Start one to showcase your products in real time.</p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => setShowCreatePost(true)}
+                  className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-bold"
+                >
+                  Create Post
+                </button>
+                <button
+                  onClick={() => setTab('for_you')}
+                  className="px-4 py-2 bg-white/10 text-white rounded-xl text-[10px] font-bold"
+                >
+                  Explore Feed
+                </button>
+              </div>
+            </div>
           )}
           {liveSessions.map(session => (
             <div key={session.id} className="bg-white/10 border border-white/10 rounded-3xl p-5 text-white">
@@ -496,10 +655,10 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
               <p className="text-[11px] text-white/60">Viewers: {session.viewerCount ?? '—'}</p>
               <div className="mt-4 flex gap-2">
                 <button
-                  onClick={() => joinLiveSession(session.id)}
+                  onClick={() => openLiveSession(session)}
                   className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-bold"
                 >
-                  Join
+                  Enter Live
                 </button>
                 <button
                   onClick={() => leaveLiveSession(session.id)}
@@ -510,6 +669,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
               </div>
             </div>
           ))}
+          </div>
         </div>
       </div>
     );
@@ -525,6 +685,37 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
       >
         {loading && (
           <div className="h-full w-full flex items-center justify-center text-white/70 text-sm font-bold">Loading feed...</div>
+        )}
+
+        {!loading && items.length === 0 && (
+          <div className="h-full w-full flex items-center justify-center">
+            <div className="w-full max-w-md bg-white/10 border border-white/10 rounded-3xl p-6 text-white text-center">
+              <p className="text-lg font-black">Welcome to Sconnect Feed</p>
+              <p className="text-[11px] text-white/70 mt-2">
+                Follow sellers, discover new drops, or create your first post.
+              </p>
+              <div className="mt-5 flex flex-col gap-2">
+                <button
+                  onClick={() => setShowCreatePost(true)}
+                  className="w-full py-3 bg-emerald-500 text-white rounded-2xl text-[11px] font-bold"
+                >
+                  Create Post
+                </button>
+                <button
+                  onClick={() => setTab('following')}
+                  className="w-full py-3 bg-white/10 text-white rounded-2xl text-[11px] font-bold"
+                >
+                  View Following
+                </button>
+                <button
+                  onClick={() => setTab('for_you')}
+                  className="w-full py-3 bg-white/10 text-white rounded-2xl text-[11px] font-bold"
+                >
+                  Explore For You
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {!loading && items.map((item, index) => (
@@ -544,92 +735,94 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
               <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/60 to-transparent" />
             </div>
 
-            <div className="absolute bottom-6 left-4 right-20 z-10 text-white pointer-events-none">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={index === activeIndex ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                transition={{ duration: 0.5 }}
-                className="pointer-events-auto cursor-pointer"
-                onClick={() => {
-                  if (item.productId) {
-                    onProductOpen(toProduct(item));
-                  }
-                }}
-              >
-                <div className="flex items-center gap-2 mb-3 pointer-events-auto">
-                  {item.sellerAvatar ? (
-                    <img 
-                      src={item.sellerAvatar} 
-                      className="w-10 h-10 rounded-full border-2 border-white"
-                      alt="avatar"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (item.sellerId) onSellerOpen(item.sellerId);
-                      }}
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full border-2 border-white bg-white/20 flex items-center justify-center text-[10px] font-black">
-                      {item.sellerName?.slice(0, 2).toUpperCase() || 'SC'}
+            <div className="absolute inset-0 z-10 pointer-events-none">
+              <div className="w-full max-w-5xl mx-auto h-full relative">
+                <div className="absolute bottom-6 left-4 right-20 text-white pointer-events-none">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={index === activeIndex ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
+                    transition={{ duration: 0.5 }}
+                    className="pointer-events-auto cursor-pointer"
+                    onClick={() => {
+                      if (item.productId) {
+                        onProductOpen(toProduct(item));
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-3 pointer-events-auto">
+                      {item.sellerAvatar ? (
+                        <img 
+                          src={item.sellerAvatar} 
+                          className="w-10 h-10 rounded-full border-2 border-white"
+                          alt="avatar"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (item.sellerId) onSellerOpen(item.sellerId);
+                          }}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full border-2 border-white bg-white/20 flex items-center justify-center text-[10px] font-black">
+                          {item.sellerName?.slice(0, 2).toUpperCase() || 'SC'}
+                        </div>
+                      )}
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (item.sellerId) onSellerOpen(item.sellerId);
+                        }}
+                        className="font-bold text-lg shadow-sm"
+                      >
+                        @{item.sellerName || 'Seller'}
+                      </button>
+                      <div className="flex items-center gap-1 bg-black/20 backdrop-blur-md px-2 py-1 rounded-lg">
+                        <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                        <span className="text-[10px] font-black">{item.sellerRating ?? '—'}</span>
+                      </div>
+                      {item.sellerId && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFollow(item.sellerId);
+                          }}
+                          className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ml-2 ${
+                            followedSellerIds.includes(item.sellerId) ? 'bg-white text-zinc-900' : 'bg-red-500 text-white'
+                          }`}
+                        >
+                          {followedSellerIds.includes(item.sellerId) ? 'Following' : 'Follow'}
+                        </button>
+                      )}
                     </div>
-                  )}
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (item.sellerId) onSellerOpen(item.sellerId);
-                    }}
-                    className="font-bold text-lg shadow-sm"
-                  >
-                    @{item.sellerName || 'Seller'}
-                  </button>
-                  <div className="flex items-center gap-1 bg-black/20 backdrop-blur-md px-2 py-1 rounded-lg">
-                    <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
-                    <span className="text-[10px] font-black">{item.sellerRating ?? '—'}</span>
-                  </div>
-                  {item.sellerId && (
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFollow(item.sellerId);
-                      }}
-                      className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ml-2 ${
-                        followedSellerIds.includes(item.sellerId) ? 'bg-white text-zinc-900' : 'bg-red-500 text-white'
-                      }`}
-                    >
-                      {followedSellerIds.includes(item.sellerId) ? 'Following' : 'Follow'}
-                    </button>
-                  )}
+
+                    <h3 className="text-xl font-bold mb-1 drop-shadow-lg">{item.name}</h3>
+                    <p className="text-sm opacity-90 line-clamp-2 mb-4 drop-shadow-md max-w-[85%]">
+                      {item.description}
+                    </p>
+
+                    <div className="flex items-center gap-2 mb-4">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsMuted(m => !m);
+                        }}
+                        className="flex items-center gap-2"
+                      >
+                        <Music2 className="w-4 h-4 animate-spin" style={{ animationDuration: '3s' }} />
+                        <span className="text-xs font-medium truncate max-w-[200px]">Original sound</span>
+                        {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                      </button>
+                    </div>
+
+                    <div className="flex gap-2 pointer-events-auto">
+                      {item.tags.map(tag => (
+                        <span key={tag} className="px-2 py-1 bg-white/10 backdrop-blur-md rounded-md text-[10px] font-bold uppercase tracking-tight border border-white/10">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  </motion.div>
                 </div>
 
-                <h3 className="text-xl font-bold mb-1 drop-shadow-lg">{item.name}</h3>
-                <p className="text-sm opacity-90 line-clamp-2 mb-4 drop-shadow-md max-w-[85%]">
-                  {item.description}
-                </p>
-
-                <div className="flex items-center gap-2 mb-4">
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsMuted(m => !m);
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <Music2 className="w-4 h-4 animate-spin" style={{ animationDuration: '3s' }} />
-                    <span className="text-xs font-medium truncate max-w-[200px]">Original sound</span>
-                    {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                  </button>
-                </div>
-
-                <div className="flex gap-2 pointer-events-auto">
-                  {item.tags.map(tag => (
-                    <span key={tag} className="px-2 py-1 bg-white/10 backdrop-blur-md rounded-md text-[10px] font-bold uppercase tracking-tight border border-white/10">
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
-              </motion.div>
-            </div>
-
-            <div className="absolute right-3 bottom-10 z-20 flex flex-col gap-5 items-center">
+                <div className="absolute right-4 bottom-10 z-20 flex flex-col gap-5 items-center pointer-events-auto">
               <div className="relative mb-4">
                 {item.sellerAvatar ? (
                   <img 
@@ -732,10 +925,12 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
               </div>
             </div>
           </div>
+          </div>
         ))}
 
         {recommendations.length > 0 && (
           <div className="h-full w-full snap-start bg-zinc-900 flex flex-col p-6 overflow-y-auto no-scrollbar">
+            <div className="w-full max-w-5xl mx-auto">
             <div className="mt-12 mb-8">
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles className="w-5 h-5 text-indigo-400" />
@@ -786,52 +981,134 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
             >
               Back to Top <ArrowRight className="w-4 h-4 -rotate-90" />
             </button>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="absolute left-0 right-0 top-0 z-30 px-4 py-6 flex items-center justify-between">
-        <button 
-          onClick={() => setShowCreatePost(true)}
-          className="p-2 bg-white/10 rounded-full text-white"
-        >
-          <Plus className="w-5 h-5" />
-        </button>
-        <div className="flex gap-6 text-white/60 font-bold text-base mx-auto">
-          <button
-            onClick={() => setTab('for_you')}
-            className={`relative ${tab === 'for_you' ? 'text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full' : 'hover:text-white transition-colors'}`}
-          >
-            For You
-          </button>
-          <button
-            onClick={() => setTab('following')}
-            className={`relative ${tab === 'following' ? 'text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full' : 'hover:text-white transition-colors'}`}
-          >
-            Following
-          </button>
-          <button
-            onClick={() => setTab('live')}
-            className="relative hover:text-white transition-colors"
-          >
-            Live
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="absolute left-0 right-0 top-0 z-30 px-4 py-6">
+        <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
           <button 
-            onClick={() => onSellerOpen('')}
+            onClick={() => setShowCreatePost(true)}
             className="p-2 bg-white/10 rounded-full text-white"
           >
-            <User className="w-5 h-5" />
+            <Plus className="w-5 h-5" />
           </button>
-          <button 
-            onClick={() => setIsMuted(!isMuted)}
-            className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
-          >
-            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-          </button>
+          <div className="flex gap-6 text-white/60 font-bold text-base mx-auto">
+            <button
+              onClick={() => setTab('for_you')}
+              className={`relative ${tab === 'for_you' ? 'text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full' : 'hover:text-white transition-colors'}`}
+            >
+              For You
+            </button>
+            <button
+              onClick={() => setTab('following')}
+              className={`relative ${tab === 'following' ? 'text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full' : 'hover:text-white transition-colors'}`}
+            >
+              Following
+            </button>
+            <button
+              onClick={() => setTab('live')}
+              className="relative hover:text-white transition-colors"
+            >
+              Live
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => onSellerOpen('')}
+              className="p-2 bg-white/10 rounded-full text-white"
+            >
+              <User className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setIsMuted(!isMuted)}
+              className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
+            >
+              {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showLiveModal && activeLive && (
+          <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="w-full max-w-lg bg-white rounded-3xl overflow-hidden"
+            >
+              <div className="p-4 bg-slate-950 text-white flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest">Live Session</p>
+                  <p className="text-[11px] text-white/70 mt-1">{activeLive.title || 'Live'}</p>
+                </div>
+                <button onClick={closeLiveSession} className="p-2 rounded-full hover:bg-white/10">
+                  <ChevronDown className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 border-b flex items-center justify-between text-[10px] font-bold text-zinc-600">
+                <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 uppercase">
+                  {liveStatus || activeLive.status || 'live'}
+                </span>
+                <span>{liveViewerCount ?? activeLive.viewerCount ?? 0} viewers</span>
+              </div>
+              <div className="max-h-[50vh] overflow-y-auto p-4 space-y-3 bg-zinc-50">
+                {liveCommentsLoading && (
+                  <div className="text-[10px] text-zinc-400 font-bold">Loading comments…</div>
+                )}
+                {!liveCommentsLoading && liveComments.length === 0 && (
+                  <div className="text-[10px] text-zinc-400 font-bold">No comments yet. Be the first to say hi!</div>
+                )}
+                {liveComments.map((comment) => (
+                  <div key={comment.id} className="bg-white rounded-2xl border border-zinc-100 px-3 py-2">
+                    <div className="text-[9px] text-zinc-400 font-bold">User {comment.userId?.slice(-4) || 'anon'}</div>
+                    <div className="text-[11px] text-zinc-800 font-semibold">{comment.message}</div>
+                  </div>
+                ))}
+                {liveTypingUsers.length > 0 && (
+                  <div className="text-[10px] text-zinc-400 font-bold">
+                    {liveTypingUsers.slice(0, 3).map((u) => `User ${String(u).slice(-4)}`).join(', ')} typing…
+                  </div>
+                )}
+              </div>
+              <div className="p-4 border-t bg-white">
+                {liveModeration && (
+                  <div className="mb-2 text-[10px] font-bold text-rose-600">{liveModeration}</div>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    value={liveCommentInput}
+                    onChange={(e) => {
+                      setLiveCommentInput(e.target.value);
+                      sendTyping(true);
+                      if (typingTimeoutRef.current) {
+                        window.clearTimeout(typingTimeoutRef.current);
+                      }
+                      typingTimeoutRef.current = window.setTimeout(() => {
+                        sendTyping(false);
+                      }, 1500);
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendLiveComment()}
+                    onFocus={() => sendTyping(true)}
+                    onBlur={() => sendTyping(false)}
+                    placeholder="Write a comment..."
+                    className="flex-1 px-3 py-2 rounded-full bg-zinc-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500/30"
+                  />
+                  <button
+                    onClick={handleSendLiveComment}
+                    className="px-4 py-2 bg-emerald-500 text-white rounded-full text-[11px] font-bold"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {shareProduct && (

@@ -33,6 +33,8 @@ const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID'
 const getUserId = () => getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
 const getAuthToken = () => getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
 const getRole = () => getStored('soko:role') ?? getEnv('VITE_ROLE') ?? '';
+const getLLMModel = () => getStored('soko:llm_model') ?? getEnv('VITE_LLM_MODEL') ?? '';
+const getLLMProvider = () => getStored('soko:llm_provider') ?? getEnv('VITE_LLM_PROVIDER') ?? '';
 const getCorrelationId = () => {
   const stored = getStored('soko:correlation_id');
   if (stored) return stored;
@@ -53,6 +55,8 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   const userId = getUserId();
   const token = getAuthToken();
   const role = getRole();
+  const llmModel = getLLMModel();
+  const llmProvider = getLLMProvider();
   const correlationId = getCorrelationId();
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
@@ -60,6 +64,8 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   if (correlationId) headers['X-Correlation-Id'] = correlationId;
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (role) headers['X-Role'] = role;
+  if (llmModel) headers['X-LLM-Model'] = llmModel;
+  if (llmProvider) headers['X-LLM-Provider'] = llmProvider;
 
   return {
     ...headers,
@@ -73,11 +79,12 @@ const parseError = async (res: Response): Promise<ApiError> => {
     const body = await res.json();
     if (body?.error) {
       error.code = body.error.code;
-      error.message = body.error.message;
     }
   } catch {}
-  if (!error.message) {
-    error.message = res.statusText || 'Request failed';
+  if (res.status >= 500) {
+    error.message = 'Service temporarily unavailable.';
+  } else {
+    error.message = 'Request failed. Please try again.';
   }
   return error;
 };
@@ -85,7 +92,7 @@ const parseError = async (res: Response): Promise<ApiError> => {
 export const apiFetch = async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
-    throw new Error('Missing API base URL. Set VITE_API_BASE_URL or configure it in Settings.');
+    throw new Error('Service unavailable. Please try again later.');
   }
 
   const res = await fetch(`${baseUrl}${path}`, {
@@ -107,7 +114,7 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
 export const apiFetchRaw = async (path: string, options: RequestInit = {}): Promise<Response> => {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
-    throw new Error('Missing API base URL. Set VITE_API_BASE_URL or configure it in Settings.');
+    throw new Error('Service unavailable. Please try again later.');
   }
   return fetch(`${baseUrl}${path}`, {
     ...options,

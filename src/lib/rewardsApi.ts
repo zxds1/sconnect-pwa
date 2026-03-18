@@ -37,6 +37,18 @@ export interface RewardsReceipt {
   created_at?: string;
 }
 
+export interface ReceiptInventoryItem {
+  id: string;
+  seller_id?: string;
+  receipt_id?: string;
+  item_name?: string;
+  quantity?: number;
+  unit_price?: number | null;
+  seller_product_id?: string | null;
+  status?: string;
+  created_at?: string;
+}
+
 export interface RewardsStreak {
   id: string;
   seller_id?: string;
@@ -76,6 +88,46 @@ export interface RewardsFraudAlert {
   created_at?: string;
 }
 
+export interface RewardsStarsSummary {
+  stars_total?: number;
+  rank?: number;
+  participants?: number;
+  updated_at?: string;
+}
+
+export interface RewardsLeaderboardEntry {
+  user_id: string;
+  stars_total?: number;
+  rank?: number;
+  updated_at?: string;
+}
+
+export interface RewardsQrScanRequest {
+  qr_payload: string;
+  scan_type?: string;
+  seller_id?: string;
+  product_name?: string;
+  price?: number;
+  quantity?: number;
+  stock_status?: string;
+  repeat_purchase?: string;
+  cleanliness?: number;
+  verification_method?: string;
+  gps_distance_m?: number;
+  gps_verified?: boolean;
+}
+
+export interface RewardsQrScanResponse {
+  scan_id?: string;
+  rewards_issued?: number;
+  stars_awarded?: number;
+  balance?: number;
+  stars_total?: number;
+  rank?: number;
+  participants?: number;
+  created_at?: string;
+}
+
 const unwrapList = <T>(data: any): T[] => {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
@@ -109,6 +161,25 @@ export const queueReceipts = async (payload: { receipt_id: string }) =>
     body: JSON.stringify(payload),
   });
 
+export const listReceiptInventoryItems = async (params?: { status?: string; limit?: number }): Promise<ReceiptInventoryItem[]> => {
+  const query = params?.status || params?.limit
+    ? `?${[
+        params?.status ? `status=${encodeURIComponent(params.status)}` : '',
+        params?.limit ? `limit=${encodeURIComponent(String(params.limit))}` : ''
+      ].filter(Boolean).join('&')}`
+    : '';
+  return unwrapList(await apiFetch(`/v1/rewards/receipts/items${query}`));
+};
+
+export const updateReceiptInventoryItem = async (
+  id: string,
+  payload: { status?: string; seller_product_id?: string }
+): Promise<ReceiptInventoryItem> =>
+  apiFetch(`/v1/rewards/receipts/items/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
 export const getRewardStreaks = async (): Promise<RewardsStreak[]> => unwrapList(await apiFetch('/v1/rewards/streaks'));
 
 export const resetRewardStreaks = async (payload?: { type?: string }) =>
@@ -135,6 +206,18 @@ export const listFraudAlerts = async (): Promise<RewardsFraudAlert[]> => unwrapL
 
 export const redeemRewards = async (payload: { amount: number }): Promise<RewardsLedgerEntry> =>
   apiFetch('/v1/rewards/redeem', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const getRewardsStarsSummary = async (): Promise<RewardsStarsSummary> =>
+  apiFetch('/v1/rewards/stars/summary');
+
+export const listRewardsLeaderboard = async (): Promise<RewardsLeaderboardEntry[]> =>
+  unwrapList(await apiFetch('/v1/rewards/stars/leaderboard'));
+
+export const submitRewardsQrScan = async (payload: RewardsQrScanRequest): Promise<RewardsQrScanResponse> =>
+  apiFetch('/v1/rewards/qr/scan', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

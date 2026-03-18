@@ -1,8 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { X, ArrowLeft, ShoppingBag, Star, BarChart3, MapPin, Map as MapIcon } from 'lucide-react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { Product } from '../types';
 import { addCartItem } from '../lib/cartApi';
+import { listPopularPaths, recordPath, type PathPoint } from '../lib/searchApi';
+import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
+import {
+  detectCityKey,
+  getCityMultiplier,
+  getDefaultRouteMultipliers,
+  getProfileMultiplier,
+  getStepRoadMultiplier,
+  loadRouteMultipliers,
+  type RouteMultipliersConfig
+} from '../lib/routeMultipliers';
 import {
   CompareMapItem,
   CompareOffer,
@@ -44,6 +57,68 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [compareRouteInfo, setCompareRouteInfo] = useState<{ distanceKm: number; durationMin: number } | null>(null);
+  const [compareRouteSteps, setCompareRouteSteps] = useState<Array<{ instruction: string; distance: number; duration: number }>>([]);
+  const [compareUserCoords, setCompareUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [compareMapReady, setCompareMapReady] = useState(false);
+  const [compareRouteProfile, setCompareRouteProfile] = useState<'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk'>('driving');
+  const [routeConfig, setRouteConfig] = useState<RouteMultipliersConfig>(() => getDefaultRouteMultipliers());
+  const routeTelemetry = useMemo(() => createRouteTelemetryTracker('comparison_map'), []);
+
+  useEffect(() => {
+    let active = true;
+    loadRouteMultipliers().then((config) => {
+      if (active) setRouteConfig(config);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toMapboxProfile = (profile: typeof compareRouteProfile) => {
+    if (profile === 'walking' || profile === 'cycling') return profile;
+    return 'driving-traffic';
+  };
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingPaused, setRecordingPaused] = useState(false);
+  const [recordingPoints, setRecordingPoints] = useState<PathPoint[]>([]);
+  const [recordingDistance, setRecordingDistance] = useState(0);
+  const [recordingStart, setRecordingStart] = useState<number | null>(null);
+  const [showRecordingPanel, setShowRecordingPanel] = useState(false);
+  const [recordingName, setRecordingName] = useState('');
+  const [recordingShared, setRecordingShared] = useState(true);
+  const [recordingStatus, setRecordingStatus] = useState<string | null>(null);
+  const [voiceDirectionsEnabled, setVoiceDirectionsEnabled] = useState(false);
+  const compareMapContainerRef = useRef<HTMLDivElement | null>(null);
+  const compareMapRef = useRef<mapboxgl.Map | null>(null);
+  const compareUserMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const compareSellerMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const compareRouteManeuversRef = useRef<Array<{ instruction: string; location: [number, number] }>>([]);
+  const compareRouteStepIndexRef = useRef(0);
+  const recordingWatchIdRef = useRef<number | null>(null);
+  const navWatchIdRef = useRef<number | null>(null);
+  const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
+    ? (import.meta as any).env.VITE_MAPBOX_TOKEN
+    : '';
+
+  const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+    const R = 6371;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLon = ((b.lng - a.lng) * Math.PI) / 180;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) * 1000;
+  };
+
+  const speak = (text: string) => {
+    if (!voiceDirectionsEnabled) return;
+    if ('speechSynthesis' in window && text) {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-US';
+      window.speechSynthesis.speak(utter);
+    }
+  };
 
   const loadCompare = async (alive?: { current: boolean }) => {
     setLoading(true);
@@ -99,6 +174,379 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
       alive.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      setVoiceDirectionsEnabled(localStorage.getItem('soko:voice_directions') === 'true');
+    } catch {
+      setVoiceDirectionsEnabled(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeMapProduct || !activeMapProduct.mapItems?.[0]) return;
+    if (!mapboxToken) return;
+    if (!compareMapContainerRef.current) return;
+    const item = activeMapProduct.mapItems[0];
+    if (!Number.isFinite(item.lng) || !Number.isFinite(item.lat)) return;
+    mapboxgl.accessToken = mapboxToken;
+    if (compareMapRef.current) return;
+    const map = new mapboxgl.Map({
+      container: compareMapContainerRef.current as HTMLElement,
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: [Number(item.lng), Number(item.lat)],
+      zoom: 13
+    });
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    map.on('load', () => {
+      setCompareMapReady(true);
+      if (!map.getSource('route-line')) {
+        map.addSource('route-line', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'route-line',
+          type: 'line',
+          source: 'route-line',
+          paint: {
+            'line-color': '#4f46e5',
+            'line-width': 4
+          }
+        });
+      }
+      if (!map.getSource('popular-paths')) {
+        map.addSource('popular-paths', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'popular-paths',
+          type: 'line',
+          source: 'popular-paths',
+          paint: {
+            'line-color': '#f97316',
+            'line-width': 3,
+            'line-opacity': 0.6
+          }
+        });
+      }
+      if (!map.getSource('recording-path')) {
+        map.addSource('recording-path', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'recording-path',
+          type: 'line',
+          source: 'recording-path',
+          paint: {
+            'line-color': '#ef4444',
+            'line-width': 4
+          }
+        });
+      }
+    });
+    compareMapRef.current = map;
+    const sellerMarker = new mapboxgl.Marker({ color: '#4f46e5' })
+      .setLngLat([Number(item.lng), Number(item.lat)])
+      .addTo(map);
+    compareSellerMarkerRef.current = sellerMarker;
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          setCompareUserCoords(coords);
+          if (compareMapRef.current) {
+            compareUserMarkerRef.current?.remove();
+            compareUserMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
+              .setLngLat([coords.lng, coords.lat])
+              .addTo(compareMapRef.current);
+          }
+        },
+        () => {
+          // ignore geo errors
+        }
+      );
+    }
+    (async () => {
+      try {
+        const pad = 0.05;
+        const bbox = [
+          Number(item.lng) - pad,
+          Number(item.lat) - pad,
+          Number(item.lng) + pad,
+          Number(item.lat) + pad
+        ].join(',');
+        const paths = await listPopularPaths({ bbox, limit: 30 });
+        const source = map.getSource('popular-paths') as mapboxgl.GeoJSONSource | undefined;
+        if (source) {
+          const features = paths
+            .map((path) => path.line_geojson ? ({
+              type: 'Feature',
+              geometry: path.line_geojson,
+              properties: { id: path.id, name: path.name, usage_count: path.usage_count || 0 }
+            }) : null)
+            .filter(Boolean);
+          source.setData({ type: 'FeatureCollection', features } as any);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [activeMapProduct, mapboxToken]);
+
+  useEffect(() => {
+    if (!compareMapReady || !compareMapRef.current) return;
+    const source = compareMapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    if (recordingPoints.length < 2) {
+      source.setData({ type: 'FeatureCollection', features: [] } as any);
+      return;
+    }
+    const line = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: recordingPoints.map((p) => [p.lng, p.lat])
+          },
+          properties: {}
+        }
+      ]
+    };
+    source.setData(line as any);
+  }, [compareMapReady, recordingPoints]);
+
+  useEffect(() => {
+    if (!compareMapReady || !compareMapRef.current || !compareUserCoords || !activeMapProduct) return;
+    const item = activeMapProduct.mapItems?.[0];
+    if (!item) return;
+    const fromLng = compareUserCoords.lng;
+    const fromLat = compareUserCoords.lat;
+    const toLng = Number(item.lng);
+    const toLat = Number(item.lat);
+    if (!Number.isFinite(toLng) || !Number.isFinite(toLat)) return;
+    const fetchRoute = async () => {
+      try {
+        const profile = toMapboxProfile(compareRouteProfile);
+        const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const route = data.routes?.[0];
+        if (!route) return;
+        const geojson = {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: route.geometry,
+              properties: {}
+            }
+          ]
+        };
+        const source = compareMapRef.current?.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+        source?.setData(geojson as any);
+        const steps = route.legs?.[0]?.steps || [];
+        const cityKey = detectCityKey(activeMapItem?.location?.address || activeMapItem?.seller_address || activeMapItem?.address);
+        const cityMultiplier = getCityMultiplier(routeConfig, cityKey, compareRouteProfile);
+        const profileMultiplier = getProfileMultiplier(routeConfig, compareRouteProfile);
+        const adjustedSteps = steps.map((step: any) => ({
+          instruction: step.maneuver?.instruction || 'Continue',
+          distance: Math.round(step.distance || 0),
+          duration: Math.round((step.duration || 0) * profileMultiplier * cityMultiplier * getStepRoadMultiplier(routeConfig, step))
+        }));
+        const adjustedDuration = adjustedSteps.reduce((sum, step) => sum + (step.duration || 0), 0);
+        setCompareRouteInfo({
+          distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+          durationMin: Math.max(1, Math.round(adjustedDuration / 60))
+        });
+        setCompareRouteSteps(adjustedSteps);
+        routeTelemetry({
+          profile: compareRouteProfile,
+          city: cityKey,
+          distance_km: Math.round((route.distance / 1000) * 10) / 10,
+          duration_min: Math.max(1, Math.round(adjustedDuration / 60)),
+          source: 'comparison'
+        });
+        compareRouteManeuversRef.current = steps
+          .map((step: any) => ({
+            instruction: step.maneuver?.instruction || 'Continue',
+            location: step.maneuver?.location as [number, number]
+          }))
+          .filter((item: any) => Array.isArray(item.location) && item.location.length === 2);
+        compareRouteStepIndexRef.current = 0;
+      } catch {
+        // ignore
+      }
+    };
+    fetchRoute();
+  }, [activeMapProduct, compareMapReady, compareRouteProfile, compareUserCoords, mapboxToken]);
+
+  useEffect(() => {
+    if (!activeMapProduct && compareMapRef.current) {
+      compareMapRef.current.remove();
+      compareMapRef.current = null;
+      compareUserMarkerRef.current = null;
+      compareSellerMarkerRef.current = null;
+      setCompareMapReady(false);
+      setCompareRouteInfo(null);
+      setCompareRouteSteps([]);
+      stopNavWatch();
+      if (recordingWatchIdRef.current) {
+        navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+        recordingWatchIdRef.current = null;
+      }
+      setIsRecording(false);
+      setRecordingPaused(false);
+      setShowRecordingPanel(false);
+      setRecordingPoints([]);
+      setRecordingDistance(0);
+      setRecordingStart(null);
+    }
+  }, [activeMapProduct]);
+
+  const stopNavWatch = () => {
+    if (navWatchIdRef.current) {
+      navigator.geolocation.clearWatch(navWatchIdRef.current);
+      navWatchIdRef.current = null;
+    }
+  };
+
+  const beginNavWatch = () => {
+    if (!navigator.geolocation || navWatchIdRef.current) return;
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setCompareUserCoords(point);
+        if (compareUserMarkerRef.current && compareMapRef.current) {
+          compareUserMarkerRef.current.setLngLat([point.lng, point.lat]);
+        }
+        if (compareRouteManeuversRef.current.length > 0) {
+          const idx = compareRouteStepIndexRef.current;
+          const next = compareRouteManeuversRef.current[idx];
+          if (next?.location) {
+            const dist = haversine({ lat: point.lat, lng: point.lng }, { lat: next.location[1], lng: next.location[0] });
+            if (dist < 25 && idx < compareRouteManeuversRef.current.length - 1) {
+              compareRouteStepIndexRef.current = idx + 1;
+              speak(next.instruction);
+            }
+          }
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    navWatchIdRef.current = id;
+  };
+
+  useEffect(() => {
+    if (!voiceDirectionsEnabled || !activeMapProduct || !compareMapReady || isRecording) {
+      stopNavWatch();
+      return;
+    }
+    if (!compareRouteManeuversRef.current.length) {
+      stopNavWatch();
+      return;
+    }
+    beginNavWatch();
+    return () => stopNavWatch();
+  }, [activeMapProduct, compareMapReady, compareRouteSteps.length, isRecording, voiceDirectionsEnabled]);
+
+  const beginRecordingWatch = () => {
+    if (!navigator.geolocation) {
+      setRecordingStatus('Geolocation not supported.');
+      return;
+    }
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+    }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, recorded_at: new Date().toISOString() };
+        setRecordingPoints((prev) => {
+          if (prev.length > 0) {
+            const last = prev[prev.length - 1];
+            const segment = haversine({ lat: last.lat, lng: last.lng }, { lat: point.lat, lng: point.lng });
+            setRecordingDistance((dist) => dist + segment);
+          }
+          return [...prev, point];
+        });
+        if (compareMapRef.current) {
+          compareMapRef.current.easeTo({ center: [point.lng, point.lat], duration: 500 });
+        }
+      },
+      () => {
+        setRecordingStatus('Unable to read GPS location.');
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    recordingWatchIdRef.current = id;
+  };
+
+  const startRecording = () => {
+    setRecordingPoints([]);
+    setRecordingDistance(0);
+    setRecordingStart(Date.now());
+    setIsRecording(true);
+    setRecordingPaused(false);
+    setRecordingStatus(null);
+    beginRecordingWatch();
+  };
+
+  const pauseRecording = () => {
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+      recordingWatchIdRef.current = null;
+    }
+    setRecordingPaused(true);
+  };
+
+  const resumeRecording = () => {
+    if (!isRecording) return;
+    setRecordingPaused(false);
+    beginRecordingWatch();
+  };
+
+  const stopRecording = () => {
+    if (recordingWatchIdRef.current) {
+      navigator.geolocation.clearWatch(recordingWatchIdRef.current);
+      recordingWatchIdRef.current = null;
+    }
+    setRecordingPaused(false);
+    setIsRecording(false);
+    setShowRecordingPanel(true);
+  };
+
+  const saveRecording = async () => {
+    if (recordingPoints.length < 2) {
+      setRecordingStatus('Record at least two points.');
+      return;
+    }
+    try {
+      const saved = await recordPath({
+        name: recordingName || 'Recorded path',
+        shared: recordingShared,
+        seller_id: activeMapItem?.seller_id || undefined,
+        points: recordingPoints
+      });
+      setRecordingStatus(saved?.id ? 'Path saved.' : 'Path saved.');
+      setShowRecordingPanel(false);
+      setRecordingName('');
+      setRecordingShared(true);
+      setRecordingPoints([]);
+      setRecordingDistance(0);
+      setRecordingStart(null);
+    } catch (err: any) {
+      setRecordingStatus(err?.message || 'Unable to save path.');
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -407,20 +855,159 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
             </div>
 
             <div className="relative h-[360px] bg-zinc-100">
-              <div className="absolute inset-0 opacity-40 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="relative">
-                  <div className="w-14 h-14 bg-white rounded-full border-2 border-indigo-600 shadow-xl overflow-hidden">
-                    {activeMapProduct.imageUrl || activeMapProduct.fallbackImageUrl ? (
-                      <img src={activeMapProduct.imageUrl || activeMapProduct.fallbackImageUrl} className="w-full h-full object-cover" alt="location" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-zinc-400">NA</div>
-                    )}
+              <div ref={compareMapContainerRef} className="absolute inset-0" />
+              {!mapboxToken && (
+                <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
+                  Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                </div>
+              )}
+              {compareRouteInfo && (
+                <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-2xl text-[10px] font-bold text-zinc-700">
+                  Route: {compareRouteInfo.distanceKm} km · {compareRouteInfo.durationMin} min
+                </div>
+              )}
+              <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
+                <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex flex-wrap gap-1 text-[9px] font-bold text-zinc-700">
+                  {[
+                    { label: 'Drive', value: 'driving' },
+                    { label: 'Motorbike', value: 'motorbike' },
+                    { label: 'Scooter', value: 'scooter' },
+                    { label: 'TukTuk', value: 'tuktuk' },
+                    { label: 'Cycle', value: 'cycling' },
+                    { label: 'Walk', value: 'walking' }
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setCompareRouteProfile(opt.value as any)}
+                      className={`px-2 py-1 rounded-full ${compareRouteProfile === opt.value ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex items-center gap-1 text-[9px] font-bold text-zinc-700">
+                  <button
+                    onClick={() => {
+                      const next = !voiceDirectionsEnabled;
+                      setVoiceDirectionsEnabled(next);
+                      try {
+                        localStorage.setItem('soko:voice_directions', String(next));
+                      } catch {}
+                    }}
+                    className={`px-3 py-1 rounded-full ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
+                  >
+                    {voiceDirectionsEnabled ? 'Voice On' : 'Voice Off'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (isRecording) {
+                        stopRecording();
+                      } else {
+                        startRecording();
+                      }
+                    }}
+                    className={`px-3 py-1 rounded-full ${isRecording ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}
+                  >
+                    {isRecording ? 'Stop' : 'Record'}
+                  </button>
+                  {isRecording && (
+                    <button
+                      onClick={recordingPaused ? resumeRecording : pauseRecording}
+                      className="px-3 py-1 rounded-full bg-zinc-100 text-zinc-700"
+                    >
+                      {recordingPaused ? 'Resume' : 'Pause'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isRecording && (
+                <div className="absolute top-12 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                  <div>
+                    Recording… {Math.round(recordingDistance)}m · {Math.floor((recordingStart ? (Date.now() - recordingStart) : 0) / 60000)}m
                   </div>
-                  <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-8 border-r-8 border-t-[14px] border-l-transparent border-r-transparent border-t-indigo-600" />
+                  <div className="text-[9px] text-white/80">Points: {recordingPoints.length} / 10</div>
+                </div>
+              )}
+              <div className="absolute bottom-0 left-0 right-0 pb-3 px-3">
+                <div className="bg-white/95 backdrop-blur-md rounded-t-3xl border border-white shadow-2xl p-4 max-h-[40vh] overflow-hidden">
+                  {compareRouteSteps.length > 0 && (
+                    <div className="max-h-28 overflow-auto text-[10px] text-zinc-700 space-y-1">
+                      <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Directions</div>
+                      {compareRouteSteps.slice(0, 5).map((step, idx) => (
+                        <div key={`cmp-route-step-${idx}`} className="flex items-center justify-between gap-2">
+                          <span className="font-bold">{step.instruction}</span>
+                          <span className="text-[9px] text-zinc-500">
+                            {Math.max(1, Math.round(step.distance / 10) * 10)}m · {Math.max(1, Math.round(step.duration / 60))}m
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {compareRouteSteps.length === 0 && compareRouteInfo && (
+                    <div className="text-[10px] font-bold text-zinc-600">
+                      Directions unavailable. Enable location services and try again.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
+
+            {showRecordingPanel && (
+              <div className="p-4 border-t bg-white">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-xs font-black text-zinc-900">Save Recorded Path</div>
+                  <button
+                    onClick={() => {
+                      setShowRecordingPanel(false);
+                      setRecordingPoints([]);
+                      setRecordingDistance(0);
+                      setRecordingStart(null);
+                    }}
+                    className="text-[10px] font-bold text-zinc-400"
+                  >
+                    Discard
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <input
+                    value={recordingName}
+                    onChange={(e) => setRecordingName(e.target.value)}
+                    placeholder="Name this path"
+                    className="w-full px-3 py-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                  />
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <input
+                      type="checkbox"
+                      checked={recordingShared}
+                      onChange={(e) => setRecordingShared(e.target.checked)}
+                    />
+                    Share with community
+                  </label>
+                </div>
+                <div className="mb-3">
+                  <div className="flex items-center justify-between text-[9px] font-bold text-zinc-500">
+                    <span>Recording progress</span>
+                    <span>{recordingPoints.length} / 10 points</span>
+                  </div>
+                  <div className="mt-2 h-2 bg-zinc-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full"
+                      style={{ width: `${Math.min(100, Math.round((recordingPoints.length / 10) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={saveRecording}
+                  disabled={recordingPoints.length < 2}
+                  className="w-full py-2 rounded-xl bg-indigo-600 text-white text-xs font-black"
+                >
+                  Save Path
+                </button>
+                {recordingStatus && (
+                  <div className="mt-2 text-[10px] font-bold text-zinc-500">{recordingStatus}</div>
+                )}
+              </div>
+            )}
 
             <div className="p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
