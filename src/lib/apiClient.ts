@@ -29,7 +29,7 @@ const setStored = (key: string, value: string) => {
 };
 
 const getBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
-const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? '';
+const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001';
 const getUserId = () => getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
 const getAuthToken = () => getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
 const getRole = () => getStored('soko:role') ?? getEnv('VITE_ROLE') ?? '';
