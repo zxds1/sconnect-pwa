@@ -12,6 +12,8 @@ export type SellerProduct = {
   stock_level?: number;
   stock_status?: string;
   is_featured?: boolean;
+  group_buy_eligible?: boolean;
+  group_buy_tiers?: Array<{ qty: number; price: number; discount?: string }>;
   updated_at?: string;
 };
 
@@ -48,6 +50,8 @@ export const createSellerProduct = async (payload: {
   stock_level?: number;
   stock_status?: string;
   is_featured?: boolean;
+  group_buy_eligible?: boolean;
+  group_buy_tiers?: Array<{ qty: number; price: number; discount?: string }>;
 }): Promise<SellerProduct> =>
   apiFetch('/v1/seller/products', {
     method: 'POST',
@@ -63,6 +67,8 @@ export const updateSellerProduct = async (id: string, payload: {
   stock_level?: number;
   stock_status?: string;
   is_featured?: boolean;
+  group_buy_eligible?: boolean;
+  group_buy_tiers?: Array<{ qty: number; price: number; discount?: string }>;
 }): Promise<SellerProduct> =>
   apiFetch(`/v1/seller/products/${id}`,
     {

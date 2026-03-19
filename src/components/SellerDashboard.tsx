@@ -374,6 +374,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     mediaUrl: string;
     stockLevel: number;
     expiryDate?: string;
+    groupBuyEligible: boolean;
+    groupBuyTiers: Array<{ qty: number; price: number; discount?: string }>;
   }>({
     name: '',
     description: '',
@@ -381,7 +383,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     category: '',
     mediaUrl: '',
     stockLevel: 10,
-    expiryDate: ''
+    expiryDate: '',
+    groupBuyEligible: false,
+    groupBuyTiers: []
   });
 
   // Profile Form States
@@ -1588,7 +1592,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       stockStatus: (item.stock_status as Product['stockStatus']) || (Number(item.stock_level ?? 0) <= 0 ? 'out_of_stock' : Number(item.stock_level ?? 0) < 5 ? 'low_stock' : 'in_stock'),
       discountPrice: item.discount_price ?? undefined,
       isFeatured: item.is_featured,
-      location: seller.location
+      location: seller.location,
+      groupBuyEligible: item.group_buy_eligible,
+      groupBuyTiers: item.group_buy_tiers || []
     }));
 
   const loadMediaForProducts = async (items: Product[]) => {
@@ -2623,7 +2629,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
   const handleAddProduct = () => {
     setEditingProduct(null);
-    setFormData({ name: '', description: '', price: '', category: '', mediaUrl: '', stockLevel: 10, expiryDate: '' });
+    setFormData({ name: '', description: '', price: '', category: '', mediaUrl: '', stockLevel: 10, expiryDate: '', groupBuyEligible: false, groupBuyTiers: [] });
     setIsAddingProduct(true);
   };
 
@@ -2636,7 +2642,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       category: product.category,
       mediaUrl: product.mediaUrl,
       stockLevel: product.stockLevel,
-      expiryDate: product.expiryDate || ''
+      expiryDate: product.expiryDate || '',
+      groupBuyEligible: Boolean(product.groupBuyEligible),
+      groupBuyTiers: Array.isArray(product.groupBuyTiers) ? product.groupBuyTiers : []
     });
     setIsAddingProduct(true);
   };
@@ -2654,7 +2662,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           category_id: formData.category,
           current_price: price,
           stock_level: stockLevel,
-          stock_status: stockStatus
+          stock_status: stockStatus,
+          group_buy_eligible: formData.groupBuyEligible,
+          group_buy_tiers: formData.groupBuyTiers
         });
         if (formData.mediaUrl) {
           await addSellerProductMedia(editingProduct.id, {
@@ -2675,7 +2685,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           stockStatus: (updated.stock_status as Product['stockStatus']) || stockStatus,
           discountPrice: updated.discount_price ?? undefined,
           isFeatured: updated.is_featured ?? editingProduct.isFeatured,
-          mediaUrl: formData.mediaUrl || editingProduct.mediaUrl
+          mediaUrl: formData.mediaUrl || editingProduct.mediaUrl,
+          groupBuyEligible: updated.group_buy_eligible ?? formData.groupBuyEligible,
+          groupBuyTiers: updated.group_buy_tiers ?? formData.groupBuyTiers
         };
         setMyProducts(prev => {
           const next = prev.map(p => (p.id === editingProduct.id ? nextProduct : p));
@@ -2690,7 +2702,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           category_id: formData.category,
           current_price: price,
           stock_level: stockLevel || 10,
-          stock_status: stockStatus
+          stock_status: stockStatus,
+          group_buy_eligible: formData.groupBuyEligible,
+          group_buy_tiers: formData.groupBuyTiers
         });
         if (formData.mediaUrl) {
           await addSellerProductMedia(created.id, {
@@ -2716,7 +2730,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           location: seller.location,
           expiryDate: formData.expiryDate,
           discountPrice: created.discount_price ?? undefined,
-          isFeatured: created.is_featured
+          isFeatured: created.is_featured,
+          groupBuyEligible: created.group_buy_eligible ?? formData.groupBuyEligible,
+          groupBuyTiers: created.group_buy_tiers ?? formData.groupBuyTiers
         };
         setMyProducts(prev => {
           const next = [newProduct, ...prev];
@@ -4430,7 +4446,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                               category: p.category,
                               mediaUrl: p.mediaUrl,
                               stockLevel: p.stockLevel,
-                              expiryDate: p.expiryDate || ''
+                              expiryDate: p.expiryDate || '',
+                              groupBuyEligible: Boolean(p.groupBuyEligible),
+                              groupBuyTiers: Array.isArray(p.groupBuyTiers) ? p.groupBuyTiers : []
                             });
                             setEditingProduct(p);
                             setIsAddingProduct(true);
@@ -7804,6 +7822,97 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-zinc-500">Group Buy Eligible</h4>
+                    <p className="text-[10px] text-zinc-500">Opt-in and set tiered pricing for bulk buyers.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={formData.groupBuyEligible}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setFormData(prev => ({
+                        ...prev,
+                        groupBuyEligible: enabled,
+                        groupBuyTiers: enabled && prev.groupBuyTiers.length === 0
+                          ? [{ qty: 5, price: Number(prev.price || 0), discount: '' }]
+                          : enabled
+                            ? prev.groupBuyTiers
+                            : []
+                      }));
+                    }}
+                    className="h-5 w-5"
+                  />
+                </div>
+                {formData.groupBuyEligible && (
+                  <div className="space-y-3">
+                    {formData.groupBuyTiers.map((tier, idx) => (
+                      <div key={`${tier.qty}-${idx}`} className="grid grid-cols-3 gap-2">
+                        <input
+                          type="number"
+                          value={tier.qty}
+                          onChange={(e) => {
+                            const qty = Number(e.target.value || 0);
+                            setFormData(prev => ({
+                              ...prev,
+                              groupBuyTiers: prev.groupBuyTiers.map((t, i) => i === idx ? { ...t, qty } : t)
+                            }));
+                          }}
+                          placeholder="Qty"
+                          className="px-3 py-2 rounded-xl bg-white text-sm font-semibold"
+                        />
+                        <input
+                          type="number"
+                          value={tier.price}
+                          onChange={(e) => {
+                            const price = Number(e.target.value || 0);
+                            setFormData(prev => ({
+                              ...prev,
+                              groupBuyTiers: prev.groupBuyTiers.map((t, i) => i === idx ? { ...t, price } : t)
+                            }));
+                          }}
+                          placeholder="Price"
+                          className="px-3 py-2 rounded-xl bg-white text-sm font-semibold"
+                        />
+                        <input
+                          type="text"
+                          value={tier.discount || ''}
+                          onChange={(e) => {
+                            const discount = e.target.value;
+                            setFormData(prev => ({
+                              ...prev,
+                              groupBuyTiers: prev.groupBuyTiers.map((t, i) => i === idx ? { ...t, discount } : t)
+                            }));
+                          }}
+                          placeholder="Discount"
+                          className="px-3 py-2 rounded-xl bg-white text-sm font-semibold"
+                        />
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, groupBuyTiers: [...prev.groupBuyTiers, { qty: 10, price: 0, discount: '' }] }))}
+                        className="px-3 py-2 rounded-xl bg-white text-xs font-bold border border-zinc-200"
+                      >
+                        + Add Tier
+                      </button>
+                      {formData.groupBuyTiers.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, groupBuyTiers: prev.groupBuyTiers.slice(0, -1) }))}
+                          className="px-3 py-2 rounded-xl bg-white text-xs font-bold border border-zinc-200 text-zinc-500"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

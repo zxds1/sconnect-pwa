@@ -24,6 +24,7 @@ import { ComparisonView } from './components/ComparisonView';
 import { Rewards } from './components/Rewards';
 import { Onboarding } from './components/Onboarding';
 import { Assistant } from './components/Assistant';
+import { GroupBuys } from './components/GroupBuys';
 import { PullToRefresh } from './components/PullToRefresh';
 import { PRODUCTS } from './mockData';
 import { Product } from './types';
@@ -37,7 +38,7 @@ import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
 
 export default function App() {
-  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
+  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications' | 'group-buys' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
     if (typeof window === 'undefined') return 'assistant';
     try {
       const token = localStorage.getItem('soko:auth_token');
@@ -521,6 +522,7 @@ export default function App() {
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenWhatsApp={() => setView('whatsapp')}
                 onOpenFeed={() => setView('feed')}
+                onOpenGroupBuys={() => setView('group-buys')}
                 onToast={setToast}
               />
             </motion.div>
@@ -794,6 +796,19 @@ export default function App() {
               className="h-full w-full bg-white z-50"
             >
               <DataDashboard onBack={() => setView('settings')} />
+            </motion.div>
+          )}
+
+          {view === 'group-buys' && (
+            <motion.div
+              key="group-buys"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="h-full w-full bg-white z-50"
+            >
+              <GroupBuys onBack={() => setView('assistant')} />
             </motion.div>
           )}
 

@@ -47,6 +47,8 @@ export type Product = {
   competitorPrice?: number;
   priceHistory?: PricePoint[];
   isGoodDeal?: boolean;
+  groupBuyEligible?: boolean;
+  groupBuyTiers?: Array<{ qty: number; price: number; discount?: string }>;
 };
 
 export type Seller = {

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users } from 'lucide-react';
 import { Product } from '../types';
 import {
   createMessage,
@@ -100,6 +100,7 @@ interface AssistantProps {
   onOpenPartnerships: () => void;
   onOpenWhatsApp: () => void;
   onOpenFeed: () => void;
+  onOpenGroupBuys: () => void;
 }
 
 export const Assistant: React.FC<AssistantProps> = ({
@@ -122,6 +123,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenPartnerships,
   onOpenWhatsApp,
   onOpenFeed,
+  onOpenGroupBuys,
   onToast
 }) => {
   const [chats, setChats] = useState<AssistantChat[]>([]);
@@ -561,6 +563,7 @@ export const Assistant: React.FC<AssistantProps> = ({
     { label: 'Feed', icon: Sparkles, onClick: onOpenFeed },
     { label: 'Search', icon: Search, onClick: () => setInput('/search ') },
     { label: 'Compare', icon: ArrowRightLeft, onClick: () => setInput('/compare ') },
+    { label: 'Group Buys', icon: Users, onClick: () => onOpenGroupBuys() },
     { label: 'Photo', icon: Camera, onClick: () => onOpenSearchAction('photo search', 'photo') },
     { label: 'Voice', icon: Mic, onClick: () => onOpenSearchAction('voice search', 'voice') },
     { label: 'Bag', icon: ShoppingBag, onClick: () => onOpenBag() },
