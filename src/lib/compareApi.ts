@@ -60,6 +60,12 @@ export interface CompareOffer {
   whatsapp_number?: string;
   delivery_radius_km?: number;
   coordination_required?: boolean;
+  delivery_details?: Record<string, any>;
+  return_policy_days?: number;
+  authenticity_verified?: boolean;
+  refurb_status?: string;
+  accessories_score?: number;
+  installation_score?: number;
   price?: number;
   currency?: string;
   availability_status?: string;

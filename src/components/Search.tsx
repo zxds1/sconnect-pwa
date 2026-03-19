@@ -68,6 +68,7 @@ import {
   type ShopDirectoryEntry
 } from '../lib/shopDirectoryApi';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
+import { getComparisonPreferences } from '../lib/settingsApi';
 import {
   detectCityKey,
   getCityMultiplier,
@@ -103,6 +104,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [isNearMeActive, setIsNearMeActive] = useState(false);
+  const [comparisonProfile, setComparisonProfile] = useState('default');
   const [locationSuggestions, setLocationSuggestions] = useState<Array<{ id: string; label: string; lng: number; lat: number }>>([]);
   const [mapStatus, setMapStatus] = useState<string | null>(null);
   const [routeInfo, setRouteInfo] = useState<{ distanceKm: number; durationMin: number } | null>(null);
@@ -119,6 +121,21 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const loadComparisonProfile = async () => {
+      try {
+        const prefs = await getComparisonPreferences();
+        if (!alive) return;
+        if (prefs?.comparison_profile) setComparisonProfile(prefs.comparison_profile);
+      } catch {}
+    };
+    loadComparisonProfile();
+    return () => {
+      alive = false;
     };
   }, []);
 
@@ -2864,7 +2881,9 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                 </div>
                 <div className="text-xs shrink-0">
                   <p className="font-bold">{comparisonList.length} Selected</p>
-                  <p className="text-zinc-400 text-[10px]">Compare features</p>
+                  <p className="text-zinc-400 text-[10px]">
+                    Profile: {comparisonProfile.replace(/_/g, ' ')}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">

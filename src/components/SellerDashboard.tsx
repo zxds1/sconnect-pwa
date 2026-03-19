@@ -122,7 +122,8 @@ import {
   listSellerLocations,
   createSellerLocation,
   updateSellerLocation,
-  type SellerLocation
+  type SellerLocation,
+  type DeliveryDetails
 } from '../lib/sellerProfileApi';
 import { listShopReviews, replyShopReview, type ShopReview } from '../lib/sellerShopApi';
 import { getSellerNotificationPreferences, updateSellerNotificationPreferences } from '../lib/sellerNotificationsApi';
@@ -496,12 +497,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [onboardingStatus, setOnboardingStatus] = useState<string | null>(null);
   const [shopType, setShopType] = useState('physical');
   const [sellerMode, setSellerMode] = useState('fixed_shop');
+  const [buyerReach, setBuyerReach] = useState<'fixed_address' | 'market_stall' | 'delivery_only'>('fixed_address');
   const [marketName, setMarketName] = useState('');
   const [visualMarker, setVisualMarker] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [deliveryRadiusKm, setDeliveryRadiusKm] = useState<number | ''>('');
   const [dailyLat, setDailyLat] = useState<number | ''>('');
   const [dailyLng, setDailyLng] = useState<number | ''>('');
+  const [deliveryDetails, setDeliveryDetails] = useState<DeliveryDetails>({
+    offers_delivery: false,
+    delivery_days: [],
+    delivery_zones: []
+  });
+  const [deliveryZonesInput, setDeliveryZonesInput] = useState('');
+  const [paymentOptionsInput, setPaymentOptionsInput] = useState('');
+  const [installationServicesInput, setInstallationServicesInput] = useState('');
+  const [afterSalesSupportInput, setAfterSalesSupportInput] = useState('');
   const [onlineConnectForm, setOnlineConnectForm] = useState<OnlineConnectRequest>({
     platform: 'shopify',
     shop_domain: '',
@@ -1122,6 +1133,30 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         }
         if (typeof profile?.daily_lat === 'number') setDailyLat(profile.daily_lat);
         if (typeof profile?.daily_lng === 'number') setDailyLng(profile.daily_lng);
+        if (profile?.delivery_details) {
+          setDeliveryDetails(profile.delivery_details);
+          if (Array.isArray(profile.delivery_details.delivery_zones)) {
+            setDeliveryZonesInput(profile.delivery_details.delivery_zones.join(', '));
+          }
+          if (Array.isArray(profile.delivery_details.payment_options)) {
+            setPaymentOptionsInput(profile.delivery_details.payment_options.join(', '));
+          }
+          if (typeof profile.delivery_details.installation_services === 'string') {
+            setInstallationServicesInput(profile.delivery_details.installation_services);
+          }
+          if (typeof profile.delivery_details.after_sales_support === 'string') {
+            setAfterSalesSupportInput(profile.delivery_details.after_sales_support);
+          }
+          if (typeof profile.delivery_details.delivery_radius_km === 'number') {
+            setDeliveryRadiusKm(profile.delivery_details.delivery_radius_km || '');
+          }
+        }
+        const effectiveMode = profile?.seller_mode || state?.seller_mode || sellerMode;
+        if (effectiveMode && effectiveMode !== 'hybrid') {
+          if (effectiveMode === 'fixed_shop') setBuyerReach('fixed_address');
+          if (effectiveMode === 'open_market_stall' || effectiveMode === 'ground_trader') setBuyerReach('market_stall');
+          if (effectiveMode === 'solopreneur') setBuyerReach('delivery_only');
+        }
         if (state?.connection?.id) {
           setOnlineConnectionId(state.connection.id);
           if (state.connection.connection_status) {
@@ -2309,6 +2344,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
   const handleSellerModeSelect = async (mode: string) => {
     setSellerMode(mode);
+    if (mode !== 'hybrid') {
+      if (mode === 'fixed_shop') setBuyerReach('fixed_address');
+      if (mode === 'open_market_stall' || mode === 'ground_trader') setBuyerReach('market_stall');
+      if (mode === 'solopreneur') setBuyerReach('delivery_only');
+    }
     setOnboardingStatus(null);
     try {
       await updateSellerProfile({ seller_mode: mode });
@@ -2319,6 +2359,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     } catch (err: any) {
       setOnboardingStatus(err?.message || 'Unable to save seller mode.');
     }
+  };
+
+  const updateDeliveryDetail = (patch: Partial<DeliveryDetails>) => {
+    setDeliveryDetails(prev => ({ ...prev, ...patch }));
+  };
+
+  const toggleDeliveryDay = (day: string) => {
+    setDeliveryDetails(prev => {
+      const days = prev.delivery_days ? [...prev.delivery_days] : [];
+      const idx = days.indexOf(day);
+      if (idx >= 0) {
+        days.splice(idx, 1);
+      } else {
+        days.push(day);
+      }
+      return { ...prev, delivery_days: days };
+    });
   };
 
   const handleUseDailyLocation = () => {
@@ -2340,13 +2397,41 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const handleSaveDeliveryDetails = async () => {
     setOnboardingStatus(null);
     try {
+      const zones = deliveryZonesInput
+        .split(',')
+        .map(zone => zone.trim())
+        .filter(Boolean);
+      const paymentOptions = paymentOptionsInput
+        .split(',')
+        .map(opt => opt.trim())
+        .filter(Boolean);
+      if ((buyerReach === 'market_stall' || sellerMode === 'ground_trader' || sellerMode === 'open_market_stall') &&
+        (!marketName.trim() || !visualMarker.trim() || !whatsappNumber.trim())) {
+        setOnboardingStatus('Market sellers need market name, visual marker, and WhatsApp number.');
+        return;
+      }
+      if ((buyerReach === 'delivery_only' || sellerMode === 'solopreneur') &&
+        (!whatsappNumber.trim() || (deliveryRadiusKm === '' && zones.length === 0))) {
+        setOnboardingStatus('Delivery sellers need WhatsApp and a delivery radius or zones.');
+        return;
+      }
+      const normalizedDetails: DeliveryDetails = {
+        ...deliveryDetails,
+        delivery_radius_km: deliveryRadiusKm === '' ? deliveryDetails.delivery_radius_km : Number(deliveryRadiusKm),
+        delivery_zones: zones,
+        offers_delivery: deliveryDetails.offers_delivery ?? (deliveryRadiusKm !== '' && Number(deliveryRadiusKm) > 0),
+        payment_options: paymentOptions,
+        installation_services: installationServicesInput || undefined,
+        after_sales_support: afterSalesSupportInput || undefined
+      };
       await updateSellerProfile({
         market_name: marketName || undefined,
         visual_marker: visualMarker || undefined,
         whatsapp_number: whatsappNumber || undefined,
         delivery_radius_km: deliveryRadiusKm === '' ? undefined : Number(deliveryRadiusKm),
         daily_lat: dailyLat === '' ? undefined : Number(dailyLat),
-        daily_lng: dailyLng === '' ? undefined : Number(dailyLng)
+        daily_lng: dailyLng === '' ? undefined : Number(dailyLng),
+        delivery_details: normalizedDetails
       });
       await recordSellerOnboardingEvent({ step: 'delivery_details', status: 'complete' });
       const state = await getSellerOnboardingState();
@@ -3316,6 +3401,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
+  const showMarketFields = buyerReach === 'market_stall'
+    || sellerMode === 'open_market_stall'
+    || sellerMode === 'ground_trader'
+    || sellerMode === 'hybrid';
+  const showDeliveryConfig = Boolean(deliveryDetails.offers_delivery)
+    || buyerReach === 'delivery_only'
+    || sellerMode === 'solopreneur'
+    || sellerMode === 'hybrid';
+
   return (
     <div className="h-full bg-zinc-50 flex flex-col">
       {/* Sidebar / Nav */}
@@ -3469,6 +3563,41 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Buyer Reach</p>
+                  <p className="text-sm font-bold text-zinc-900">How do buyers reach you?</p>
+                  <p className="text-[10px] text-zinc-500">Choose the primary method; hybrid sellers can use all.</p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-zinc-50 text-[10px] font-black text-zinc-600">
+                  Selected: {buyerReach.replace('_', ' ')}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-bold">
+                {[
+                  { id: 'fixed_address', label: 'Fixed Address' },
+                  { id: 'market_stall', label: 'Market Stall / Ground Trader' },
+                  { id: 'delivery_only', label: 'Delivery Only' }
+                ].map(option => (
+                  <button
+                    key={option.id}
+                    onClick={() => setBuyerReach(option.id as typeof buyerReach)}
+                    className={`px-3 py-3 rounded-2xl border ${
+                      buyerReach === option.id
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 text-[10px] text-zinc-500 font-bold">
+                Fixed address details live in the Shop Profile tab.
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Unified Shop Registry</p>
                   <p className="text-sm font-bold text-zinc-900">Select how you sell today</p>
                   <p className="text-[10px] text-zinc-500">Physical, online, hybrid, or marketplace sellers — one flow.</p>
@@ -3520,6 +3649,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     placeholder="+2547..."
                   />
                 </label>
+                <label className="text-[10px] font-bold text-zinc-500 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="accent-emerald-600"
+                    checked={deliveryDetails.offers_delivery ?? false}
+                    onChange={(e) => updateDeliveryDetail({ offers_delivery: e.target.checked })}
+                  />
+                  Offers Delivery
+                </label>
                 <label className="text-[10px] font-bold text-zinc-500">
                   Delivery Radius (km)
                   <input
@@ -3532,23 +3670,212 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   />
                 </label>
                 <label className="text-[10px] font-bold text-zinc-500">
-                  Market Name (if applicable)
+                  Delivery Zones
                   <input
                     className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                    value={marketName}
-                    onChange={(e) => setMarketName(e.target.value)}
-                    placeholder="My Gikomba Spot"
+                    value={deliveryZonesInput}
+                    onChange={(e) => setDeliveryZonesInput(e.target.value)}
+                    placeholder="CBD, Westlands, Eastlands"
                   />
                 </label>
-                <label className="text-[10px] font-bold text-zinc-500">
-                  Visual Marker
-                  <input
-                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                    value={visualMarker}
-                    onChange={(e) => setVisualMarker(e.target.value)}
-                    placeholder="Blue tarp"
-                  />
-                </label>
+                {showMarketFields && (
+                  <>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Market Name (if applicable)
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={marketName}
+                        onChange={(e) => setMarketName(e.target.value)}
+                        placeholder="My Gikomba Spot"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Visual Marker
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={visualMarker}
+                        onChange={(e) => setVisualMarker(e.target.value)}
+                        placeholder="Blue tarp"
+                      />
+                    </label>
+                  </>
+                )}
+                {showDeliveryConfig && (
+                  <>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Delivery Fee (flat)
+                      <input
+                        type="number"
+                        min={0}
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.delivery_fee_flat ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ delivery_fee_flat: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="50"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Delivery Fee per KM
+                      <input
+                        type="number"
+                        min={0}
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.delivery_fee_per_km ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ delivery_fee_per_km: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="20"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Free Delivery Threshold
+                      <input
+                        type="number"
+                        min={0}
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.free_delivery_threshold ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ free_delivery_threshold: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="1500"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Minimum Order Value
+                      <input
+                        type="number"
+                        min={0}
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.minimum_order_value ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ minimum_order_value: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="500"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Average ETA (minutes)
+                      <input
+                        type="number"
+                        min={0}
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.average_eta_minutes ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ average_eta_minutes: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="45"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-emerald-600"
+                        checked={deliveryDetails.same_day_available ?? false}
+                        onChange={(e) => updateDeliveryDetail({ same_day_available: e.target.checked })}
+                      />
+                      Same Day Available
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Same Day Cutoff
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.same_day_cutoff_time ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ same_day_cutoff_time: e.target.value })}
+                        placeholder="14:00"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Delivery Hours
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.delivery_hours ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ delivery_hours: e.target.value })}
+                        placeholder="8:00-18:00"
+                      />
+                    </label>
+                    <div className="text-[10px] font-bold text-zinc-500">
+                      Delivery Days
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {WEEK_DAYS.map(day => (
+                          <button
+                            key={day}
+                            onClick={() => toggleDeliveryDay(day)}
+                            className={`px-3 py-1 rounded-full border text-[9px] font-black ${
+                              deliveryDetails.delivery_days?.includes(day)
+                                ? 'bg-emerald-600 border-emerald-600 text-white'
+                                : 'bg-zinc-50 border-zinc-200 text-zinc-600'
+                            }`}
+                          >
+                            {day}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="text-[10px] font-bold text-zinc-500 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-emerald-600"
+                        checked={deliveryDetails.pickup_available ?? false}
+                        onChange={(e) => updateDeliveryDetail({ pickup_available: e.target.checked })}
+                      />
+                      Pickup Available
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Pickup Instructions
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.pickup_instructions ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ pickup_instructions: e.target.value })}
+                        placeholder="Call on arrival, rear entrance"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="accent-emerald-600"
+                        checked={deliveryDetails.cash_on_delivery ?? false}
+                        onChange={(e) => updateDeliveryDetail({ cash_on_delivery: e.target.checked })}
+                      />
+                      Cash on Delivery
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Delivery Partner
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.delivery_partner ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ delivery_partner: e.target.value })}
+                        placeholder="In-house, rider, 3rd-party"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Order Tracking Method
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={deliveryDetails.order_tracking_method ?? ''}
+                        onChange={(e) => updateDeliveryDetail({ order_tracking_method: e.target.value })}
+                        placeholder="whatsapp, sms, link"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Payment Options
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={paymentOptionsInput}
+                        onChange={(e) => setPaymentOptionsInput(e.target.value)}
+                        placeholder="M-Pesa, Cash, Card"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      Installation Services
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={installationServicesInput}
+                        onChange={(e) => setInstallationServicesInput(e.target.value)}
+                        placeholder="Setup, calibration, assembly"
+                      />
+                    </label>
+                    <label className="text-[10px] font-bold text-zinc-500">
+                      After-Sales Support
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                        value={afterSalesSupportInput}
+                        onChange={(e) => setAfterSalesSupportInput(e.target.value)}
+                        placeholder="Warranty claims, return handling"
+                      />
+                    </label>
+                  </>
+                )}
                 <label className="text-[10px] font-bold text-zinc-500">
                   Daily Latitude
                   <input

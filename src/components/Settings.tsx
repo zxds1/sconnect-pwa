@@ -18,7 +18,15 @@ import {
   Sun
 } from 'lucide-react';
 import { getNotificationPreferences, updateNotificationPreferences } from '../lib/notificationsApi';
-import { getConsents, getSettingsSummary, requestSettingsDeletion, requestSettingsExport, updateConsentByType } from '../lib/settingsApi';
+import {
+  getConsents,
+  getSettingsSummary,
+  requestSettingsDeletion,
+  requestSettingsExport,
+  updateConsentByType,
+  getComparisonPreferences,
+  updateComparisonPreferences
+} from '../lib/settingsApi';
 
 interface SettingsProps {
   onOpenDataDashboard?: () => void;
@@ -67,6 +75,21 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     recentLoginAt: ''
   });
   const [exportStatus, setExportStatus] = React.useState<string | null>(null);
+  const [comparisonWeights, setComparisonWeights] = React.useState({
+    price: 30,
+    convenience: 25,
+    trust: 20,
+    quality: 15,
+    ownership: 10
+  });
+  const [dealThresholds, setDealThresholds] = React.useState({
+    best_value: 85,
+    fastest_pickup: 30,
+    trusted_seller: 80,
+    nearby: 3
+  });
+  const [comparisonProfile, setComparisonProfile] = React.useState('default');
+  const [comparisonStatus, setComparisonStatus] = React.useState<string | null>(null);
   const [deleteForm, setDeleteForm] = React.useState({
     verificationMethod: 'mfa',
     mfa: false,
@@ -123,6 +146,27 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           trending: Boolean(prefs.trending),
           watched_items: Boolean(prefs.watched_items)
         });
+        const comparison = await getComparisonPreferences();
+        if (comparison?.comparison_weights) {
+          setComparisonWeights({
+            price: Number(comparison.comparison_weights.price ?? 30),
+            convenience: Number(comparison.comparison_weights.convenience ?? 25),
+            trust: Number(comparison.comparison_weights.trust ?? 20),
+            quality: Number(comparison.comparison_weights.quality ?? 15),
+            ownership: Number(comparison.comparison_weights.ownership ?? 10)
+          });
+        }
+        if (comparison?.deal_thresholds) {
+          setDealThresholds({
+            best_value: Number(comparison.deal_thresholds.best_value ?? 85),
+            fastest_pickup: Number(comparison.deal_thresholds.fastest_pickup ?? 30),
+            trusted_seller: Number(comparison.deal_thresholds.trusted_seller ?? 80),
+            nearby: Number(comparison.deal_thresholds.nearby ?? 3)
+          });
+        }
+        if (comparison?.comparison_profile) {
+          setComparisonProfile(comparison.comparison_profile);
+        }
       } catch {
         if (!ignore) {
           setDataSummary({ searches: 0, receipts: 0, purchases: 0, reviews: 0 });
@@ -162,6 +206,49 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       await updateNotificationPreferences({ [field]: nextValue } as any);
       setNotificationPrefs((prev) => ({ ...prev, [field]: nextValue }));
     } catch {}
+  };
+
+  const totalWeight = Object.values(comparisonWeights).reduce((sum, value) => sum + Number(value || 0), 0);
+  const updateWeight = (key: keyof typeof comparisonWeights, value: number) => {
+    setComparisonWeights((prev) => ({ ...prev, [key]: Math.max(0, Math.min(100, value)) }));
+  };
+
+  const updateThreshold = (key: keyof typeof dealThresholds, value: number) => {
+    setDealThresholds((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const applyProfilePreset = (profile: string) => {
+    const normalized = profile.toLowerCase().replace(/\s+/g, '_');
+    setComparisonProfile(normalized);
+    if (normalized === 'deal_hunter' || normalized === 'aggressive_deals') {
+      setComparisonWeights({ price: 50, convenience: 20, trust: 10, quality: 10, ownership: 10 });
+    } else if (normalized === 'trust_first') {
+      setComparisonWeights({ price: 20, convenience: 20, trust: 50, quality: 5, ownership: 5 });
+    } else if (normalized === 'speed_priority') {
+      setComparisonWeights({ price: 20, convenience: 50, trust: 10, quality: 10, ownership: 10 });
+    } else {
+      setComparisonWeights({ price: 30, convenience: 25, trust: 20, quality: 15, ownership: 10 });
+    }
+  };
+
+  const handleSaveComparisonPreferences = async () => {
+    setComparisonStatus(null);
+    if (totalWeight <= 0) {
+      setComparisonStatus('Weights must total 100%.');
+      return;
+    }
+    try {
+      const payload = {
+        comparison_weights: comparisonWeights,
+        deal_thresholds: dealThresholds,
+        comparison_profile: comparisonProfile || 'custom'
+      };
+      const saved = await updateComparisonPreferences(payload);
+      if (saved?.comparison_profile) setComparisonProfile(saved.comparison_profile);
+      setComparisonStatus('Comparison preferences saved.');
+    } catch (err: any) {
+      setComparisonStatus(err?.message || 'Unable to save preferences.');
+    }
   };
 
   const handleExport = async () => {
@@ -465,6 +552,133 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
             </div>
           </div>
         )}
+
+        {/* Comparison Preferences */}
+        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Database className="w-5 h-5 text-indigo-500" />
+              <div>
+                <p className="text-sm font-bold text-zinc-900">My Comparison Preferences</p>
+                <p className="text-[10px] text-zinc-500">Control how Value Score ranks sellers.</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-zinc-400 uppercase">Total {Math.round(totalWeight)}%</span>
+          </div>
+          {Math.round(totalWeight) !== 100 && (
+            <div className="mb-3 text-[10px] font-bold text-amber-600">
+              Weights will normalize to 100% on save.
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {([
+              { key: 'price', label: 'Price' },
+              { key: 'convenience', label: 'Convenience' },
+              { key: 'trust', label: 'Trust' },
+              { key: 'quality', label: 'Quality' },
+              { key: 'ownership', label: 'Ownership' }
+            ] as const).map((item) => (
+              <div key={item.key} className="flex items-center gap-3">
+                <span className="w-20 text-[10px] font-bold text-zinc-600">{item.label}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={comparisonWeights[item.key]}
+                  onChange={(e) => updateWeight(item.key, Number(e.target.value))}
+                  className="flex-1 accent-indigo-600"
+                />
+                <span className="w-10 text-right text-[10px] font-bold text-zinc-500">
+                  {Math.round(comparisonWeights[item.key])}%
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px] font-bold text-zinc-600">
+            <label className="flex items-center justify-between gap-3">
+              Best Value ≥
+              <input
+                type="number"
+                min={80}
+                max={95}
+                value={dealThresholds.best_value}
+                onChange={(e) => updateThreshold('best_value', Number(e.target.value))}
+                className="w-16 px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-200 text-[10px]"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              Fastest Pickup ≤
+              <input
+                type="number"
+                min={15}
+                max={60}
+                value={dealThresholds.fastest_pickup}
+                onChange={(e) => updateThreshold('fastest_pickup', Number(e.target.value))}
+                className="w-16 px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-200 text-[10px]"
+              />
+              <span className="text-[9px] text-zinc-400">min</span>
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              Trusted Seller ≥
+              <input
+                type="number"
+                min={70}
+                max={95}
+                value={dealThresholds.trusted_seller}
+                onChange={(e) => updateThreshold('trusted_seller', Number(e.target.value))}
+                className="w-16 px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-200 text-[10px]"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              Nearby ≤
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={dealThresholds.nearby}
+                onChange={(e) => updateThreshold('nearby', Number(e.target.value))}
+                className="w-16 px-2 py-1 rounded-lg bg-zinc-50 border border-zinc-200 text-[10px]"
+              />
+              <span className="text-[9px] text-zinc-400">km</span>
+            </label>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[
+              { id: 'default', label: 'Default' },
+              { id: 'aggressive_deals', label: 'Aggressive Deals' },
+              { id: 'deal_hunter', label: 'Deal Hunter' },
+              { id: 'trust_first', label: 'Trust First' },
+              { id: 'speed_priority', label: 'Speed Priority' }
+            ].map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => applyProfilePreset(preset.id)}
+                className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase ${
+                  comparisonProfile === preset.id
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-zinc-100 text-zinc-600'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between">
+            <button
+              onClick={handleSaveComparisonPreferences}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
+            >
+              Save Preferences
+            </button>
+            {comparisonStatus && (
+              <span className="text-[10px] font-bold text-zinc-500">{comparisonStatus}</span>
+            )}
+          </div>
+        </div>
 
         {/* Voice Feedback */}
         <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">

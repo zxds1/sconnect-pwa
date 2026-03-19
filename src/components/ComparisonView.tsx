@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { X, ArrowLeft, ShoppingBag, Star, BarChart3, MapPin, Map as MapIcon } from 'lucide-react';
+import { X, ArrowLeft, ShoppingBag, Star, BarChart3, MapPin, Map as MapIcon, HelpCircle } from 'lucide-react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Product } from '../types';
@@ -28,6 +28,7 @@ import {
   CompareHistoryItem,
   removeCompareItem
 } from '../lib/compareApi';
+import { getComparisonPreferences, updateComparisonPreferences } from '../lib/settingsApi';
 
 type CompareProductView = {
   id: string;
@@ -50,6 +51,28 @@ interface ComparisonViewProps {
 export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProductOpen }) => {
   const [activeMapProduct, setActiveMapProduct] = useState<CompareProductView | null>(null);
   const [products, setProducts] = useState<CompareProductView[]>([]);
+  const [compareTabs, setCompareTabs] = useState<string[]>([
+    'Best Value',
+    'Fastest Pickup',
+    'Trusted Sellers',
+    'Nearby',
+    'Best Warranty'
+  ]);
+  const [activeCompareTab, setActiveCompareTab] = useState('Best Value');
+  const [comparisonThresholds, setComparisonThresholds] = useState({
+    best_value: 85,
+    fastest_pickup: 30,
+    trusted_seller: 80,
+    nearby: 3
+  });
+  const [comparisonWeights, setComparisonWeights] = useState({
+    price: 30,
+    convenience: 25,
+    trust: 20,
+    quality: 15,
+    ownership: 10
+  });
+  const [comparisonProfile, setComparisonProfile] = useState('default');
   const [mapLoadingProductId, setMapLoadingProductId] = useState<string | null>(null);
   const [history, setHistory] = useState<CompareHistoryItem[]>([]);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'add' | 'remove' | 'view'>('all');
@@ -72,6 +95,40 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
     });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const loadPrefs = async () => {
+      try {
+        const prefs = await getComparisonPreferences();
+        if (!alive) return;
+        if (prefs?.deal_thresholds) {
+          setComparisonThresholds({
+            best_value: Number(prefs.deal_thresholds.best_value ?? 85),
+            fastest_pickup: Number(prefs.deal_thresholds.fastest_pickup ?? 30),
+            trusted_seller: Number(prefs.deal_thresholds.trusted_seller ?? 80),
+            nearby: Number(prefs.deal_thresholds.nearby ?? 3)
+          });
+        }
+        if (prefs?.comparison_weights) {
+          setComparisonWeights({
+            price: Number(prefs.comparison_weights.price ?? 30),
+            convenience: Number(prefs.comparison_weights.convenience ?? 25),
+            trust: Number(prefs.comparison_weights.trust ?? 20),
+            quality: Number(prefs.comparison_weights.quality ?? 15),
+            ownership: Number(prefs.comparison_weights.ownership ?? 10)
+          });
+        }
+        if (prefs?.comparison_profile) {
+          setComparisonProfile(prefs.comparison_profile);
+        }
+      } catch {}
+    };
+    loadPrefs();
+    return () => {
+      alive = false;
     };
   }, []);
 
@@ -111,6 +168,85 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
     return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) * 1000;
   };
 
+  const normalizeTab = (tab: string) => tab.trim().toLowerCase();
+
+  const rankOffersByTab = (offers: CompareOffer[], tab: string) => {
+    const normalized = normalizeTab(tab);
+    const withFallback = [...offers];
+    const byValue = (a: CompareOffer, b: CompareOffer) => (b.value_score ?? 0) - (a.value_score ?? 0);
+    if (normalized.includes('fastest pickup')) {
+      return withFallback.sort((a, b) => {
+        const aEta = a.pickup_eta_minutes && a.pickup_eta_minutes > 0 ? a.pickup_eta_minutes : 9999;
+        const bEta = b.pickup_eta_minutes && b.pickup_eta_minutes > 0 ? b.pickup_eta_minutes : 9999;
+        if (aEta !== bEta) return aEta - bEta;
+        return byValue(a, b);
+      });
+    }
+    if (normalized.includes('trusted')) {
+      const trusted = withFallback.filter((o) => (o.trust_score ?? 0) >= comparisonThresholds.trusted_seller);
+      return (trusted.length ? trusted : withFallback).sort((a, b) => (b.trust_score ?? 0) - (a.trust_score ?? 0));
+    }
+    if (normalized.includes('nearby')) {
+      return withFallback.sort((a, b) => {
+        const aDist = typeof a.distance_km === 'number' && a.distance_km > 0 ? a.distance_km : 9999;
+        const bDist = typeof b.distance_km === 'number' && b.distance_km > 0 ? b.distance_km : 9999;
+        if (aDist !== bDist) return aDist - bDist;
+        return byValue(a, b);
+      });
+    }
+    if (normalized.includes('warranty')) {
+      return withFallback.sort((a, b) => {
+        const aW = a.warranty_months ?? 0;
+        const bW = b.warranty_months ?? 0;
+        if (aW !== bW) return bW - aW;
+        return byValue(a, b);
+      });
+    }
+    return withFallback.sort(byValue);
+  };
+
+  const priceBandMeta = (label?: string) => {
+    const normalized = (label || '').toLowerCase();
+    if (normalized.includes('below')) {
+      return { label: 'Below Average', color: 'bg-emerald-500', text: 'text-emerald-700' };
+    }
+    if (normalized.includes('premium')) {
+      return { label: 'Premium', color: 'bg-rose-500', text: 'text-rose-700' };
+    }
+    if (normalized.includes('average')) {
+      return { label: 'Average', color: 'bg-amber-500', text: 'text-amber-700' };
+    }
+    return { label: 'Unknown', color: 'bg-zinc-300', text: 'text-zinc-500' };
+  };
+
+  const handleProfileSwitch = async (profile: string) => {
+    setComparisonProfile(profile);
+    try {
+      const updated = await updateComparisonPreferences({ comparison_profile: profile });
+      if (updated?.comparison_profile) {
+        setComparisonProfile(updated.comparison_profile);
+      }
+      if (updated?.comparison_weights) {
+        setComparisonWeights({
+          price: Number(updated.comparison_weights.price ?? comparisonWeights.price),
+          convenience: Number(updated.comparison_weights.convenience ?? comparisonWeights.convenience),
+          trust: Number(updated.comparison_weights.trust ?? comparisonWeights.trust),
+          quality: Number(updated.comparison_weights.quality ?? comparisonWeights.quality),
+          ownership: Number(updated.comparison_weights.ownership ?? comparisonWeights.ownership)
+        });
+      }
+      if (updated?.deal_thresholds) {
+        setComparisonThresholds({
+          best_value: Number(updated.deal_thresholds.best_value ?? comparisonThresholds.best_value),
+          fastest_pickup: Number(updated.deal_thresholds.fastest_pickup ?? comparisonThresholds.fastest_pickup),
+          trusted_seller: Number(updated.deal_thresholds.trusted_seller ?? comparisonThresholds.trusted_seller),
+          nearby: Number(updated.deal_thresholds.nearby ?? comparisonThresholds.nearby)
+        });
+      }
+      await loadCompare();
+    } catch {}
+  };
+
   const speak = (text: string) => {
     if (!voiceDirectionsEnabled) return;
     if ('speechSynthesis' in window && text) {
@@ -138,19 +274,21 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
         })
       );
       if (alive && !alive.current) return;
-      const view = analysisResponses.map(({ item, analysis }) => {
+      const view = analysisResponses.map(({ item, analysis }, index) => {
         const product: CompareProduct | undefined = analysis?.product;
         const offers = analysis?.offers || [];
-        const bestOffer = offers.length
-          ? [...offers].sort((a, b) => (a.price ?? 0) - (b.price ?? 0))[0]
-          : null;
+        if (index === 0 && Array.isArray(analysis?.tabs) && analysis.tabs.length) {
+          setCompareTabs(analysis.tabs);
+          if (!analysis.tabs.includes(activeCompareTab)) {
+            setActiveCompareTab(analysis.tabs[0]);
+          }
+        }
         return {
           id: item.product_id,
           name: product?.name || item.product_name,
           brand: product?.brand,
           categoryId: product?.category_id,
           imageUrl: product?.image_url || item.product_image_url,
-          bestOffer,
           offers,
           mapItems: [],
           fallbackName: item.product_name,
@@ -606,7 +744,18 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
     }
   };
 
-  const formattedProducts = useMemo(() => products.filter(p => p.id), [products]);
+  const formattedProducts = useMemo(() => {
+    return products
+      .filter(p => p.id)
+      .map((product) => {
+        const ranked = rankOffersByTab(product.offers || [], activeCompareTab);
+        return {
+          ...product,
+          offers: ranked,
+          bestOffer: ranked[0] || null
+        };
+      });
+  }, [products, activeCompareTab]);
   const activeMapItem = activeMapProduct?.mapItems?.[0];
 
   if (!loading && formattedProducts.length === 0) {
@@ -633,8 +782,52 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-xl font-bold">Product Comparison</h1>
+          <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500">
+            <HelpCircle
+              className="w-4 h-4 text-zinc-400"
+              title="Value Score uses your weights. Badges use your thresholds. Change profile to re-rank."
+            />
+            <span className="hidden sm:inline">How scoring works</span>
+          </div>
         </div>
         <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">{formattedProducts.length} Items</span>
+      </div>
+      <div className="px-4 py-3 bg-white border-b flex flex-wrap gap-2">
+        {compareTabs.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveCompareTab(tab)}
+            className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+              activeCompareTab === tab
+                ? 'bg-indigo-600 text-white'
+                : 'bg-zinc-100 text-zinc-600'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+        <div className="ml-auto flex flex-wrap gap-2">
+          {['default', 'aggressive_deals', 'deal_hunter', 'trust_first', 'speed_priority'].map((profile) => (
+            <button
+              key={profile}
+              onClick={() => handleProfileSwitch(profile)}
+              className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                comparisonProfile === profile
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-zinc-100 text-zinc-600'
+              }`}
+            >
+              {profile.replace(/_/g, ' ')}
+            </button>
+          ))}
+          <button
+            onClick={() => handleProfileSwitch('default')}
+            className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-zinc-900 text-white"
+            title="Reset comparison profile to default"
+          >
+            Reset Default
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -699,14 +892,36 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
             )}
           </div>
           <div className="flex gap-4 min-w-max h-full">
-            {formattedProducts.map((product) => (
-              <motion.div 
-                key={product.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="w-72 bg-white rounded-3xl border border-zinc-100 shadow-sm flex flex-col overflow-hidden"
-              >
+            {formattedProducts.map((product) => {
+              const offer = product.bestOffer;
+              const deliveryDetails = (offer?.delivery_details || {}) as Record<string, any>;
+              const priceBand = priceBandMeta(offer?.price_position);
+              const sellerMode = offer?.seller_mode || 'seller';
+              const sellerIndicator = (() => {
+                switch (sellerMode) {
+                  case 'fixed_shop':
+                    return 'Fixed Shop · Address + hours';
+                  case 'open_market_stall':
+                    return `Stall · ${offer?.market_name || 'Market'} · ${offer?.visual_marker || 'Marker'}`;
+                  case 'ground_trader':
+                    return `Ground Trader · ${offer?.visual_marker || 'Marker'} · WhatsApp`;
+                  case 'solopreneur':
+                    return `Solopreneur · Delivery ${offer?.delivery_radius_km ?? '—'} km`;
+                  case 'hybrid':
+                    return 'Hybrid · Shop + delivery';
+                  default:
+                    return sellerMode.replace('_', ' ');
+                }
+              })();
+
+              return (
+                <motion.div 
+                  key={product.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="w-72 bg-white rounded-3xl border border-zinc-100 shadow-sm flex flex-col overflow-hidden"
+                >
                 <div className="relative aspect-square">
                   {product.imageUrl || product.fallbackImageUrl ? (
                     <img src={product.imageUrl || product.fallbackImageUrl} className="w-full h-full object-cover" alt={product.name || product.id} />
@@ -732,6 +947,23 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                   <div>
                     <h3 className="font-bold text-zinc-900 text-lg mb-1 leading-tight">{product.name || product.fallbackName || product.id}</h3>
                     <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{product.categoryId || product.brand || '—'}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase">
+                        Profile: {comparisonProfile.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    {offer?.badges?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {offer.badges.map((badge) => (
+                          <span key={badge} className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-black">
+                            {badge}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-[9px] text-zinc-400 font-bold">
+                      Thresholds: Best ≥{comparisonThresholds.best_value} · Pickup ≤{comparisonThresholds.fastest_pickup}m · Trust ≥{comparisonThresholds.trusted_seller} · Nearby ≤{comparisonThresholds.nearby}km
+                    </div>
                   </div>
 
                   <div className="space-y-4">
@@ -753,6 +985,14 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                             {mapLoadingProductId === product.id ? 'Loading...' : 'Map View'}
                           </button>
                         </div>
+                        <div className="mt-2 text-[10px] text-zinc-600 font-bold">
+                          {sellerIndicator}
+                        </div>
+                        {(product.bestOffer?.market_name) && (
+                          <div className="mt-1 text-[10px] text-zinc-500">
+                            Market zone: {product.bestOffer.market_name}
+                          </div>
+                        )}
                         {(product.bestOffer?.seller_mode || product.bestOffer?.market_name || product.bestOffer?.visual_marker) && (
                           <div className="mt-2 text-[10px] text-zinc-600 font-bold">
                             {product.bestOffer?.seller_mode ? product.bestOffer.seller_mode.replace('_', ' ') : 'Seller'} ·{' '}
@@ -766,13 +1006,38 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                             {typeof product.bestOffer?.delivery_radius_km === 'number' && `Delivery ${product.bestOffer.delivery_radius_km} km`}
                           </div>
                         )}
+                        <div className="mt-1 text-[10px] text-zinc-500">
+                          Pickup ETA: {product.bestOffer?.pickup_eta_minutes ? `${product.bestOffer.pickup_eta_minutes} min` : '—'}
+                          {' • '}Delivery ETA: {product.bestOffer?.delivery_eta_minutes ? `${product.bestOffer.delivery_eta_minutes} min` : '—'}
+                        </div>
+                        {typeof product.bestOffer?.delivery_radius_km === 'number' && typeof product.bestOffer?.distance_km === 'number' && product.bestOffer.distance_km > 0 && (
+                          <div className="mt-1 text-[10px] text-zinc-500">
+                            Delivery coverage: {product.bestOffer.distance_km <= product.bestOffer.delivery_radius_km ? 'Within radius' : 'Outside radius'}
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="p-3 bg-zinc-50 rounded-2xl">
                       <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Price Analysis</p>
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-zinc-600">Value Score</span>
+                        <span className="text-xs font-bold text-zinc-600">Your Value Score</span>
                         <span className="text-xs font-bold text-zinc-900">{product.bestOffer?.value_score ?? '—'}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-[9px] text-zinc-500 font-bold">
+                        <div>Price {comparisonWeights.price}%</div>
+                        <div>Convenience {comparisonWeights.convenience}%</div>
+                        <div>Trust {comparisonWeights.trust}%</div>
+                        <div>Quality {comparisonWeights.quality}%</div>
+                        <div>Ownership {comparisonWeights.ownership}%</div>
+                      </div>
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[10px] font-bold text-zinc-500">
+                          <span>Market Band</span>
+                          <span className={priceBand.text}>{priceBand.label}</span>
+                        </div>
+                        <div className="mt-2 h-2 rounded-full bg-zinc-200 overflow-hidden">
+                          <div className={`h-full ${priceBand.color}`} style={{ width: '100%' }} />
+                        </div>
                       </div>
                       <div className="flex items-center justify-between mt-1">
                         <span className="text-xs font-bold text-zinc-600">Price Position</span>
@@ -797,6 +1062,42 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                         <span className="text-xs font-bold text-zinc-600">Trust Label</span>
                         <span className="text-xs font-black text-zinc-900">{product.bestOffer?.trust_label || '—'}</span>
                       </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Warranty</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {product.bestOffer?.warranty_months ? `${product.bestOffer.warranty_months} mo` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Return Policy</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {product.bestOffer?.return_policy_days ? `${product.bestOffer.return_policy_days} days` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Condition</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {product.bestOffer?.refurb_status || '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Authenticity</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {product.bestOffer?.authenticity_verified ? 'Verified' : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Bundle/Accessories</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {typeof product.bestOffer?.accessories_score === 'number' ? product.bestOffer.accessories_score : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Installation</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {typeof product.bestOffer?.installation_score === 'number' ? product.bestOffer.installation_score : '—'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="p-3 bg-zinc-50 rounded-2xl">
@@ -804,6 +1105,48 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-zinc-600">Status</span>
                         <span className="text-xs font-black text-zinc-900">{product.bestOffer?.availability_status || product.bestOffer?.stock_status || '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Stock Signal</span>
+                        <span className="text-xs font-black text-zinc-900">{product.bestOffer?.stock_status || '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Coordination</span>
+                        <span className="text-xs font-black text-zinc-900">{product.bestOffer?.coordination_required ? 'Required' : 'Standard'}</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Same-Day</span>
+                        <span className="text-xs font-black text-zinc-900">{deliveryDetails.same_day_available ? 'Yes' : 'No'}</span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-zinc-50 rounded-2xl">
+                      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Service</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-zinc-600">Delivery Fee</span>
+                        <span className="text-xs font-black text-zinc-900">
+                          {deliveryDetails.delivery_fee_flat
+                            ? `KES ${deliveryDetails.delivery_fee_flat}`
+                            : deliveryDetails.delivery_fee_per_km
+                              ? `KES ${deliveryDetails.delivery_fee_per_km}/km`
+                              : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Payment</span>
+                        <span className="text-[10px] font-black text-zinc-900">
+                          {Array.isArray(deliveryDetails.payment_options) && deliveryDetails.payment_options.length
+                            ? deliveryDetails.payment_options.join(', ')
+                            : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">Install</span>
+                        <span className="text-[10px] font-black text-zinc-900">{deliveryDetails.installation_services || '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-xs font-bold text-zinc-600">After Sales</span>
+                        <span className="text-[10px] font-black text-zinc-900">{deliveryDetails.after_sales_support || '—'}</span>
                       </div>
                     </div>
                   </div>
@@ -839,7 +1182,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                   </div>
                 </div>
               </motion.div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

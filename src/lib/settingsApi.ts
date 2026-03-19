@@ -32,6 +32,11 @@ export type SettingsSummary = {
 
 export type SettingsExportResponse = Record<string, any>;
 export type SettingsDeleteResponse = Record<string, any>;
+export type ComparisonPreferences = {
+  comparison_weights?: Record<string, number>;
+  deal_thresholds?: Record<string, number>;
+  comparison_profile?: string;
+};
 
 export const getConsents = async (): Promise<ConsentsResponse> =>
   apiFetch('/v1/settings/consents');
@@ -60,5 +65,14 @@ export const requestSettingsExport = async (payload: { export_type: string; veri
 export const requestSettingsDeletion = async (payload: { verification_method: string; mfa: boolean; verified_device: boolean; support_ticket_id: string }) : Promise<SettingsDeleteResponse> =>
   apiFetch('/v1/settings/delete-account', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const getComparisonPreferences = async (): Promise<ComparisonPreferences> =>
+  apiFetch('/v1/settings/comparison-preferences');
+
+export const updateComparisonPreferences = async (payload: ComparisonPreferences): Promise<ComparisonPreferences> =>
+  apiFetch('/v1/settings/comparison-preferences', {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   });

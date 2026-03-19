@@ -313,6 +313,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const averageRating = reviews.length
     ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
     : baseRating.toFixed(1);
+  const deliveryDetails = (sellerProfile?.delivery_details || sellerProfile?.deliveryDetails || {}) as Record<string, any>;
+  const deliveryPaymentOptions = Array.isArray(deliveryDetails.payment_options)
+    ? deliveryDetails.payment_options.join(', ')
+    : '';
+  const sellerModeLabel = (sellerProfile?.seller_mode || sellerProfile?.sellerMode || '').toString();
 
   const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
     const R = 6371;
@@ -1548,6 +1553,41 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div className="mt-3 bg-white border border-zinc-200 rounded-2xl p-3 text-[10px] text-zinc-600 font-bold">
               Seller history: {sellerReputation?.active_since || '—'} • {sellerReputation?.response_rate || '—'} response rate • {counterfeitSummary?.resolved_reports || 0} counterfeit reports resolved.
             </div>
+            {(sellerModeLabel || Object.keys(deliveryDetails).length > 0) && (
+              <div className="mt-3 bg-white border border-zinc-200 rounded-2xl p-3 text-[10px] text-zinc-600 font-bold space-y-1">
+                <div className="text-[10px] text-zinc-400 font-black uppercase tracking-widest">Delivery & Service</div>
+                {sellerModeLabel && (
+                  <div>Seller Mode: {sellerModeLabel.replace(/_/g, ' ')}</div>
+                )}
+                {sellerProfile?.market_name && (
+                  <div>Market: {sellerProfile.market_name}</div>
+                )}
+                {sellerProfile?.visual_marker && (
+                  <div>Marker: {sellerProfile.visual_marker}</div>
+                )}
+                {typeof sellerProfile?.delivery_radius_km === 'number' && sellerProfile.delivery_radius_km > 0 && (
+                  <div>Delivery Radius: {sellerProfile.delivery_radius_km} km</div>
+                )}
+                {deliveryDetails.delivery_fee_flat && (
+                  <div>Delivery Fee: KES {deliveryDetails.delivery_fee_flat}</div>
+                )}
+                {deliveryDetails.delivery_fee_per_km && (
+                  <div>Fee per km: KES {deliveryDetails.delivery_fee_per_km}</div>
+                )}
+                {deliveryDetails.average_eta_minutes && (
+                  <div>ETA: {deliveryDetails.average_eta_minutes} min</div>
+                )}
+                {deliveryPaymentOptions && (
+                  <div>Payments: {deliveryPaymentOptions}</div>
+                )}
+                {deliveryDetails.installation_services && (
+                  <div>Installation: {deliveryDetails.installation_services}</div>
+                )}
+                {deliveryDetails.after_sales_support && (
+                  <div>After Sales: {deliveryDetails.after_sales_support}</div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-6 mb-8">

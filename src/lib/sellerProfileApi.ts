@@ -15,6 +15,30 @@ export type SellerProfile = {
   whatsapp_number?: string;
   daily_lat?: number;
   daily_lng?: number;
+  delivery_details?: DeliveryDetails;
+};
+
+export type DeliveryDetails = {
+  offers_delivery?: boolean;
+  delivery_radius_km?: number;
+  delivery_zones?: string[];
+  delivery_fee_flat?: number;
+  delivery_fee_per_km?: number;
+  free_delivery_threshold?: number;
+  minimum_order_value?: number;
+  average_eta_minutes?: number;
+  same_day_available?: boolean;
+  same_day_cutoff_time?: string;
+  delivery_days?: string[];
+  delivery_hours?: string;
+  pickup_available?: boolean;
+  pickup_instructions?: string;
+  cash_on_delivery?: boolean;
+  delivery_partner?: string;
+  order_tracking_method?: string;
+  payment_options?: string[];
+  installation_services?: string;
+  after_sales_support?: string;
 };
 
 export type SellerLocation = {
@@ -47,6 +71,7 @@ export const updateSellerProfile = async (payload: {
   whatsapp_number?: string;
   daily_lat?: number;
   daily_lng?: number;
+  delivery_details?: DeliveryDetails;
 }) =>
   apiFetch('/v1/seller/profile', {
     method: 'PATCH',

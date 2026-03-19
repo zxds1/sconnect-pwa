@@ -46,6 +46,7 @@ import {
 import { searchShops } from '../lib/shopDirectoryApi';
 import { getCartInsights, getCartSummary, getCartRecommendations, getCartAlerts } from '../lib/cartApi';
 import { getCompareList } from '../lib/compareApi';
+import { getComparisonPreferences } from '../lib/settingsApi';
 import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
 import { listNotifications, type NotificationListResponse } from '../lib/notificationsApi';
 
@@ -161,6 +162,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [buyerInsight, setBuyerInsight] = useState<BuyerInsight | null>(null);
   const [marketBenchmarks, setMarketBenchmarks] = useState<MarketBenchmarks | null>(null);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [comparisonPrefs, setComparisonPrefs] = useState<Record<string, any> | null>(null);
   const [lowStock, setLowStock] = useState<SellerLowStock[]>([]);
   const [marketingKpis, setMarketingKpis] = useState<KPIStat | null>(null);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
@@ -200,6 +202,21 @@ export const Assistant: React.FC<AssistantProps> = ({
       return false;
     }
   });
+
+  useEffect(() => {
+    let alive = true;
+    const loadComparisonPrefs = async () => {
+      try {
+        const prefs = await getComparisonPreferences();
+        if (!alive) return;
+        setComparisonPrefs(prefs || null);
+      } catch {}
+    };
+    loadComparisonPrefs();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const toNumber = (value: any) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -949,7 +966,10 @@ export const Assistant: React.FC<AssistantProps> = ({
 
   const sendStreamMessage = async (threadId: string, content: string, metadata?: Record<string, any>) => {
     try {
-      await streamThreadMessage(threadId, { content, metadata });
+      const enrichedMetadata = comparisonPrefs
+        ? { ...(metadata || {}), comparison_preferences: comparisonPrefs }
+        : metadata;
+      await streamThreadMessage(threadId, { content, metadata: enrichedMetadata });
       await syncMessages(threadId);
       return true;
     } catch {
