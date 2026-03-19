@@ -923,6 +923,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                   <div className="w-full h-full bg-zinc-700" />
                 )}
               </div>
+              </div>
             </div>
           </div>
           </div>
@@ -931,7 +932,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
         {recommendations.length > 0 && (
           <div className="h-full w-full snap-start bg-zinc-900 flex flex-col p-6 overflow-y-auto no-scrollbar">
             <div className="w-full max-w-5xl mx-auto">
-            <div className="mt-12 mb-8">
+              <div className="mt-12 mb-8">
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles className="w-5 h-5 text-indigo-400" />
                 <span className="text-xs font-black uppercase tracking-widest text-indigo-400">Personalized</span>
@@ -947,13 +948,13 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                   initial={{ opacity: 0, scale: 0.9 }}
                   whileInView={{ opacity: 1, scale: 1 }}
                   transition={{ delay: i * 0.1 }}
-                className="bg-zinc-800 rounded-2xl overflow-hidden border border-white/5 group active:scale-95 transition-transform"
-                onClick={() => {
-                  if (product.productId) {
-                    onChatOpen(toProduct(product));
-                  }
-                }}
-              >
+                  className="bg-zinc-800 rounded-2xl overflow-hidden border border-white/5 group active:scale-95 transition-transform"
+                  onClick={() => {
+                    if (product.productId) {
+                      onChatOpen(toProduct(product));
+                    }
+                  }}
+                >
                   <div className="aspect-[3/4] relative">
                     {product.mediaUrl ? (
                       <img 
