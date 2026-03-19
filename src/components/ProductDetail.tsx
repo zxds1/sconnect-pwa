@@ -1004,12 +1004,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         const cityKey = detectCityKey(activeProduct.location?.address || sellerProfile?.location?.address);
         const cityMultiplier = getCityMultiplier(routeConfig, cityKey, routeProfile);
         const profileMultiplier = getProfileMultiplier(routeConfig, routeProfile);
-        const adjustedSteps = steps.map((step: any) => ({
+        const adjustedSteps: Array<{ instruction: string; distance: number; duration: number }> = steps.map((step: any) => ({
           instruction: step.maneuver?.instruction || 'Continue',
           distance: Math.round(step.distance || 0),
           duration: Math.round((step.duration || 0) * profileMultiplier * cityMultiplier * getStepRoadMultiplier(routeConfig, step))
         }));
-        const adjustedDuration = adjustedSteps.reduce((sum, step) => sum + (step.duration || 0), 0);
+        const adjustedDuration = adjustedSteps.reduce((sum: number, step) => sum + (step.duration || 0), 0);
         setRouteInfo({
           distanceKm: Math.round((route.distance / 1000) * 10) / 10,
           durationMin: Math.max(1, Math.round(adjustedDuration / 60))

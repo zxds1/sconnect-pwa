@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Plus, BadgeCheck, TrendingUp } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera } from 'lucide-react';
 import { Product } from '../types';
 import {
   createMessage,
@@ -907,9 +907,13 @@ export const Assistant: React.FC<AssistantProps> = ({
       context: 'assistant_media'
     });
     const mediaKey = await uploadToPresignedUrl(file, presign);
+    const mediaUrl = presign?.file_url || presign?.url || '';
+    if (!mediaUrl) {
+      throw new Error('Missing media URL');
+    }
     return {
       mediaKey,
-      mediaUrl: presign?.url
+      mediaUrl
     };
   };
 

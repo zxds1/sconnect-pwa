@@ -44,6 +44,8 @@ export type AssistantJob = {
   id: string;
   status?: string;
   type?: string;
+  text?: string;
+  query?: string;
   result?: any;
   created_at?: string;
 };

@@ -3,6 +3,7 @@ import { apiFetch } from './apiClient';
 export type PresignResponse = {
   upload_url?: string;
   url?: string;
+  file_url?: string;
   method?: string;
   headers?: Record<string, string>;
   fields?: Record<string, string>;

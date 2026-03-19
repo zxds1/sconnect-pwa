@@ -2,6 +2,9 @@ import { apiFetch } from './apiClient';
 
 export type KPISummary = {
   seller_id?: string;
+  revenue?: string;
+  orders?: number;
+  margin?: string;
   gross_revenue?: string;
   net_revenue?: string;
   aov?: string;
@@ -27,6 +30,7 @@ export type InventoryInsight = {
   stockout_risk?: number;
   reorder_point?: number;
   days_cover?: number;
+  inventory_value?: number;
 };
 
 export type BuyerInsight = {

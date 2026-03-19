@@ -4,7 +4,6 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   Search as SearchIcon, 
-  SlidersHorizontal, 
   X, 
   ShoppingBag, 
   ArrowRightLeft, 
@@ -16,7 +15,6 @@ import {
   Navigation,
   CheckCircle2,
   TrendingUp,
-  Bookmark,
   Bell,
   Sparkles,
   Clock
@@ -324,6 +322,65 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     };
   };
 
+  const updateRoute = React.useCallback(async (toLng: number, toLat: number) => {
+    if (!mapboxToken || !userCoords || !mapRef.current || !mapReadyRef.current) return;
+    routeTargetRef.current = { lng: toLng, lat: toLat };
+    const fromLng = userCoords.lng;
+    const fromLat = userCoords.lat;
+    const profile = toMapboxProfile(routeProfile);
+    const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const route = data.routes?.[0];
+      if (!route) return;
+      const geojson = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: route.geometry,
+            properties: {}
+          }
+        ]
+      };
+      const source = mapRef.current.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+      source?.setData(geojson as any);
+      const steps = route.legs?.[0]?.steps || [];
+      const cityKey = detectCityKey(locationQuery);
+      const cityMultiplier = getCityMultiplier(routeConfig, cityKey, routeProfile);
+      const profileMultiplier = getProfileMultiplier(routeConfig, routeProfile);
+      const adjustedSteps: Array<{ instruction: string; distance: number; duration: number }> = steps.map((step: any) => ({
+        instruction: step.maneuver?.instruction || 'Continue',
+        distance: Math.round(step.distance || 0),
+        duration: Math.round((step.duration || 0) * profileMultiplier * cityMultiplier * getStepRoadMultiplier(routeConfig, step))
+      }));
+      const adjustedDuration = adjustedSteps.reduce((sum: number, step) => sum + (step.duration || 0), 0);
+      setRouteInfo({
+        distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+        durationMin: Math.max(1, Math.round(adjustedDuration / 60))
+      });
+      setRouteSteps(adjustedSteps);
+      routeTelemetry({
+        profile: routeProfile,
+        city: cityKey,
+        distance_km: Math.round((route.distance / 1000) * 10) / 10,
+        duration_min: Math.max(1, Math.round(adjustedDuration / 60)),
+        source: 'search',
+      });
+      routeManeuversRef.current = steps
+        .map((step: any) => ({
+          instruction: step.maneuver?.instruction || 'Continue',
+          location: step.maneuver?.location as [number, number]
+        }))
+        .filter((item: any) => Array.isArray(item.location) && item.location.length === 2);
+      routeStepIndexRef.current = 0;
+    } catch {
+      // Ignore route errors.
+    }
+  }, [mapboxToken, routeProfile, routeConfig, locationQuery, userCoords, routeTelemetry]);
+
   const ensureMap = React.useCallback(() => {
     if (!mapboxToken) {
       setMapStatus('Mapbox token missing.');
@@ -388,7 +445,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             'circle-stroke-width': 3
           }
         });
-        map.on('click', 'clusters', (event) => {
+        map.on('click', 'clusters', (event: any) => {
           const features = map.queryRenderedFeatures(event.point, { layers: ['clusters'] });
           const clusterId = features[0]?.properties?.cluster_id;
           const source = map.getSource('products') as mapboxgl.GeoJSONSource | undefined;
@@ -421,7 +478,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
               .addTo(map);
           });
         });
-        map.on('click', 'unclustered-point', (event) => {
+        map.on('click', 'unclustered-point', (event: any) => {
           const feature = event.features?.[0];
           const props: any = feature?.properties || {};
           const productId = props.productId;
@@ -518,7 +575,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         });
       }
     });
-    map.on('click', async (event) => {
+    map.on('click', async (event: any) => {
       const coords = event.lngLat;
       const picked = await reverseGeocode(coords.lng, coords.lat);
       if (picked) {
@@ -531,65 +588,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     });
     mapRef.current = map;
   }, [mapboxToken, userCoords, updateRoute, onProductOpen]);
-
-  const updateRoute = React.useCallback(async (toLng: number, toLat: number) => {
-    if (!mapboxToken || !userCoords || !mapRef.current || !mapReadyRef.current) return;
-    routeTargetRef.current = { lng: toLng, lat: toLat };
-    const fromLng = userCoords.lng;
-    const fromLat = userCoords.lat;
-    const profile = toMapboxProfile(routeProfile);
-    const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const data = await res.json();
-      const route = data.routes?.[0];
-      if (!route) return;
-      const geojson = {
-        type: 'FeatureCollection',
-        features: [
-          {
-            type: 'Feature',
-            geometry: route.geometry,
-            properties: {}
-          }
-        ]
-      };
-      const source = mapRef.current.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
-      source?.setData(geojson as any);
-      const steps = route.legs?.[0]?.steps || [];
-      const cityKey = detectCityKey(locationQuery);
-      const cityMultiplier = getCityMultiplier(routeConfig, cityKey, routeProfile);
-      const profileMultiplier = getProfileMultiplier(routeConfig, routeProfile);
-      const adjustedSteps = steps.map((step: any) => ({
-        instruction: step.maneuver?.instruction || 'Continue',
-        distance: Math.round(step.distance || 0),
-        duration: Math.round((step.duration || 0) * profileMultiplier * cityMultiplier * getStepRoadMultiplier(routeConfig, step))
-      }));
-      const adjustedDuration = adjustedSteps.reduce((sum, step) => sum + (step.duration || 0), 0);
-      setRouteInfo({
-        distanceKm: Math.round((route.distance / 1000) * 10) / 10,
-        durationMin: Math.max(1, Math.round(adjustedDuration / 60))
-      });
-      setRouteSteps(adjustedSteps);
-      routeTelemetry({
-        profile: routeProfile,
-        city: cityKey,
-        distance_km: Math.round((route.distance / 1000) * 10) / 10,
-        duration_min: Math.max(1, Math.round(adjustedDuration / 60)),
-        source: 'search',
-      });
-      routeManeuversRef.current = steps
-        .map((step: any) => ({
-          instruction: step.maneuver?.instruction || 'Continue',
-          location: step.maneuver?.location as [number, number]
-        }))
-        .filter((item: any) => Array.isArray(item.location) && item.location.length === 2);
-      routeStepIndexRef.current = 0;
-    } catch {
-      // Ignore route errors.
-    }
-  }, [mapboxToken, routeProfile, userCoords]);
 
   const normalizeLocation = (raw: any) => {
     if (!raw) return undefined;
@@ -839,6 +837,45 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     }
   };
 
+  const runSearch = React.useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchProducts([]);
+      setSearchQueryId(null);
+      setSearchError(null);
+      return;
+    }
+    const runId = ++searchRunRef.current;
+    setSearchLoading(true);
+    setSearchError(null);
+    const lat = isNearMeActive ? userCoords?.lat : undefined;
+    const lng = isNearMeActive ? userCoords?.lng : undefined;
+    const radius = isNearMeActive ? maxDistance ?? undefined : undefined;
+    try {
+      const response = await search({
+        q: query,
+        lat,
+        lng,
+        radius,
+        locationConsent: Boolean(isNearMeActive && userCoords)
+      });
+      if (runId !== searchRunRef.current) return;
+      setSearchQueryId(response.query_id || null);
+      const results = response.results || [];
+      const hydrated = await hydrateProductsFromResults(results);
+      if (runId !== searchRunRef.current) return;
+      setSearchProducts(hydrated);
+      const recent = await listRecentSearches();
+      if (runId === searchRunRef.current) setRecentSearches(recent);
+    } catch (err: any) {
+      if (runId === searchRunRef.current) {
+        setSearchError(err?.message || 'Search failed');
+        setSearchProducts([]);
+      }
+    } finally {
+      if (runId === searchRunRef.current) setSearchLoading(false);
+    }
+  }, [hydrateProductsFromResults, isNearMeActive, maxDistance, userCoords]);
+
   const handleMediaFile = React.useCallback(async (file: File) => {
     if (mediaUploading) return;
     setMediaUploading(true);
@@ -987,45 +1024,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     recognitionRef.current = recognition;
     recognition.start();
   };
-
-  const runSearch = React.useCallback(async (query: string) => {
-    if (!query.trim()) {
-      setSearchProducts([]);
-      setSearchQueryId(null);
-      setSearchError(null);
-      return;
-    }
-    const runId = ++searchRunRef.current;
-    setSearchLoading(true);
-    setSearchError(null);
-    const lat = isNearMeActive ? userCoords?.lat : undefined;
-    const lng = isNearMeActive ? userCoords?.lng : undefined;
-    const radius = isNearMeActive ? maxDistance ?? undefined : undefined;
-    try {
-      const response = await search({
-        q: query,
-        lat,
-        lng,
-        radius,
-        locationConsent: Boolean(isNearMeActive && userCoords)
-      });
-      if (runId !== searchRunRef.current) return;
-      setSearchQueryId(response.query_id || null);
-      const results = response.results || [];
-      const hydrated = await hydrateProductsFromResults(results);
-      if (runId !== searchRunRef.current) return;
-      setSearchProducts(hydrated);
-      const recent = await listRecentSearches();
-      if (runId === searchRunRef.current) setRecentSearches(recent);
-    } catch (err: any) {
-      if (runId === searchRunRef.current) {
-        setSearchError(err?.message || 'Search failed');
-        setSearchProducts([]);
-      }
-    } finally {
-      if (runId === searchRunRef.current) setSearchLoading(false);
-    }
-  }, [hydrateProductsFromResults, isNearMeActive, maxDistance, userCoords]);
 
   const trackSearchEvent = React.useCallback((eventType: string, productId?: string) => {
     if (!searchQueryId || !productId) return;
@@ -1247,30 +1245,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   }, [ensureMap, viewMode]);
 
   useEffect(() => {
-    if (viewMode !== 'map') return;
-    if (!mapRef.current || !mapReadyRef.current) return;
-    const source = mapRef.current.getSource('products') as mapboxgl.GeoJSONSource | undefined;
-    if (!source) return;
-    const features = mapItems
-      .filter((product) => product.location)
-      .map((product) => ({
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [product.location!.lng, product.location!.lat]
-        },
-        properties: {
-          productId: product.id,
-          name: product.name,
-          price: product.price,
-          lng: product.location!.lng,
-          lat: product.location!.lat
-        }
-      }));
-    source.setData({ type: 'FeatureCollection', features } as any);
-  }, [mapItems, mapReadyVersion, viewMode]);
-
-  useEffect(() => {
     if (!mapRef.current || !mapReadyRef.current) return;
     const source = mapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
     if (!source) return;
@@ -1349,6 +1323,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     const handleIdle = () => {
       if (!mapRef.current || !mapReadyRef.current) return;
       const bounds = mapRef.current.getBounds();
+      if (!bounds) return;
       const bbox = [
         bounds.getWest(),
         bounds.getSouth(),
@@ -1740,6 +1715,30 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const mapItems = viewMode === 'map'
     ? (mapProducts.length > 0 ? mapProducts : filteredProducts)
     : filteredProducts;
+
+  useEffect(() => {
+    if (viewMode !== 'map') return;
+    if (!mapRef.current || !mapReadyRef.current) return;
+    const source = mapRef.current.getSource('products') as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    const features = mapItems
+      .filter((product) => product.location)
+      .map((product) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [product.location!.lng, product.location!.lat]
+        },
+        properties: {
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          lng: product.location!.lng,
+          lat: product.location!.lat
+        }
+      }));
+    source.setData({ type: 'FeatureCollection', features } as any);
+  }, [mapItems, mapReadyVersion, viewMode]);
   const recordingElapsedSec = recordingStart ? Math.max(0, Math.round((Date.now() - recordingStart) / 1000)) : 0;
   const recordingPointCount = recordingPoints.length;
   const recordingGoal = 10;
@@ -1890,7 +1889,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = '';
-            handleMediaFile(file);
+            if (file) handleMediaFile(file);
           }}
         />
 

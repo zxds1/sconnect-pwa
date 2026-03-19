@@ -15,7 +15,6 @@ import {
   getTrendingFeed,
   joinLiveSession,
   leaveLiveSession,
-  getLiveSession,
   listLiveComments,
   createLiveComment,
   likeFeedItem,

@@ -40,6 +40,7 @@ export interface CompareProduct {
 export interface CompareLocation {
   lat: number;
   lng: number;
+  address?: string;
 }
 
 export interface CompareProductSummary {
@@ -92,6 +93,9 @@ export interface CompareMapItem {
   lng?: number;
   distance_km?: number;
   badges?: string[];
+  location?: CompareLocation;
+  seller_address?: string;
+  address?: string;
 }
 
 export interface CompareHistoryItem {

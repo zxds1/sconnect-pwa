@@ -1152,6 +1152,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   }, [activeTab]);
 
+  const onlinePlatform = onlineConnectForm.platform;
+
   useEffect(() => {
     setOnlineAuthUrl(null);
     setOnlineConnectForm(prev => {
@@ -1888,7 +1890,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     if (!pathRecorderContainerRef.current) return;
     mapboxgl.accessToken = mapboxToken;
     if (!pathRecorderMapRef.current) {
-      const fallback = sellerLocations[0]?.location || sellerLocations[0];
+      const fallback = sellerLocations[0] as any;
       const centerLng = Number(fallback?.lng ?? fallback?.longitude ?? 39.6682);
       const centerLat = Number(fallback?.lat ?? fallback?.latitude ?? -4.0435);
       const map = new mapboxgl.Map({
@@ -2373,7 +2375,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const onlinePlatform = onlineConnectForm.platform;
   const isShopify = onlinePlatform === 'shopify';
   const isWoo = onlinePlatform === 'woocommerce';
   const isOpenCart = onlinePlatform === 'opencart';

@@ -88,7 +88,6 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const [supplierAppLoading, setSupplierAppLoading] = useState(false);
   const [supplierAppError, setSupplierAppError] = useState<string | null>(null);
   const [creatingSupplierApp, setCreatingSupplierApp] = useState(false);
-  const [supplierStreamActive, setSupplierStreamActive] = useState(false);
   const [supplierForm, setSupplierForm] = useState({
     business_name: '',
     category: '',
@@ -240,18 +239,15 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           (items) => {
             if (cancelled) return;
             setSupplierApps(items || []);
-            setSupplierStreamActive(true);
           },
           (message) => {
             if (cancelled) return;
             setSupplierAppError(message);
-            setSupplierStreamActive(false);
           }
         );
       } catch (err: any) {
         if (cancelled) return;
         setSupplierAppError(err?.message || 'Unable to open live updates.');
-        setSupplierStreamActive(false);
       }
     };
     start();
