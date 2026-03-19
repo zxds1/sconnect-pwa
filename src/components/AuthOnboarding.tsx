@@ -12,6 +12,11 @@ interface AuthOnboardingProps {
 export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish }) => {
   const [intent, setIntent] = React.useState<'buyer' | 'seller' | null>(null);
   const [sellerShopType, setSellerShopType] = React.useState<'physical' | 'online' | 'hybrid' | 'marketplace'>('physical');
+  const [sellerMode, setSellerMode] = React.useState<'fixed_shop' | 'open_market_stall' | 'ground_trader' | 'solopreneur' | 'hybrid'>('fixed_shop');
+  const [sellerWhatsApp, setSellerWhatsApp] = React.useState('');
+  const [sellerDeliveryRadius, setSellerDeliveryRadius] = React.useState('');
+  const [sellerMarketName, setSellerMarketName] = React.useState('');
+  const [sellerVisualMarker, setSellerVisualMarker] = React.useState('');
   const [checklist, setChecklist] = React.useState({
     profile: false,
     favorites: false,
@@ -50,6 +55,11 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
       localStorage.setItem('soko:onboarding_checklist', JSON.stringify(checklist));
       if (intent === 'seller') {
         localStorage.setItem('soko:shop_type', sellerShopType);
+        localStorage.setItem('soko:seller_mode', sellerMode);
+        localStorage.setItem('soko:seller_whatsapp', sellerWhatsApp);
+        localStorage.setItem('soko:seller_delivery_radius', sellerDeliveryRadius);
+        localStorage.setItem('soko:seller_market_name', sellerMarketName);
+        localStorage.setItem('soko:seller_visual_marker', sellerVisualMarker);
       }
     } catch {}
     trackEvent({
@@ -57,12 +67,14 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
       intent,
       checklist,
       shop_type: intent === 'seller' ? sellerShopType : undefined,
+      seller_mode: intent === 'seller' ? sellerMode : undefined,
     });
     trackAnalytics({
       action: 'complete',
       intent,
       checklist,
       shop_type: intent === 'seller' ? sellerShopType : undefined,
+      seller_mode: intent === 'seller' ? sellerMode : undefined,
     });
     onFinish?.(intent);
   };
@@ -164,6 +176,73 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
                   {option.label}
                 </button>
               ))}
+            </div>
+            <div className="mt-5">
+              <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Seller Mode</p>
+              <p className="text-xs text-zinc-500 mt-1">Used for open market + delivery coordination.</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-bold">
+                {[
+                  { id: 'fixed_shop', label: 'Fixed Shop' },
+                  { id: 'open_market_stall', label: 'Market Stall' },
+                  { id: 'ground_trader', label: 'Ground Trader' },
+                  { id: 'solopreneur', label: 'Solopreneur' },
+                  { id: 'hybrid', label: 'Hybrid' }
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => {
+                      setSellerMode(option.id as typeof sellerMode);
+                      trackEvent({ action: 'select_seller_mode', seller_mode: option.id });
+                      trackAnalytics({ action: 'select_seller_mode', seller_mode: option.id });
+                    }}
+                    className={`px-3 py-2 rounded-2xl border ${
+                      sellerMode === option.id
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-2">
+                <label className="text-[10px] font-bold text-zinc-500">
+                  WhatsApp Number
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={sellerWhatsApp}
+                    onChange={(e) => setSellerWhatsApp(e.target.value)}
+                    placeholder="+2547..."
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Delivery Radius (km)
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={sellerDeliveryRadius}
+                    onChange={(e) => setSellerDeliveryRadius(e.target.value)}
+                    placeholder="5"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Market Name (optional)
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={sellerMarketName}
+                    onChange={(e) => setSellerMarketName(e.target.value)}
+                    placeholder="My Gikomba Spot"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Visual Marker (optional)
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={sellerVisualMarker}
+                    onChange={(e) => setSellerVisualMarker(e.target.value)}
+                    placeholder="Blue tarp"
+                  />
+                </label>
+              </div>
             </div>
           </div>
         )}

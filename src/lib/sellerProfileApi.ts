@@ -8,6 +8,13 @@ export type SellerProfile = {
   categories?: string[];
   hours?: Record<string, any>;
   service_area?: Record<string, any>;
+  seller_mode?: string;
+  market_name?: string;
+  visual_marker?: string;
+  delivery_radius_km?: number;
+  whatsapp_number?: string;
+  daily_lat?: number;
+  daily_lng?: number;
 };
 
 export type SellerLocation = {
@@ -33,6 +40,13 @@ export const updateSellerProfile = async (payload: {
   categories?: string[];
   hours?: Record<string, any>;
   service_area?: Record<string, any>;
+  seller_mode?: string;
+  market_name?: string;
+  visual_marker?: string;
+  delivery_radius_km?: number;
+  whatsapp_number?: string;
+  daily_lat?: number;
+  daily_lng?: number;
 }) =>
   apiFetch('/v1/seller/profile', {
     method: 'PATCH',

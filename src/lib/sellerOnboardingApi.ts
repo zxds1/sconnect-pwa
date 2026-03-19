@@ -9,6 +9,9 @@ export type OnboardingState = {
   grace_until?: string | null;
   last_updated?: string;
   shop_type?: string;
+  seller_mode?: string;
+  delivery_radius_km?: number;
+  whatsapp_number?: string;
   connection?: {
     id?: string;
     platform?: string;

@@ -54,6 +54,12 @@ export interface CompareOffer {
   offer_id: string;
   seller_id: string;
   seller_name?: string;
+  seller_mode?: string;
+  market_name?: string;
+  visual_marker?: string;
+  whatsapp_number?: string;
+  delivery_radius_km?: number;
+  coordination_required?: boolean;
   price?: number;
   currency?: string;
   availability_status?: string;
@@ -96,6 +102,9 @@ export interface CompareMapItem {
   location?: CompareLocation;
   seller_address?: string;
   address?: string;
+  seller_mode?: string;
+  market_name?: string;
+  visual_marker?: string;
 }
 
 export interface CompareHistoryItem {

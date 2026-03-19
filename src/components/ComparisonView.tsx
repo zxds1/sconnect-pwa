@@ -753,6 +753,19 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                             {mapLoadingProductId === product.id ? 'Loading...' : 'Map View'}
                           </button>
                         </div>
+                        {(product.bestOffer?.seller_mode || product.bestOffer?.market_name || product.bestOffer?.visual_marker) && (
+                          <div className="mt-2 text-[10px] text-zinc-600 font-bold">
+                            {product.bestOffer?.seller_mode ? product.bestOffer.seller_mode.replace('_', ' ') : 'Seller'} ·{' '}
+                            {[product.bestOffer?.market_name, product.bestOffer?.visual_marker].filter(Boolean).join(' • ')}
+                          </div>
+                        )}
+                        {(product.bestOffer?.whatsapp_number || typeof product.bestOffer?.delivery_radius_km === 'number') && (
+                          <div className="mt-1 text-[10px] text-zinc-500">
+                            {product.bestOffer?.whatsapp_number && `WhatsApp: ${product.bestOffer.whatsapp_number}`}
+                            {product.bestOffer?.whatsapp_number && typeof product.bestOffer?.delivery_radius_km === 'number' ? ' · ' : ''}
+                            {typeof product.bestOffer?.delivery_radius_km === 'number' && `Delivery ${product.bestOffer.delivery_radius_km} km`}
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="p-3 bg-zinc-50 rounded-2xl">

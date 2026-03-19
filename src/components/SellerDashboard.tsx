@@ -495,6 +495,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [onboardingTutorials, setOnboardingTutorials] = useState<SellerTutorial[]>([]);
   const [onboardingStatus, setOnboardingStatus] = useState<string | null>(null);
   const [shopType, setShopType] = useState('physical');
+  const [sellerMode, setSellerMode] = useState('fixed_shop');
+  const [marketName, setMarketName] = useState('');
+  const [visualMarker, setVisualMarker] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [deliveryRadiusKm, setDeliveryRadiusKm] = useState<number | ''>('');
+  const [dailyLat, setDailyLat] = useState<number | ''>('');
+  const [dailyLng, setDailyLng] = useState<number | ''>('');
   const [onlineConnectForm, setOnlineConnectForm] = useState<OnlineConnectRequest>({
     platform: 'shopify',
     shop_domain: '',
@@ -1088,11 +1095,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     const loadOnboarding = async () => {
       setOnboardingStatus(null);
       try {
-        const [state, eligibility, tutorials, verification] = await Promise.all([
+        const [state, eligibility, tutorials, verification, profile] = await Promise.all([
           getSellerOnboardingState(),
           getSellerOnboardingEligibility(),
           listSellerTutorials(),
-          getSellerVerificationStatus()
+          getSellerVerificationStatus(),
+          getSellerProfile()
         ]);
         if (ignore) return;
         setOnboardingState(state);
@@ -1100,6 +1108,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setOnboardingTutorials(tutorials);
         setVerificationStatus(verification);
         if (state?.shop_type) setShopType(state.shop_type);
+        if (state?.seller_mode) setSellerMode(state.seller_mode);
+        if (typeof state?.delivery_radius_km === 'number') {
+          setDeliveryRadiusKm(state.delivery_radius_km || '');
+        }
+        if (state?.whatsapp_number) setWhatsappNumber(state.whatsapp_number);
+        if (profile?.seller_mode) setSellerMode(profile.seller_mode);
+        if (profile?.market_name) setMarketName(profile.market_name);
+        if (profile?.visual_marker) setVisualMarker(profile.visual_marker);
+        if (profile?.whatsapp_number) setWhatsappNumber(profile.whatsapp_number);
+        if (typeof profile?.delivery_radius_km === 'number') {
+          setDeliveryRadiusKm(profile.delivery_radius_km || '');
+        }
+        if (typeof profile?.daily_lat === 'number') setDailyLat(profile.daily_lat);
+        if (typeof profile?.daily_lng === 'number') setDailyLng(profile.daily_lng);
         if (state?.connection?.id) {
           setOnlineConnectionId(state.connection.id);
           if (state.connection.connection_status) {
@@ -1127,6 +1149,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             }
           } catch {}
         }
+        if (!state?.seller_mode) {
+          try {
+            const storedMode = localStorage.getItem('soko:seller_mode');
+            if (storedMode) {
+              setSellerMode(storedMode);
+              await updateSellerProfile({ seller_mode: storedMode });
+              await recordSellerOnboardingEvent({ step: 'seller_mode', status: 'complete' });
+            }
+          } catch {}
+        }
+        try {
+          const storedWhats = localStorage.getItem('soko:seller_whatsapp');
+          const storedRadius = localStorage.getItem('soko:seller_delivery_radius');
+          const storedMarket = localStorage.getItem('soko:seller_market_name');
+          const storedMarker = localStorage.getItem('soko:seller_visual_marker');
+          if (storedWhats && !whatsappNumber) setWhatsappNumber(storedWhats);
+          if (storedRadius && deliveryRadiusKm === '') setDeliveryRadiusKm(Number(storedRadius));
+          if (storedMarket && !marketName) setMarketName(storedMarket);
+          if (storedMarker && !visualMarker) setVisualMarker(storedMarker);
+        } catch {}
       } catch (err: any) {
         if (!ignore) setOnboardingStatus(err?.message || 'Unable to load onboarding status.');
       }
@@ -2265,6 +2307,56 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
+  const handleSellerModeSelect = async (mode: string) => {
+    setSellerMode(mode);
+    setOnboardingStatus(null);
+    try {
+      await updateSellerProfile({ seller_mode: mode });
+      await recordSellerOnboardingEvent({ step: 'seller_mode', status: 'complete' });
+      const state = await getSellerOnboardingState();
+      setOnboardingState(state);
+      setOnboardingStatus('Seller mode saved.');
+    } catch (err: any) {
+      setOnboardingStatus(err?.message || 'Unable to save seller mode.');
+    }
+  };
+
+  const handleUseDailyLocation = () => {
+    if (!navigator.geolocation) {
+      setOnboardingStatus('Geolocation not available.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setDailyLat(Number(pos.coords.latitude.toFixed(6)));
+        setDailyLng(Number(pos.coords.longitude.toFixed(6)));
+      },
+      () => {
+        setOnboardingStatus('Unable to fetch location.');
+      }
+    );
+  };
+
+  const handleSaveDeliveryDetails = async () => {
+    setOnboardingStatus(null);
+    try {
+      await updateSellerProfile({
+        market_name: marketName || undefined,
+        visual_marker: visualMarker || undefined,
+        whatsapp_number: whatsappNumber || undefined,
+        delivery_radius_km: deliveryRadiusKm === '' ? undefined : Number(deliveryRadiusKm),
+        daily_lat: dailyLat === '' ? undefined : Number(dailyLat),
+        daily_lng: dailyLng === '' ? undefined : Number(dailyLng)
+      });
+      await recordSellerOnboardingEvent({ step: 'delivery_details', status: 'complete' });
+      const state = await getSellerOnboardingState();
+      setOnboardingState(state);
+      setOnboardingStatus('Delivery details saved.');
+    } catch (err: any) {
+      setOnboardingStatus(err?.message || 'Unable to save delivery details.');
+    }
+  };
+
   const handleConnectOnline = async () => {
     setOnlineConnectionStatus(null);
     setMappingStatus(null);
@@ -3343,6 +3435,40 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Seller Mode</p>
+                  <p className="text-sm font-bold text-zinc-900">How do buyers reach you today?</p>
+                  <p className="text-[10px] text-zinc-500">Pick the mode that best matches your setup.</p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-zinc-50 text-[10px] font-black text-zinc-600">
+                  Current: {sellerMode.replace('_', ' ')}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2 text-[10px] font-bold">
+                {[
+                  { id: 'fixed_shop', label: 'Fixed Shop' },
+                  { id: 'open_market_stall', label: 'Market Stall' },
+                  { id: 'ground_trader', label: 'Ground Trader' },
+                  { id: 'solopreneur', label: 'Solopreneur' },
+                  { id: 'hybrid', label: 'Hybrid' }
+                ].map(option => (
+                  <button
+                    key={option.id}
+                    onClick={() => handleSellerModeSelect(option.id)}
+                    className={`px-3 py-3 rounded-2xl border ${
+                      sellerMode === option.id
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Unified Shop Registry</p>
                   <p className="text-sm font-bold text-zinc-900">Select how you sell today</p>
                   <p className="text-[10px] text-zinc-500">Physical, online, hybrid, or marketplace sellers — one flow.</p>
@@ -3374,6 +3500,90 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               {onboardingStatus && (
                 <div className="mt-3 text-[10px] font-bold text-emerald-600">{onboardingStatus}</div>
               )}
+            </div>
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Delivery Details</p>
+                  <p className="text-sm font-bold text-zinc-900">Share how buyers can reach you</p>
+                  <p className="text-[10px] text-zinc-500">Required for all seller modes.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="text-[10px] font-bold text-zinc-500">
+                  WhatsApp Number
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={whatsappNumber}
+                    onChange={(e) => setWhatsappNumber(e.target.value)}
+                    placeholder="+2547..."
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Delivery Radius (km)
+                  <input
+                    type="number"
+                    min={0}
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={deliveryRadiusKm}
+                    onChange={(e) => setDeliveryRadiusKm(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="5"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Market Name (if applicable)
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={marketName}
+                    onChange={(e) => setMarketName(e.target.value)}
+                    placeholder="My Gikomba Spot"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Visual Marker
+                  <input
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={visualMarker}
+                    onChange={(e) => setVisualMarker(e.target.value)}
+                    placeholder="Blue tarp"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Daily Latitude
+                  <input
+                    type="number"
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={dailyLat}
+                    onChange={(e) => setDailyLat(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="-4.0435"
+                  />
+                </label>
+                <label className="text-[10px] font-bold text-zinc-500">
+                  Daily Longitude
+                  <input
+                    type="number"
+                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                    value={dailyLng}
+                    onChange={(e) => setDailyLng(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="39.6682"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleUseDailyLocation}
+                  className="px-4 py-2 rounded-2xl bg-zinc-100 text-zinc-700 text-[10px] font-black"
+                >
+                  Use Current Location
+                </button>
+                <button
+                  onClick={handleSaveDeliveryDetails}
+                  className="px-4 py-2 rounded-2xl bg-emerald-600 text-white text-[10px] font-black"
+                >
+                  Save Delivery Details
+                </button>
+              </div>
             </div>
 
             {shopType !== 'physical' && (
