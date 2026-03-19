@@ -1,7 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   Search as SearchIcon, 
   X, 
@@ -174,10 +172,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const mediaStatusTimerRef = React.useRef<number | null>(null);
   const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const mapRef = React.useRef<mapboxgl.Map | null>(null);
-  const userMarkerRef = React.useRef<mapboxgl.Marker | null>(null);
+  const mapRef = React.useRef<any>(null);
+  const userMarkerRef = React.useRef<any>(null);
   const mapReadyRef = React.useRef(false);
-  const mapPopupRef = React.useRef<mapboxgl.Popup | null>(null);
+  const mapPopupRef = React.useRef<any>(null);
   const routeTargetRef = React.useRef<{ lng: number; lat: number } | null>(null);
   const recordingWatchIdRef = React.useRef<number | null>(null);
   const routeManeuversRef = React.useRef<Array<{ instruction: string; location: [number, number] }>>([]);
@@ -208,6 +206,8 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const skipAutoSearchRef = React.useRef(false);
   const mapItemsRef = React.useRef<Product[]>([]);
   const navWatchIdRef = React.useRef<number | null>(null);
+  const mapboxModuleRef = React.useRef<any>(null);
+  const mapboxLoadingRef = React.useRef<Promise<any> | null>(null);
 
   useEffect(() => {
     sellerMetaRef.current = sellerMeta;
@@ -310,6 +310,23 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     return typeof token === 'string' ? token : '';
   })();
 
+  const ensureMapbox = async () => {
+    if (mapboxModuleRef.current) {
+      return mapboxModuleRef.current;
+    }
+    if (!mapboxLoadingRef.current) {
+      mapboxLoadingRef.current = Promise.all([
+        import('mapbox-gl'),
+        import('mapbox-gl/dist/mapbox-gl.css')
+      ]).then(([module]) => {
+        const loaded = (module as any).default ?? module;
+        mapboxModuleRef.current = loaded;
+        return loaded;
+      });
+    }
+    return mapboxLoadingRef.current;
+  };
+
   const fetchMapboxSuggestions = async (query: string) => {
     if (!mapboxToken || !query.trim()) return [];
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query.trim())}.json?access_token=${mapboxToken}&autocomplete=true&types=place,locality,neighborhood,poi,address&limit=5`;
@@ -362,7 +379,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           }
         ]
       };
-      const source = mapRef.current.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+      const source = mapRef.current.getSource('route-line') as any;
       source?.setData(geojson as any);
       const steps = route.legs?.[0]?.steps || [];
       const cityKey = detectCityKey(locationQuery);
@@ -398,12 +415,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     }
   }, [mapboxToken, routeProfile, routeConfig, locationQuery, userCoords, routeTelemetry]);
 
-  const ensureMap = React.useCallback(() => {
+  const ensureMap = React.useCallback(async () => {
     if (!mapboxToken) {
       setMapStatus('Mapbox token missing.');
       return;
     }
     if (!mapContainerRef.current || mapRef.current) return;
+    const mapboxgl = await ensureMapbox();
     mapboxgl.accessToken = mapboxToken;
     const center = userCoords ? [userCoords.lng, userCoords.lat] : [39.6682, -4.0435];
     const map = new mapboxgl.Map({
@@ -465,7 +483,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         map.on('click', 'clusters', (event: any) => {
           const features = map.queryRenderedFeatures(event.point, { layers: ['clusters'] });
           const clusterId = features[0]?.properties?.cluster_id;
-          const source = map.getSource('products') as mapboxgl.GeoJSONSource | undefined;
+          const source = map.getSource('products') as any;
           if (!source || clusterId == null) return;
           (source as any).getClusterExpansionZoom(clusterId, (err: any, zoom: number) => {
             if (err) return;
@@ -974,10 +992,12 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
 
   const fitPathOnMap = (path: RecordedPath) => {
     if (!mapRef.current || !path.line_geojson) return;
+    const mapboxgl = mapboxModuleRef.current;
+    if (!mapboxgl) return;
     const coords = path.line_geojson.coordinates || [];
     if (!Array.isArray(coords) || coords.length === 0) return;
     const bounds = coords.reduce(
-      (b: mapboxgl.LngLatBounds, coord: number[]) => b.extend(coord as [number, number]),
+      (b: any, coord: number[]) => b.extend(coord as [number, number]),
       new mapboxgl.LngLatBounds(coords[0], coords[0])
     );
     mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 16 });
@@ -1258,12 +1278,12 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
 
   useEffect(() => {
     if (viewMode !== 'map') return;
-    ensureMap();
+    void ensureMap();
   }, [ensureMap, viewMode]);
 
   useEffect(() => {
     if (!mapRef.current || !mapReadyRef.current) return;
-    const source = mapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    const source = mapRef.current.getSource('recording-path') as any;
     if (!source) return;
     const coords = recordingPoints.map((p) => [p.lng, p.lat]);
     const data = coords.length >= 2
@@ -1286,7 +1306,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
 
   useEffect(() => {
     if (!mapRef.current || !mapReadyRef.current) return;
-    const popularSource = mapRef.current.getSource('popular-paths') as mapboxgl.GeoJSONSource | undefined;
+    const popularSource = mapRef.current.getSource('popular-paths') as any;
     if (popularSource) {
       const features = showPopularPaths
         ? popularPaths.map((path) => path.line_geojson ? ({
@@ -1301,7 +1321,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         : [];
       popularSource.setData({ type: 'FeatureCollection', features } as any);
     }
-    const mySource = mapRef.current.getSource('my-paths') as mapboxgl.GeoJSONSource | undefined;
+    const mySource = mapRef.current.getSource('my-paths') as any;
     if (mySource) {
       const features = showMyPaths
         ? myPaths.map((path) => path.line_geojson ? ({
@@ -1321,6 +1341,8 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   useEffect(() => {
     if (viewMode !== 'map') return;
     if (!mapRef.current || !userCoords) return;
+    const mapboxgl = mapboxModuleRef.current;
+    if (!mapboxgl) return;
     mapRef.current.setCenter([userCoords.lng, userCoords.lat]);
     if (!userMarkerRef.current) {
       const el = document.createElement('div');
@@ -1544,7 +1566,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     setRouteInfo(null);
     setRouteSteps([]);
     if (mapRef.current && mapReadyRef.current) {
-      const source = mapRef.current.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+      const source = mapRef.current.getSource('route-line') as any;
       source?.setData({ type: 'FeatureCollection', features: [] } as any);
     }
   }, [userCoords, viewMode]);
@@ -1736,7 +1758,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   useEffect(() => {
     if (viewMode !== 'map') return;
     if (!mapRef.current || !mapReadyRef.current) return;
-    const source = mapRef.current.getSource('products') as mapboxgl.GeoJSONSource | undefined;
+    const source = mapRef.current.getSource('products') as any;
     if (!source) return;
     const features = mapItems
       .filter((product) => product.location)

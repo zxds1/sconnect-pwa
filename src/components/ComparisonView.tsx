@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { X, ArrowLeft, ShoppingBag, Star, BarChart3, MapPin, Map as MapIcon, HelpCircle } from 'lucide-react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
 import { Product } from '../types';
 import { addCartItem } from '../lib/cartApi';
 import { listPopularPaths, recordPath, type PathPoint } from '../lib/searchApi';
@@ -147,9 +145,11 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
   const [recordingStatus, setRecordingStatus] = useState<string | null>(null);
   const [voiceDirectionsEnabled, setVoiceDirectionsEnabled] = useState(false);
   const compareMapContainerRef = useRef<HTMLDivElement | null>(null);
-  const compareMapRef = useRef<mapboxgl.Map | null>(null);
-  const compareUserMarkerRef = useRef<mapboxgl.Marker | null>(null);
-  const compareSellerMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const compareMapRef = useRef<any>(null);
+  const compareUserMarkerRef = useRef<any>(null);
+  const compareSellerMarkerRef = useRef<any>(null);
+  const mapboxModuleRef = useRef<any>(null);
+  const mapboxLoadingRef = useRef<Promise<any> | null>(null);
   const compareRouteManeuversRef = useRef<Array<{ instruction: string; location: [number, number] }>>([]);
   const compareRouteStepIndexRef = useRef(0);
   const recordingWatchIdRef = useRef<number | null>(null);
@@ -157,6 +157,23 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
   const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
     ? (import.meta as any).env.VITE_MAPBOX_TOKEN
     : '';
+
+  const ensureMapbox = async () => {
+    if (mapboxModuleRef.current) {
+      return mapboxModuleRef.current;
+    }
+    if (!mapboxLoadingRef.current) {
+      mapboxLoadingRef.current = Promise.all([
+        import('mapbox-gl'),
+        import('mapbox-gl/dist/mapbox-gl.css')
+      ]).then(([module]) => {
+        const loaded = (module as any).default ?? module;
+        mapboxModuleRef.current = loaded;
+        return loaded;
+      });
+    }
+    return mapboxLoadingRef.current;
+  };
 
   const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
     const R = 6371;
@@ -327,119 +344,126 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
     if (!compareMapContainerRef.current) return;
     const item = activeMapProduct.mapItems[0];
     if (!Number.isFinite(item.lng) || !Number.isFinite(item.lat)) return;
-    mapboxgl.accessToken = mapboxToken;
-    if (compareMapRef.current) return;
-    const map = new mapboxgl.Map({
-      container: compareMapContainerRef.current as HTMLElement,
-      style: 'mapbox://styles/mapbox/streets-v12',
-      center: [Number(item.lng), Number(item.lat)],
-      zoom: 13
-    });
-    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-    map.on('load', () => {
-      setCompareMapReady(true);
-      if (!map.getSource('route-line')) {
-        map.addSource('route-line', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] }
-        });
-        map.addLayer({
-          id: 'route-line',
-          type: 'line',
-          source: 'route-line',
-          paint: {
-            'line-color': '#4f46e5',
-            'line-width': 4
-          }
-        });
-      }
-      if (!map.getSource('popular-paths')) {
-        map.addSource('popular-paths', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] }
-        });
-        map.addLayer({
-          id: 'popular-paths',
-          type: 'line',
-          source: 'popular-paths',
-          paint: {
-            'line-color': '#f97316',
-            'line-width': 3,
-            'line-opacity': 0.6
-          }
-        });
-      }
-      if (!map.getSource('recording-path')) {
-        map.addSource('recording-path', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] }
-        });
-        map.addLayer({
-          id: 'recording-path',
-          type: 'line',
-          source: 'recording-path',
-          paint: {
-            'line-color': '#ef4444',
-            'line-width': 4
-          }
-        });
-      }
-    });
-    compareMapRef.current = map;
-    const sellerMarker = new mapboxgl.Marker({ color: '#4f46e5' })
-      .setLngLat([Number(item.lng), Number(item.lat)])
-      .addTo(map);
-    compareSellerMarkerRef.current = sellerMarker;
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const coords = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-          setCompareUserCoords(coords);
-          if (compareMapRef.current) {
-            compareUserMarkerRef.current?.remove();
-            compareUserMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
-              .setLngLat([coords.lng, coords.lat])
-              .addTo(compareMapRef.current);
-          }
-        },
-        () => {
-          // ignore geo errors
+    let active = true;
+    ensureMapbox().then((mapboxgl) => {
+      if (!active) return;
+      mapboxgl.accessToken = mapboxToken;
+      if (compareMapRef.current) return;
+      const map = new mapboxgl.Map({
+        container: compareMapContainerRef.current as HTMLElement,
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [Number(item.lng), Number(item.lat)],
+        zoom: 13
+      });
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.on('load', () => {
+        setCompareMapReady(true);
+        if (!map.getSource('route-line')) {
+          map.addSource('route-line', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'route-line',
+            type: 'line',
+            source: 'route-line',
+            paint: {
+              'line-color': '#4f46e5',
+              'line-width': 4
+            }
+          });
         }
-      );
-    }
-    (async () => {
-      try {
-        const pad = 0.05;
-        const bbox = [
-          Number(item.lng) - pad,
-          Number(item.lat) - pad,
-          Number(item.lng) + pad,
-          Number(item.lat) + pad
-        ].join(',');
-        const paths = await listPopularPaths({ bbox, limit: 30 });
-        const source = map.getSource('popular-paths') as mapboxgl.GeoJSONSource | undefined;
-        if (source) {
-          const features = paths
-            .map((path) => path.line_geojson ? ({
-              type: 'Feature',
-              geometry: path.line_geojson,
-              properties: { id: path.id, name: path.name, usage_count: path.usage_count || 0 }
-            }) : null)
-            .filter(Boolean);
-          source.setData({ type: 'FeatureCollection', features } as any);
+        if (!map.getSource('popular-paths')) {
+          map.addSource('popular-paths', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'popular-paths',
+            type: 'line',
+            source: 'popular-paths',
+            paint: {
+              'line-color': '#f97316',
+              'line-width': 3,
+              'line-opacity': 0.6
+            }
+          });
         }
-      } catch {
-        // ignore
+        if (!map.getSource('recording-path')) {
+          map.addSource('recording-path', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'recording-path',
+            type: 'line',
+            source: 'recording-path',
+            paint: {
+              'line-color': '#ef4444',
+              'line-width': 4
+            }
+          });
+        }
+      });
+      compareMapRef.current = map;
+      const sellerMarker = new mapboxgl.Marker({ color: '#4f46e5' })
+        .setLngLat([Number(item.lng), Number(item.lat)])
+        .addTo(map);
+      compareSellerMarkerRef.current = sellerMarker;
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const coords = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            setCompareUserCoords(coords);
+            if (compareMapRef.current) {
+              compareUserMarkerRef.current?.remove();
+              compareUserMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
+                .setLngLat([coords.lng, coords.lat])
+                .addTo(compareMapRef.current);
+            }
+          },
+          () => {
+            // ignore geo errors
+          }
+        );
       }
-    })();
+      (async () => {
+        try {
+          const pad = 0.05;
+          const bbox = [
+            Number(item.lng) - pad,
+            Number(item.lat) - pad,
+            Number(item.lng) + pad,
+            Number(item.lat) + pad
+          ].join(',');
+          const paths = await listPopularPaths({ bbox, limit: 30 });
+          const source = map.getSource('popular-paths') as any;
+          if (source) {
+            const features = paths
+              .map((path) => path.line_geojson ? ({
+                type: 'Feature',
+                geometry: path.line_geojson,
+                properties: { id: path.id, name: path.name, usage_count: path.usage_count || 0 }
+              }) : null)
+              .filter(Boolean);
+            source.setData({ type: 'FeatureCollection', features } as any);
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    });
+    return () => {
+      active = false;
+    };
   }, [activeMapProduct, mapboxToken]);
 
   useEffect(() => {
     if (!compareMapReady || !compareMapRef.current) return;
-    const source = compareMapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    const source = compareMapRef.current.getSource('recording-path') as any;
     if (!source) return;
     if (recordingPoints.length < 2) {
       source.setData({ type: 'FeatureCollection', features: [] } as any);
@@ -489,7 +513,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
             }
           ]
         };
-        const source = compareMapRef.current?.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+        const source = compareMapRef.current?.getSource('route-line') as any;
         source?.setData(geojson as any);
         const steps = route.legs?.[0]?.steps || [];
         const cityKey = detectCityKey(activeMapItem?.location?.address || activeMapItem?.seller_address || activeMapItem?.address);

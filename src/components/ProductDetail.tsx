@@ -22,8 +22,6 @@ import {
   Share2,
   Flag
 } from 'lucide-react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Product, PricePoint, Review } from '../types';
 import { ProductAIChat } from './ProductAIChat';
@@ -196,19 +194,38 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     [pathLandmarks]
   );
   const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const mapRef = React.useRef<mapboxgl.Map | null>(null);
-  const userMarkerRef = React.useRef<mapboxgl.Marker | null>(null);
-  const sellerMarkerRef = React.useRef<mapboxgl.Marker | null>(null);
+  const mapRef = React.useRef<any>(null);
+  const userMarkerRef = React.useRef<any>(null);
+  const sellerMarkerRef = React.useRef<any>(null);
   const mapReadyRef = React.useRef(false);
   const routeManeuversRef = React.useRef<Array<{ instruction: string; location: [number, number] }>>([]);
   const routeStepIndexRef = React.useRef(0);
-  const routeStepMarkersRef = React.useRef<mapboxgl.Marker[]>([]);
-  const landmarkMarkersRef = React.useRef<mapboxgl.Marker[]>([]);
+  const routeStepMarkersRef = React.useRef<any[]>([]);
+  const landmarkMarkersRef = React.useRef<any[]>([]);
   const recordingWatchIdRef = React.useRef<number | null>(null);
   const navWatchIdRef = React.useRef<number | null>(null);
   const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
     ? (import.meta as any).env.VITE_MAPBOX_TOKEN
     : '';
+  const mapboxModuleRef = React.useRef<any>(null);
+  const mapboxLoadingRef = React.useRef<Promise<any> | null>(null);
+
+  const ensureMapbox = async () => {
+    if (mapboxModuleRef.current) {
+      return mapboxModuleRef.current;
+    }
+    if (!mapboxLoadingRef.current) {
+      mapboxLoadingRef.current = Promise.all([
+        import('mapbox-gl'),
+        import('mapbox-gl/dist/mapbox-gl.css')
+      ]).then(([module]) => {
+        const loaded = (module as any).default ?? module;
+        mapboxModuleRef.current = loaded;
+        return loaded;
+      });
+    }
+    return mapboxLoadingRef.current;
+  };
   const [orderRating, setOrderRating] = React.useState(5);
   const [orderComment, setOrderComment] = React.useState('');
   const [qaList, setQaList] = React.useState<QuestionItem[]>([]);
@@ -813,134 +830,141 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     const lng = loc?.lng;
     if (!mapboxToken || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     if (!mapContainerRef.current) return;
-    mapboxgl.accessToken = mapboxToken;
-    if (!mapRef.current) {
-      const map = new mapboxgl.Map({
-        container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center: [lng as number, lat as number],
-        zoom: 14
-      });
-      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-      map.on('load', () => {
-        mapReadyRef.current = true;
-        if (!map.getSource('route-line')) {
-          map.addSource('route-line', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] }
-          });
-          map.addLayer({
-            id: 'route-line',
-            type: 'line',
-            source: 'route-line',
-            paint: {
-              'line-color': '#4f46e5',
-              'line-width': 4
-            }
-          });
-        }
-        if (!map.getSource('popular-paths')) {
-          map.addSource('popular-paths', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] }
-          });
-          map.addLayer({
-            id: 'popular-paths',
-            type: 'line',
-            source: 'popular-paths',
-            paint: {
-              'line-color': '#f97316',
-              'line-width': 3,
-              'line-opacity': 0.6
-            }
-          });
-        }
-        if (!map.getSource('recording-path')) {
-          map.addSource('recording-path', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] }
-          });
-          map.addLayer({
-            id: 'recording-path',
-            type: 'line',
-            source: 'recording-path',
-            paint: {
-              'line-color': '#ef4444',
-              'line-width': 4
-            }
-          });
-        }
-      });
-      mapRef.current = map;
-      sellerMarkerRef.current = new mapboxgl.Marker({ color: '#4f46e5' })
-        .setLngLat([lng as number, lat as number])
-        .addTo(map);
-    }
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
-          setUserCoords(coords);
-          if (mapRef.current) {
-            userMarkerRef.current?.remove();
-            userMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
-              .setLngLat([coords.lng, coords.lat])
-              .addTo(mapRef.current);
+    let active = true;
+    ensureMapbox().then((mapboxgl) => {
+      if (!active) return;
+      mapboxgl.accessToken = mapboxToken;
+      if (!mapRef.current) {
+        const map = new mapboxgl.Map({
+          container: mapContainerRef.current,
+          style: 'mapbox://styles/mapbox/streets-v12',
+          center: [lng as number, lat as number],
+          zoom: 14
+        });
+        map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+        map.on('load', () => {
+          mapReadyRef.current = true;
+          if (!map.getSource('route-line')) {
+            map.addSource('route-line', {
+              type: 'geojson',
+              data: { type: 'FeatureCollection', features: [] }
+            });
+            map.addLayer({
+              id: 'route-line',
+              type: 'line',
+              source: 'route-line',
+              paint: {
+                'line-color': '#4f46e5',
+                'line-width': 4
+              }
+            });
           }
-        },
-        () => {}
-      );
-    }
-    (async () => {
-      try {
-        const pad = 0.05;
-        const bbox = [
-          Number(lng) - pad,
-          Number(lat) - pad,
-          Number(lng) + pad,
-          Number(lat) + pad
-        ].join(',');
-        let paths: RecordedPath[] = [];
-        const sellerPathsList = sellerId ? await listSellerPaths(sellerId) : [];
-        if (sellerPathsList.length > 0) {
-          paths = sellerPathsList;
-          setPopularPaths(sellerPathsList);
-          if (!preferredPathId) {
-            const primary = sellerPathsList.find((path) => path.is_primary);
-            if (primary?.id) {
-              setPreferredPathId(primary.id);
-            } else if (sellerPathsList[0]?.id) {
-              setPreferredPathId(sellerPathsList[0].id);
+          if (!map.getSource('popular-paths')) {
+            map.addSource('popular-paths', {
+              type: 'geojson',
+              data: { type: 'FeatureCollection', features: [] }
+            });
+            map.addLayer({
+              id: 'popular-paths',
+              type: 'line',
+              source: 'popular-paths',
+              paint: {
+                'line-color': '#f97316',
+                'line-width': 3,
+                'line-opacity': 0.6
+              }
+            });
+          }
+          if (!map.getSource('recording-path')) {
+            map.addSource('recording-path', {
+              type: 'geojson',
+              data: { type: 'FeatureCollection', features: [] }
+            });
+            map.addLayer({
+              id: 'recording-path',
+              type: 'line',
+              source: 'recording-path',
+              paint: {
+                'line-color': '#ef4444',
+                'line-width': 4
+              }
+            });
+          }
+        });
+        mapRef.current = map;
+        sellerMarkerRef.current = new mapboxgl.Marker({ color: '#4f46e5' })
+          .setLngLat([lng as number, lat as number])
+          .addTo(map);
+      }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+            setUserCoords(coords);
+            if (mapRef.current) {
+              userMarkerRef.current?.remove();
+              userMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
+                .setLngLat([coords.lng, coords.lat])
+                .addTo(mapRef.current);
+            }
+          },
+          () => {}
+        );
+      }
+      (async () => {
+        try {
+          const pad = 0.05;
+          const bbox = [
+            Number(lng) - pad,
+            Number(lat) - pad,
+            Number(lng) + pad,
+            Number(lat) + pad
+          ].join(',');
+          let paths: RecordedPath[] = [];
+          const sellerPathsList = sellerId ? await listSellerPaths(sellerId) : [];
+          if (sellerPathsList.length > 0) {
+            paths = sellerPathsList;
+            setPopularPaths(sellerPathsList);
+            if (!preferredPathId) {
+              const primary = sellerPathsList.find((path) => path.is_primary);
+              if (primary?.id) {
+                setPreferredPathId(primary.id);
+              } else if (sellerPathsList[0]?.id) {
+                setPreferredPathId(sellerPathsList[0].id);
+              }
+            }
+          } else {
+            paths = await listPopularPaths({ bbox, limit: 30 });
+            setPopularPaths(paths);
+            if (!preferredPathId) {
+              const best = paths.sort((a, b) => (b.usage_count || 0) - (a.usage_count || 0))[0];
+              if (best?.id) {
+                setPreferredPathId(best.id);
+              }
             }
           }
-        } else {
-          paths = await listPopularPaths({ bbox, limit: 30 });
-          setPopularPaths(paths);
-          if (!preferredPathId) {
-            const best = paths.sort((a, b) => (b.usage_count || 0) - (a.usage_count || 0))[0];
-            if (best?.id) {
-              setPreferredPathId(best.id);
-            }
+          const source = mapRef.current?.getSource('popular-paths') as any;
+          if (source) {
+            const features = paths
+              .map((path) => path.line_geojson ? ({
+                type: 'Feature',
+                geometry: path.line_geojson,
+                properties: { id: path.id, name: path.name, usage_count: path.usage_count || 0 }
+              }) : null)
+              .filter(Boolean);
+            source.setData({ type: 'FeatureCollection', features } as any);
           }
-        }
-        const source = mapRef.current?.getSource('popular-paths') as mapboxgl.GeoJSONSource | undefined;
-        if (source) {
-          const features = paths
-            .map((path) => path.line_geojson ? ({
-              type: 'Feature',
-              geometry: path.line_geojson,
-              properties: { id: path.id, name: path.name, usage_count: path.usage_count || 0 }
-            }) : null)
-            .filter(Boolean);
-          source.setData({ type: 'FeatureCollection', features } as any);
-        }
-      } catch {}
-    })();
+        } catch {}
+      })();
+    });
+    return () => {
+      active = false;
+    };
   }, [activeProduct.location, mapboxToken, sellerId, sellerProfile?.location, showMapModal]);
 
   React.useEffect(() => {
     if (!showMapModal || !mapReadyRef.current || !mapRef.current) return;
-    const source = mapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    const source = mapRef.current.getSource('recording-path') as any;
     if (!source) return;
     if (recordingPoints.length < 2) {
       source.setData({ type: 'FeatureCollection', features: [] } as any);
@@ -964,6 +988,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     if (!showMapModal || !mapReadyRef.current || !mapRef.current || !userCoords) return;
+    const mapboxgl = mapboxModuleRef.current;
+    if (!mapboxgl) return;
     const loc = activeProduct.location || sellerProfile?.location;
     const lat = loc?.lat;
     const lng = loc?.lng;
@@ -1003,7 +1029,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             }
           ]
         };
-        const source = mapRef.current?.getSource('route-line') as mapboxgl.GeoJSONSource | undefined;
+        const source = mapRef.current?.getSource('route-line') as any;
         source?.setData(geojson as any);
         const steps = route.legs?.[0]?.steps || [];
         const cityKey = detectCityKey(activeProduct.location?.address || sellerProfile?.location?.address);
@@ -1258,6 +1284,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     if (!mapRef.current || !mapReadyRef.current) return;
+    const mapboxgl = mapboxModuleRef.current;
+    if (!mapboxgl) return;
     landmarkMarkersRef.current.forEach((marker) => marker.remove());
     landmarkMarkersRef.current = [];
     if (pathLandmarks.length === 0) return;

@@ -8,8 +8,6 @@ import {
   ShieldCheck, Clock, MessageSquare, Heart, Phone, ImageIcon,
   LineChart as LineChartIcon, Zap, Send, Search as SearchIcon
 } from 'lucide-react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
 import { MARKETING_SPEND, ORDERS, PRODUCTS, SELLERS } from '../mockData';
 import { Product, Seller } from '../types';
 import { 
@@ -453,11 +451,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [analyticsAnomalies, setAnalyticsAnomalies] = useState<Anomaly[]>([]);
   const [analyticsStatus, setAnalyticsStatus] = useState<string | null>(null);
   const heatmapContainerRef = useRef<HTMLDivElement | null>(null);
-  const heatmapMapRef = useRef<mapboxgl.Map | null>(null);
+  const heatmapMapRef = useRef<any>(null);
   const heatmapReadyRef = useRef(false);
   const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
     ? (import.meta as any).env.VITE_MAPBOX_TOKEN
     : '';
+  const mapboxModuleRef = useRef<any>(null);
+  const mapboxLoadingRef = useRef<Promise<any> | null>(null);
   const [showPathRecorder, setShowPathRecorder] = useState(false);
   const [pathRecordingActive, setPathRecordingActive] = useState(false);
   const [pathRecordingPoints, setPathRecordingPoints] = useState<PathPoint[]>([]);
@@ -479,7 +479,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [routeConfigUpdatedAt, setRouteConfigUpdatedAt] = useState<string | null>(null);
   const landmarkDragIndexRef = useRef<number | null>(null);
   const pathRecorderContainerRef = useRef<HTMLDivElement | null>(null);
-  const pathRecorderMapRef = useRef<mapboxgl.Map | null>(null);
+  const pathRecorderMapRef = useRef<any>(null);
   const pathRecordingWatchIdRef = useRef<number | null>(null);
   const [, setBroadcasts] = useState<Broadcast[]>([]);
   const [broadcastMessage, setBroadcastMessage] = useState('Leo Unga 2kg KES 175 • Sukari 1kg KES 150 • Maziwa fresh!');
@@ -1885,122 +1885,153 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         demand: 40 + ((i * 23) % 60)
       }))).filter(p => p.location);
 
+  const ensureMapbox = async () => {
+    if (mapboxModuleRef.current) {
+      return mapboxModuleRef.current;
+    }
+    if (!mapboxLoadingRef.current) {
+      mapboxLoadingRef.current = Promise.all([
+        import('mapbox-gl'),
+        import('mapbox-gl/dist/mapbox-gl.css')
+      ]).then(([module]) => {
+        const loaded = (module as any).default ?? module;
+        mapboxModuleRef.current = loaded;
+        return loaded;
+      });
+    }
+    return mapboxLoadingRef.current;
+  };
+
   useEffect(() => {
     if (activeTab !== 'marketing') return;
     if (!mapboxToken) return;
     if (!heatmapContainerRef.current) return;
-    mapboxgl.accessToken = mapboxToken;
-    if (!heatmapMapRef.current) {
-      const center = demandHeatmap[0]?.location
-        ? [demandHeatmap[0].location!.lng || 39.6682, demandHeatmap[0].location!.lat || -4.0435]
-        : [39.6682, -4.0435];
-      const map = new mapboxgl.Map({
-        container: heatmapContainerRef.current,
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center,
-        zoom: 11
-      });
-      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-      map.on('load', () => {
-        heatmapReadyRef.current = true;
-        if (!map.getSource('demand-heat')) {
-          map.addSource('demand-heat', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] }
-          });
-          map.addLayer({
-            id: 'demand-heatmap',
-            type: 'heatmap',
-            source: 'demand-heat',
-            paint: {
-              'heatmap-weight': ['interpolate', ['linear'], ['get', 'demand'], 0, 0, 100, 1],
-              'heatmap-intensity': 1.1,
-              'heatmap-radius': 22,
-              'heatmap-opacity': 0.8,
-              'heatmap-color': [
-                'interpolate',
-                ['linear'],
-                ['heatmap-density'],
-                0, 'rgba(14, 165, 233, 0)',
-                0.4, 'rgba(99, 102, 241, 0.6)',
-                0.7, 'rgba(236, 72, 153, 0.7)',
-                1, 'rgba(244, 63, 94, 0.9)'
-              ]
-            }
-          });
-          map.addLayer({
-            id: 'demand-points',
-            type: 'circle',
-            source: 'demand-heat',
-            paint: {
-              'circle-color': '#ef4444',
-              'circle-radius': 4,
-              'circle-opacity': 0.6
-            }
-          });
-        }
-      });
-      heatmapMapRef.current = map;
-    }
-    if (heatmapMapRef.current && heatmapReadyRef.current) {
-      const source = heatmapMapRef.current.getSource('demand-heat') as mapboxgl.GeoJSONSource | undefined;
-      if (source) {
-        const features = demandHeatmap.map((p) => ({
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: [p.location!.lng, p.location!.lat]
-          },
-          properties: {
-            demand: p.demand,
-            name: p.name
+    let active = true;
+    ensureMapbox().then((mapboxgl) => {
+      if (!active) return;
+      mapboxgl.accessToken = mapboxToken;
+      if (!heatmapMapRef.current) {
+        const center = demandHeatmap[0]?.location
+          ? [demandHeatmap[0].location!.lng || 39.6682, demandHeatmap[0].location!.lat || -4.0435]
+          : [39.6682, -4.0435];
+        const map = new mapboxgl.Map({
+          container: heatmapContainerRef.current!,
+          style: 'mapbox://styles/mapbox/streets-v12',
+          center,
+          zoom: 11
+        });
+        map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+        map.on('load', () => {
+          heatmapReadyRef.current = true;
+          if (!map.getSource('demand-heat')) {
+            map.addSource('demand-heat', {
+              type: 'geojson',
+              data: { type: 'FeatureCollection', features: [] }
+            });
+            map.addLayer({
+              id: 'demand-heatmap',
+              type: 'heatmap',
+              source: 'demand-heat',
+              paint: {
+                'heatmap-weight': ['interpolate', ['linear'], ['get', 'demand'], 0, 0, 100, 1],
+                'heatmap-intensity': 1.1,
+                'heatmap-radius': 22,
+                'heatmap-opacity': 0.8,
+                'heatmap-color': [
+                  'interpolate',
+                  ['linear'],
+                  ['heatmap-density'],
+                  0, 'rgba(14, 165, 233, 0)',
+                  0.4, 'rgba(99, 102, 241, 0.6)',
+                  0.7, 'rgba(236, 72, 153, 0.7)',
+                  1, 'rgba(244, 63, 94, 0.9)'
+                ]
+              }
+            });
+            map.addLayer({
+              id: 'demand-points',
+              type: 'circle',
+              source: 'demand-heat',
+              paint: {
+                'circle-color': '#ef4444',
+                'circle-radius': 4,
+                'circle-opacity': 0.6
+              }
+            });
           }
-        }));
-        source.setData({ type: 'FeatureCollection', features } as any);
+        });
+        heatmapMapRef.current = map;
       }
-    }
+      if (heatmapMapRef.current && heatmapReadyRef.current) {
+        const source = heatmapMapRef.current.getSource('demand-heat') as any;
+        if (source) {
+          const features = demandHeatmap.map((p) => ({
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [p.location!.lng, p.location!.lat]
+            },
+            properties: {
+              demand: p.demand,
+              name: p.name
+            }
+          }));
+          source.setData({ type: 'FeatureCollection', features } as any);
+        }
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [activeTab, demandHeatmap, mapboxToken]);
 
   useEffect(() => {
     if (!showPathRecorder) return;
     if (!mapboxToken) return;
     if (!pathRecorderContainerRef.current) return;
-    mapboxgl.accessToken = mapboxToken;
-    if (!pathRecorderMapRef.current) {
-      const fallback = sellerLocations[0] as any;
-      const centerLng = Number(fallback?.lng ?? fallback?.longitude ?? 39.6682);
-      const centerLat = Number(fallback?.lat ?? fallback?.latitude ?? -4.0435);
-      const map = new mapboxgl.Map({
-        container: pathRecorderContainerRef.current,
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center: [centerLng, centerLat],
-        zoom: 14
-      });
-      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-      map.on('load', () => {
-        if (!map.getSource('recording-path')) {
-          map.addSource('recording-path', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] }
-          });
-          map.addLayer({
-            id: 'recording-path',
-            type: 'line',
-            source: 'recording-path',
-            paint: {
-              'line-color': '#ef4444',
-              'line-width': 4
-            }
-          });
-        }
-      });
-      pathRecorderMapRef.current = map;
-    }
+    let active = true;
+    ensureMapbox().then((mapboxgl) => {
+      if (!active) return;
+      mapboxgl.accessToken = mapboxToken;
+      if (!pathRecorderMapRef.current) {
+        const fallback = sellerLocations[0] as any;
+        const centerLng = Number(fallback?.lng ?? fallback?.longitude ?? 39.6682);
+        const centerLat = Number(fallback?.lat ?? fallback?.latitude ?? -4.0435);
+        const map = new mapboxgl.Map({
+          container: pathRecorderContainerRef.current!,
+          style: 'mapbox://styles/mapbox/streets-v12',
+          center: [centerLng, centerLat],
+          zoom: 14
+        });
+        map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+        map.on('load', () => {
+          if (!map.getSource('recording-path')) {
+            map.addSource('recording-path', {
+              type: 'geojson',
+              data: { type: 'FeatureCollection', features: [] }
+            });
+            map.addLayer({
+              id: 'recording-path',
+              type: 'line',
+              source: 'recording-path',
+              paint: {
+                'line-color': '#ef4444',
+                'line-width': 4
+              }
+            });
+          }
+        });
+        pathRecorderMapRef.current = map;
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [mapboxToken, sellerLocations, showPathRecorder]);
 
   useEffect(() => {
     if (!showPathRecorder || !pathRecorderMapRef.current) return;
-    const source = pathRecorderMapRef.current.getSource('recording-path') as mapboxgl.GeoJSONSource | undefined;
+    const source = pathRecorderMapRef.current.getSource('recording-path') as any;
     if (!source) return;
     if (pathRecordingPoints.length < 2) {
       source.setData({ type: 'FeatureCollection', features: [] } as any);
