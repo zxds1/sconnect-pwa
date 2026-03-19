@@ -23,6 +23,7 @@ export default defineConfig(({mode}) => {
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: 'auto',
+        minify: false,
         includeAssets: ['logo.jpg', 'logo-header.jpg', 'logo.svg'],
         manifest: {
           name: 'Sconnect',
@@ -46,6 +47,7 @@ export default defineConfig(({mode}) => {
           ]
         },
         workbox: {
+          mode: 'development',
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff2}']
         },
         devOptions: {
@@ -64,6 +66,20 @@ export default defineConfig(({mode}) => {
     server: {
       port: 3000,
       hmr: process.env.DISABLE_HMR !== 'true',
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ['react', 'react-dom'],
+            maps: ['mapbox-gl'],
+            charts: ['recharts'],
+            motion: ['motion'],
+            ai: ['@google/genai'],
+            markdown: ['react-markdown'],
+          },
+        },
+      },
     },
   };
 });
