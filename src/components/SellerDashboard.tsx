@@ -80,6 +80,8 @@ import {
   listSellerTutorials,
   setSellerShopType,
   connectOnlineStore,
+  startOnlineOAuth,
+  completeOnlineOAuth,
   bulkProductMappings,
   getConnectionStatus,
   triggerConnectionSync,
@@ -109,6 +111,7 @@ import {
   type SellerProductInsight,
   type SellerLowStock
 } from '../lib/sellerProductsApi';
+import { createGroupBuyOffer } from '../lib/groupBuyApi';
 import { listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
 import { addPathLandmark, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, type PathPoint, type RecordedPath } from '../lib/searchApi';
@@ -535,6 +538,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [onlineConnectionStatus, setOnlineConnectionStatus] = useState<string | null>(null);
   const [onlineConnectionId, setOnlineConnectionId] = useState<string | null>(null);
   const [onlineAuthUrl, setOnlineAuthUrl] = useState<string | null>(null);
+  const [oauthStatus, setOauthStatus] = useState<string | null>(null);
+  const [groupBuyOfferStatus, setGroupBuyOfferStatus] = useState<string | null>(null);
   const [mappingItems, setMappingItems] = useState<ProductMappingItem[]>([]);
   const [mappingStatus, setMappingStatus] = useState<string | null>(null);
   const [mappingSyncing, setMappingSyncing] = useState(false);
@@ -2482,7 +2487,28 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const handleConnectOnline = async () => {
     setOnlineConnectionStatus(null);
     setMappingStatus(null);
+    setOauthStatus(null);
     try {
+      const platform = onlineConnectForm.platform;
+      if (platform === 'shopify' || platform === 'woocommerce') {
+        const redirectUrl = `${window.location.origin}${window.location.pathname}?oauth=1&platform=${platform}`;
+        const start = await startOnlineOAuth({
+          platform,
+          shop_domain: onlineConnectForm.shop_domain || undefined,
+          scopes: onlineConnectForm.scopes || undefined,
+          redirect_url: redirectUrl
+        });
+        if (start?.auth_url) {
+          try {
+            localStorage.setItem('soko:oauth_platform', platform);
+            if (onlineConnectForm.shop_domain) {
+              localStorage.setItem('soko:oauth_shop', onlineConnectForm.shop_domain);
+            }
+          } catch {}
+          window.location.href = start.auth_url;
+          return;
+        }
+      }
       const payload: OnlineConnectRequest = {
         ...onlineConnectForm,
         shop_type: shopType
@@ -2508,6 +2534,57 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setOnlineConnectionStatus(err?.message || 'Unable to connect store.');
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('oauth') !== '1') return;
+    const platformParam = params.get('platform') || '';
+    const platform = platformParam || localStorage.getItem('soko:oauth_platform') || '';
+    const shop = params.get('shop') || localStorage.getItem('soko:oauth_shop') || onlineConnectForm.shop_domain || '';
+    const code = params.get('code') || '';
+    const state = params.get('state') || '';
+    const hmac = params.get('hmac') || '';
+    const timestamp = params.get('timestamp') || '';
+    const host = params.get('host') || '';
+    const consumerKey = params.get('consumer_key') || '';
+    const consumerSecret = params.get('consumer_secret') || '';
+    const signature = params.get('signature') || '';
+    const userId = params.get('user_id') || '';
+    const scope = params.get('scope') || '';
+    const returnUrl = params.get('return_url') || '';
+    const callbackUrl = params.get('callback_url') || '';
+
+    const finish = async () => {
+      if (!platform) return;
+      setOauthStatus('Finalizing OAuth connection...');
+      try {
+        await completeOnlineOAuth({
+          platform,
+          shop_domain: shop || undefined,
+          code: code || undefined,
+          state: state || undefined,
+          hmac: hmac || undefined,
+          timestamp: timestamp || undefined,
+          host: host || undefined,
+          consumer_key: consumerKey || undefined,
+          consumer_secret: consumerSecret || undefined,
+          signature: signature || undefined,
+          user_id: userId || undefined,
+          scope: scope || undefined,
+          return_url: returnUrl || undefined,
+          callback_url: callbackUrl || undefined
+        });
+        setOauthStatus('OAuth connection complete.');
+        const stateResp = await getSellerOnboardingState();
+        setOnboardingState(stateResp);
+      } catch (err: any) {
+        setOauthStatus(err?.message || 'OAuth completion failed.');
+      } finally {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    };
+    finish();
+  }, []);
 
   const handleAddMappingRow = () => {
     setMappingItems(prev => ([
@@ -2543,6 +2620,30 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       }
     } catch (err: any) {
       setOnlineConnectionStatus(err?.message || 'Unable to fetch connection status.');
+    }
+  };
+
+  const handleCreateGroupBuyOffer = async (product: Product) => {
+    setGroupBuyOfferStatus(null);
+    if (!product.productId) {
+      setGroupBuyOfferStatus('Product SKU missing.');
+      return;
+    }
+    if (!product.groupBuyEligible) {
+      setGroupBuyOfferStatus('Enable group buy eligibility first.');
+      return;
+    }
+    try {
+      await createGroupBuyOffer({
+        product_sku: product.productId,
+        tiers: product.groupBuyTiers || [],
+        min_group_size: 5,
+        max_groups: 5,
+        duration_hours: 48
+      });
+      setGroupBuyOfferStatus(`Group buy published for ${product.name}.`);
+    } catch (err: any) {
+      setGroupBuyOfferStatus(err?.message || 'Unable to publish group buy.');
     }
   };
 
@@ -4127,7 +4228,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     onClick={handleConnectOnline}
                     className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
                   >
-                    Connect Store
+                    {isShopify || isWoo ? 'Connect via OAuth' : 'Connect Store'}
                   </button>
                   {onlineAuthUrl && (
                     <button
@@ -4154,6 +4255,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
                 {onlineConnectionStatus && (
                   <div className="text-[10px] font-bold text-emerald-600">{onlineConnectionStatus}</div>
+                )}
+                {oauthStatus && (
+                  <div className="text-[10px] font-bold text-indigo-600">{oauthStatus}</div>
                 )}
               </div>
             )}
@@ -4672,6 +4776,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     )}
                   </div>
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {product.groupBuyEligible && (
+                      <button
+                        onClick={() => handleCreateGroupBuyOffer(product)}
+                        className="p-2 hover:bg-zinc-100 rounded-lg transition-colors text-emerald-600"
+                        title="Publish group buy"
+                      >
+                        <Users className="w-4 h-4" />
+                      </button>
+                    )}
                     {product.productId && (
                       <button
                         onClick={() => handleOpenMediaDrawer(product)}
@@ -4703,6 +4816,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
               )}
             </div>
+            {groupBuyOfferStatus && (
+              <div className="text-[10px] font-bold text-emerald-600">{groupBuyOfferStatus}</div>
+            )}
           </div>
         )}
 

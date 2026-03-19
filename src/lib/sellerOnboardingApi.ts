@@ -71,6 +71,35 @@ export type OnlineConnectResponse = {
   auth_url?: string;
 };
 
+export type OnlineOAuthStartRequest = {
+  platform: string;
+  shop_domain?: string;
+  scopes?: string;
+  redirect_url?: string;
+};
+
+export type OnlineOAuthStartResponse = {
+  auth_url?: string;
+  state?: string;
+};
+
+export type OnlineOAuthCallbackRequest = {
+  platform: string;
+  shop_domain?: string;
+  code?: string;
+  state?: string;
+  hmac?: string;
+  timestamp?: string;
+  host?: string;
+  consumer_key?: string;
+  consumer_secret?: string;
+  signature?: string;
+  user_id?: string;
+  scope?: string;
+  return_url?: string;
+  callback_url?: string;
+};
+
 export type ProductMappingItem = {
   external_sku: string;
   canonical_sku: string;
@@ -119,6 +148,18 @@ export const setSellerShopType = async (payload: { shop_type: string }) =>
 
 export const connectOnlineStore = async (payload: OnlineConnectRequest): Promise<OnlineConnectResponse> =>
   apiFetch('/v1/onboarding/online/connect', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const startOnlineOAuth = async (payload: OnlineOAuthStartRequest): Promise<OnlineOAuthStartResponse> =>
+  apiFetch('/v1/seller/online/oauth/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const completeOnlineOAuth = async (payload: OnlineOAuthCallbackRequest) =>
+  apiFetch('/v1/seller/online/oauth/callback', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

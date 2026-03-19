@@ -144,6 +144,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('oauth') === '1') {
+      setView('seller');
+    }
+  }, []);
+
+  useEffect(() => {
     let alive = true;
     const loadSellerStatus = async () => {
       try {

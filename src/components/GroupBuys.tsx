@@ -218,6 +218,12 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             const progress = Math.min(100, Math.round((current / target) * 100));
             const tierPrice = item.tiers?.[0]?.price ?? item.current_price ?? 0;
             const tierDiscount = item.tiers?.[0]?.discount;
+            const etaMin = item.distance_km ? Math.max(5, Math.round(item.distance_km * 6)) : null;
+            const shareLink = item.share_link
+              ? item.share_link.startsWith('http')
+                ? item.share_link
+                : `${window.location.origin}/group/${item.share_link}`
+              : '';
             return (
               <motion.div
                 key={item.id}
@@ -229,7 +235,7 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                   <div>
                     <div className="text-sm font-black">{item.product_sku || 'Group Buy'}</div>
                     <div className="text-[11px] text-zinc-500">
-                      {item.market_name || item.seller_name || 'Market'} • {item.distance_km ? `${item.distance_km.toFixed(1)}km` : 'Nearby'}
+                      {item.market_name || item.seller_name || 'Market'} • {item.distance_km ? `${item.distance_km.toFixed(1)}km` : 'Nearby'}{etaMin ? ` • ${etaMin} min` : ''}
                     </div>
                     <div className="text-[11px] text-zinc-500">
                       {item.seller_mode || 'seller'} {item.visual_marker ? `• ${item.visual_marker}` : ''}
@@ -258,6 +264,14 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                   >
                     <Users className="w-4 h-4" /> Join Chat
                   </button>
+                  {shareLink && (
+                    <button
+                      onClick={() => window.open(shareLink, '_blank', 'noopener')}
+                      className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-xs font-bold inline-flex items-center gap-2"
+                    >
+                      <MessageCircle className="w-4 h-4" /> Open Chat
+                    </button>
+                  )}
                   {item.whatsapp_number && (
                     <a
                       href={`https://wa.me/${item.whatsapp_number}`}
