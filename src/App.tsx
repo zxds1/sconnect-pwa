@@ -777,7 +777,15 @@ export default function App() {
                 />
                 <h1 className="ml-3 text-xl font-bold">Settings</h1>
               </div>
-              <Settings onOpenDataDashboard={() => setView('data')} onOpenNotifications={() => setView('notifications')} />
+              <Settings
+                onOpenDataDashboard={() => setView('data')}
+                onOpenNotifications={() => setView('notifications')}
+                onOpenProfile={() => setView('profile')}
+                onOpenSecurity={() => setView('password-reset')}
+                onOpenPayments={() => setView('subscriptions')}
+                onOpenSupport={() => setSupportChatMode('duka')}
+                onOpenPolicies={() => setSupportChatMode('duka')}
+              />
             </motion.div>
           )}
 

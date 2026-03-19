@@ -31,9 +31,14 @@ import {
 interface SettingsProps {
   onOpenDataDashboard?: () => void;
   onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
+  onOpenSecurity?: () => void;
+  onOpenPayments?: () => void;
+  onOpenSupport?: () => void;
+  onOpenPolicies?: () => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenNotifications }) => {
+export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenNotifications, onOpenProfile, onOpenSecurity, onOpenPayments, onOpenSupport, onOpenPolicies }) => {
   const [consents, setConsents] = React.useState({
     location: false,
     receipts: false,
@@ -356,6 +361,26 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
                   onClick={() => {
                     if (item.label === 'Notifications') {
                       onOpenNotifications?.();
+                      return;
+                    }
+                    if (item.label === 'Personal Information') {
+                      onOpenProfile?.();
+                      return;
+                    }
+                    if (item.label === 'Password & Security') {
+                      onOpenSecurity?.();
+                      return;
+                    }
+                    if (item.label === 'Payments & Payouts') {
+                      onOpenPayments?.();
+                      return;
+                    }
+                    if (item.label === 'Help Center') {
+                      onOpenSupport?.();
+                      return;
+                    }
+                    if (item.label === 'Terms & Policies') {
+                      onOpenPolicies?.();
                     }
                   }}
                   className="w-full flex items-center justify-between p-4 hover:bg-zinc-50 transition-colors border-b last:border-b-0 border-zinc-50"
