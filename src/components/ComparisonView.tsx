@@ -783,10 +783,9 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
           </button>
           <h1 className="text-xl font-bold">Product Comparison</h1>
           <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500">
-            <HelpCircle
-              className="w-4 h-4 text-zinc-400"
-              title="Value Score uses your weights. Badges use your thresholds. Change profile to re-rank."
-            />
+            <span title="Value Score uses your weights. Badges use your thresholds. Change profile to re-rank.">
+              <HelpCircle className="w-4 h-4 text-zinc-400" />
+            </span>
             <span className="hidden sm:inline">How scoring works</span>
           </div>
         </div>

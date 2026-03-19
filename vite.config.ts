@@ -6,8 +6,13 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import {webcrypto} from 'node:crypto';
 import {defineConfig, loadEnv} from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
+import {VitePWA} from 'vite-plugin-pwa';
+
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto as Crypto;
+}
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
