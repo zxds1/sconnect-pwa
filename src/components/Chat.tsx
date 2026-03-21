@@ -140,14 +140,16 @@ export const Chat: React.FC<ChatProps> = ({ product, onClose, onEscalate }) => {
           <div className="flex items-center gap-2">
             <button
               onClick={handleEscalate}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors text-emerald-400"
+              className="p-2 hover:bg-white/10 rounded-full transition-colors text-emerald-400 focus:outline-none focus:ring-2 focus:ring-white/30"
               title="Escalate to seller"
+              aria-label="Escalate to seller"
             >
               <PhoneCall className="w-5 h-5" />
             </button>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors"
+              className="p-2 hover:bg-white/10 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-white/30"
+              aria-label="Close chat"
             >
               <X className="w-5 h-5" />
             </button>
@@ -199,19 +201,21 @@ export const Chat: React.FC<ChatProps> = ({ product, onClose, onEscalate }) => {
           <div className="flex gap-2">
             <input
               type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Type a message..."
-              className="flex-1 px-4 py-3 bg-[#f1f6ff] rounded-full focus:outline-none focus:ring-2 focus:ring-[#1976D2] text-sm"
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || loading || !threadId}
-              className="p-3 bg-zinc-900 text-white rounded-full disabled:opacity-50"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Type a message..."
+            aria-label="Message input"
+            className="flex-1 px-4 py-3 bg-[#f1f6ff] rounded-full text-sm text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || loading || !threadId}
+            className="p-3 bg-zinc-900 text-white rounded-full disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            aria-label="Send message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
           </div>
         </div>
       </motion.div>

@@ -463,8 +463,8 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     setCreatingSellerAccount(true);
     try {
       await updateSellerProfile({
-        name: profileData.name || 'My Shop',
-        description: profileData.description || 'My shop on Sconnect'
+        name: profileData.name?.trim() || undefined,
+        description: profileData.description?.trim() || undefined
       });
       onSellerAccountCreated?.();
       setSellerAccountStatus('Seller account created.');

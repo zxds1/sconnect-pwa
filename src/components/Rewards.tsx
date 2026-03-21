@@ -36,9 +36,11 @@ import { getOpsConfig } from '../lib/opsConfigApi';
 interface RewardsProps {
   openQrOnMount?: boolean;
   onOpenQrHandled?: () => void;
+  onOpenQrRequested?: () => void;
+  onCloseQrRequested?: () => void;
 }
 
-export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled }) => {
+export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled, onOpenQrRequested, onCloseQrRequested }) => {
   const [starsSummary, setStarsSummary] = useState<RewardsStarsSummary | null>(null);
   const [leaderboard, setLeaderboard] = useState<RewardsLeaderboardEntry[]>([]);
   const currentStars = Number(starsSummary?.stars_total ?? 0);
@@ -93,10 +95,12 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
 
   useEffect(() => {
     if (openQrOnMount) {
-        setActiveTab('wallet');
-        setShowQrModal(true);
-        setQrStep('scan');
-        onOpenQrHandled?.();
+      setActiveTab('wallet');
+      setShowQrModal(true);
+      setQrStep('scan');
+      onOpenQrHandled?.();
+    } else {
+      setShowQrModal(false);
     }
   }, [openQrOnMount, onOpenQrHandled]);
 
@@ -260,6 +264,11 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
       setStarsSummary(starsResp as RewardsStarsSummary);
       setLeaderboard(Array.isArray(leaderboardResp) ? (leaderboardResp as RewardsLeaderboardEntry[]) : []);
     } catch {}
+  };
+
+  const closeQrModal = () => {
+    onCloseQrRequested?.();
+    setShowQrModal(false);
   };
 
   const stopScanner = () => {
@@ -994,7 +1003,11 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                   <p className="text-sm font-bold text-slate-900">Your Balance: {buyerCoins} SC</p>
                 </div>
                 <button
-                  onClick={() => setShowQrModal(true)}
+                  onClick={() => {
+                    onOpenQrRequested?.();
+                    setShowQrModal(true);
+                    setQrStep('scan');
+                  }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-xl text-[10px] font-black flex items-center gap-2"
                 >
                   <QrCode className="w-4 h-4" /> Scan QR
@@ -1191,7 +1204,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
           <div className="w-full max-w-sm bg-white rounded-3xl overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between">
               <div className="text-xs font-black text-slate-800">QR Scan (Unlimited)</div>
-              <button onClick={() => setShowQrModal(false)} className="text-slate-400">✕</button>
+              <button onClick={closeQrModal} className="text-slate-400" aria-label="Close QR scanner">✕</button>
             </div>
             <div className="p-5 space-y-4">
               {qrStep === 'scan' && (
@@ -1447,7 +1460,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                   <button
                     onClick={() => {
                       setQrStep('scan');
-                      setShowQrModal(false);
+                      closeQrModal();
                       setQrPayload('');
                       setSellerId('');
                       setSurvey({ price: '', stock: 'Full', repeat: 'Yes', cleanliness: 4, product: '' });

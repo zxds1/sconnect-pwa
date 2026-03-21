@@ -91,6 +91,7 @@ type SellerProfile = Record<string, any>;
 type SellerReputation = Record<string, any>;
 
 type SummaryStat = Record<string, any>;
+type ProductDetailModal = 'ai-chat' | 'counterfeit' | 'dispute' | 'map' | 'recording';
 
 const numberOrZero = (value: any) => {
   const n = Number(value);
@@ -213,6 +214,43 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const mapboxModuleRef = React.useRef<any>(null);
   const mapboxLoadingRef = React.useRef<Promise<any> | null>(null);
 
+  const syncModalFromHistory = React.useCallback((modal?: ProductDetailModal) => {
+    setShowAIChat(modal === 'ai-chat');
+    setShowCounterfeitModal(modal === 'counterfeit');
+    setShowDisputeModal(modal === 'dispute');
+    setShowMapModal(modal === 'map');
+    setShowRecordingPanel(modal === 'recording');
+  }, []);
+
+  const pushModalHistory = React.useCallback((modal: ProductDetailModal) => {
+    if (typeof window === 'undefined') return;
+    const nextState = { ...(window.history.state || {}), productDetailModal: modal };
+    window.history.pushState(nextState, '', `${window.location.pathname}${window.location.search}${window.location.hash}`);
+  }, []);
+
+  const setModal = React.useCallback((modal: ProductDetailModal, next: boolean) => {
+    if (next) {
+      syncModalFromHistory(modal);
+      pushModalHistory(modal);
+      return;
+    }
+    if (typeof window !== 'undefined' && window.history.state?.productDetailModal === modal) {
+      window.history.back();
+      return;
+    }
+    syncModalFromHistory(undefined);
+  }, [pushModalHistory, syncModalFromHistory]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = (event: PopStateEvent) => {
+      const nextModal = event.state?.productDetailModal as ProductDetailModal | undefined;
+      syncModalFromHistory(nextModal);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [syncModalFromHistory]);
+
   const ensureMapbox = async () => {
     if (mapboxModuleRef.current) {
       return mapboxModuleRef.current;
@@ -307,9 +345,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     if (initialShowMap) {
-      setShowMapModal(true);
+      setModal('map', true);
     }
-  }, [initialShowMap]);
+  }, [initialShowMap, setModal]);
 
   React.useEffect(() => {
     if (initialPreferredPathId) {
@@ -404,7 +442,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     const address = activeProduct.location?.address || sellerProfile?.location?.address || sellerProfile?.address;
     const loc = activeProduct.location || sellerProfile?.location;
     if (mapboxToken && loc?.lat && loc?.lng) {
-      setShowMapModal(true);
+      setModal('map', true);
       return;
     }
     if (address) {
@@ -625,7 +663,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         evidence_keys: evidenceKeys,
       });
       void createAuditEvent({ action: 'report_counterfeit', entity_type: 'product', entity_id: productId }).catch(() => {});
-      setShowCounterfeitModal(false);
+      setModal('counterfeit', false);
       setCounterfeitForm({ reason: '', orderId: '', evidenceKeys: '' });
     } catch (err: any) {
       setError(err?.message || 'Unable to submit counterfeit report.');
@@ -1254,7 +1292,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     }
     setRecordingPaused(false);
     setIsRecording(false);
-    setShowRecordingPanel(true);
+    setModal('recording', true);
   };
 
   const saveRecording = async () => {
@@ -1273,7 +1311,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         precomputePathWaypoints(saved.id).catch(() => {});
       }
       setRecordingStatus(saved?.id ? 'Path saved.' : 'Path saved.');
-      setShowRecordingPanel(false);
+      setModal('recording', false);
       setRecordingName('');
       setRecordingShared(true);
       setRecordingPoints([]);
@@ -1736,29 +1774,32 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <div className="mt-3 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <input
-                      className="w-full p-2.5 bg-white rounded-xl text-xs font-bold"
+                      className="w-full p-2.5 bg-white rounded-xl text-xs font-bold text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                       value={reviewForm.name}
                       onChange={(e) => setReviewForm(prev => ({ ...prev, name: e.target.value }))}
                       placeholder="Your name"
+                      aria-label="Your name"
                     />
                     <select
-                      className="w-full p-2.5 bg-white rounded-xl text-xs font-bold"
+                      className="w-full p-2.5 bg-white rounded-xl text-xs font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                       value={reviewForm.rating}
                       onChange={(e) => setReviewForm(prev => ({ ...prev, rating: Number(e.target.value) }))}
+                      aria-label="Rating"
                     >
                       {[5, 4, 3, 2, 1].map(r => <option key={r} value={r}>{r} Stars</option>)}
                     </select>
                   </div>
                   <textarea
-                    className="w-full p-3 bg-white rounded-xl text-xs font-bold"
+                    className="w-full p-3 bg-white rounded-xl text-xs font-bold text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                     rows={3}
                     value={reviewForm.comment}
                     onChange={(e) => setReviewForm(prev => ({ ...prev, comment: e.target.value }))}
                     placeholder="Share your experience..."
+                    aria-label="Review comment"
                   />
                   <div className="flex items-center gap-2">
-                    <button onClick={handleSubmitReview} className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-xs font-bold">Submit</button>
-                    <button onClick={() => setShowReviewForm(false)} className="px-4 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-xs font-bold">Cancel</button>
+                    <button onClick={handleSubmitReview} className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-zinc-400" aria-label="Submit review">Submit</button>
+                    <button onClick={() => setShowReviewForm(false)} className="px-4 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-zinc-300" aria-label="Cancel review">Cancel</button>
                   </div>
                 </div>
               )}
@@ -1795,14 +1836,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </div>
             <div className="mt-4 flex gap-2">
               <input
-                className="flex-1 p-3 bg-zinc-50 rounded-xl text-[10px] font-bold"
+                className="flex-1 p-3 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                 placeholder="Ask a question about this product..."
                 value={qaInput}
                 onChange={(e) => setQaInput(e.target.value)}
+                aria-label="Ask a question about this product"
               />
               <button
                 onClick={handleAskQuestion}
-                className="px-4 py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black"
+                className="px-4 py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                aria-label="Submit product question"
               >
                 Ask
               </button>
@@ -1820,7 +1863,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               </div>
             </div>
             <button
-              onClick={() => setShowCounterfeitModal(true)}
+              onClick={() => setModal('counterfeit', true)}
               className="px-3 py-2 bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase"
             >
               Report
@@ -1833,7 +1876,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               <p className="text-[10px] text-red-700 font-bold">Issue with a purchase? Start a dispute and we mediate.</p>
             </div>
             <button
-              onClick={() => setShowDisputeModal(true)}
+              onClick={() => setModal('dispute', true)}
               className="px-3 py-2 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase"
             >
               Start Dispute
@@ -1975,7 +2018,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
           <div className="mb-20">
             <button
-              onClick={() => setShowAIChat(true)}
+              onClick={() => setModal('ai-chat', true)}
               className="w-full p-6 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl text-white flex items-center justify-between group overflow-hidden relative"
             >
               <div className="relative z-10">
@@ -2000,7 +2043,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div
               className="absolute inset-0 bg-black/40"
               onClick={() => {
-                setShowCounterfeitModal(false);
+                setModal('counterfeit', false);
                 setCounterfeitErrors({});
               }}
             />
@@ -2014,17 +2057,18 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <p className="text-sm font-black">Report Counterfeit</p>
                 <button
                   onClick={() => {
-                    setShowCounterfeitModal(false);
+                    setModal('counterfeit', false);
                     setCounterfeitErrors({});
                   }}
-                  className="text-[10px] font-black text-zinc-400"
+                  className="rounded-full px-2 py-1 text-[10px] font-black text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                  aria-label="Close counterfeit report"
                 >
                   Close
                 </button>
               </div>
               <div className="space-y-3">
                 <textarea
-                  className={`w-full p-3 rounded-xl text-xs font-bold ${counterfeitErrors.reason ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
+                  className={`w-full p-3 rounded-xl text-xs font-bold placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 ${counterfeitErrors.reason ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent text-zinc-900'}`}
                   rows={3}
                   placeholder="Describe the issue"
                   value={counterfeitForm.reason}
@@ -2032,33 +2076,37 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     setCounterfeitForm(prev => ({ ...prev, reason: e.target.value }));
                     setCounterfeitErrors(prev => ({ ...prev, reason: '' }));
                   }}
+                  aria-label="Describe the issue"
                 />
                 {counterfeitErrors.reason && (
                   <p className="text-[10px] font-bold text-red-600">{counterfeitErrors.reason}</p>
                 )}
                 <input
-                  className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold border border-transparent"
+                  className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900 placeholder:text-zinc-400 border border-transparent focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                   placeholder="Order ID (optional)"
                   value={counterfeitForm.orderId}
                   onChange={(e) => setCounterfeitForm(prev => ({ ...prev, orderId: e.target.value }))}
+                  aria-label="Order ID optional"
                 />
                 <input
-                  className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold border border-transparent"
+                  className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900 placeholder:text-zinc-400 border border-transparent focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                   placeholder="Evidence keys (comma-separated)"
                   value={counterfeitForm.evidenceKeys}
                   onChange={(e) => setCounterfeitForm(prev => ({ ...prev, evidenceKeys: e.target.value }))}
+                  aria-label="Evidence keys comma separated"
                 />
               </div>
               <div className="mt-4 flex gap-2">
-                <button onClick={handleCounterfeitReport} className="flex-1 py-2 bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase">
+                <button onClick={handleCounterfeitReport} className="flex-1 py-2 bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase focus:outline-none focus:ring-2 focus:ring-amber-200" aria-label="Submit counterfeit report">
                   Submit
                 </button>
                 <button
                   onClick={() => {
-                    setShowCounterfeitModal(false);
+                    setModal('counterfeit', false);
                     setCounterfeitErrors({});
                   }}
-                  className="flex-1 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black uppercase"
+                  className="flex-1 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black uppercase focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                  aria-label="Cancel counterfeit report"
                 >
                   Cancel
                 </button>
@@ -2074,7 +2122,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div
               className="absolute inset-0 bg-black/40"
               onClick={() => {
-                setShowDisputeModal(false);
+                setModal('dispute', false);
                 setDisputeErrors({});
                 setEvidenceErrors({});
                 setEvidenceStatus(null);
@@ -2092,33 +2140,35 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <p className="text-sm font-black">Start Dispute</p>
                 <button
                   onClick={() => {
-                    setShowDisputeModal(false);
+                    setModal('dispute', false);
                     setDisputeErrors({});
                     setEvidenceErrors({});
                     setEvidenceStatus(null);
                     setDisputeStatus(null);
                     setDisputeId('');
                   }}
-                  className="text-[10px] font-black text-zinc-400"
+                  className="rounded-full px-2 py-1 text-[10px] font-black text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                  aria-label="Close dispute modal"
                 >
                   Close
                 </button>
               </div>
               <div className="space-y-3">
                 <input
-                  className={`w-full p-3 rounded-xl text-xs font-bold ${disputeErrors.orderId ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
+                  className={`w-full p-3 rounded-xl text-xs font-bold placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 ${disputeErrors.orderId ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent text-zinc-900'}`}
                   placeholder="Order ID"
                   value={disputeForm.orderId}
                   onChange={(e) => {
                     setDisputeForm(prev => ({ ...prev, orderId: e.target.value }));
                     setDisputeErrors(prev => ({ ...prev, orderId: '' }));
                   }}
+                  aria-label="Dispute order ID"
                 />
                 {disputeErrors.orderId && (
                   <p className="text-[10px] font-bold text-red-600">{disputeErrors.orderId}</p>
                 )}
                 <textarea
-                  className={`w-full p-3 rounded-xl text-xs font-bold ${disputeErrors.reason ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
+                  className={`w-full p-3 rounded-xl text-xs font-bold placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 ${disputeErrors.reason ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent text-zinc-900'}`}
                   rows={3}
                   placeholder="Describe the dispute"
                   value={disputeForm.reason}
@@ -2126,18 +2176,20 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     setDisputeForm(prev => ({ ...prev, reason: e.target.value }));
                     setDisputeErrors(prev => ({ ...prev, reason: '' }));
                   }}
+                  aria-label="Describe the dispute"
                 />
                 {disputeErrors.reason && (
                   <p className="text-[10px] font-bold text-red-600">{disputeErrors.reason}</p>
                 )}
                 <input
-                  className={`w-full p-3 rounded-xl text-xs font-bold ${disputeErrors.amount ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
+                  className={`w-full p-3 rounded-xl text-xs font-bold placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 ${disputeErrors.amount ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent text-zinc-900'}`}
                   placeholder="Dispute amount (KES)"
                   value={disputeForm.amount}
                   onChange={(e) => {
                     setDisputeForm(prev => ({ ...prev, amount: e.target.value }));
                     setDisputeErrors(prev => ({ ...prev, amount: '' }));
                   }}
+                  aria-label="Dispute amount in KES"
                 />
                 {disputeErrors.amount && (
                   <p className="text-[10px] font-bold text-red-600">{disputeErrors.amount}</p>
@@ -2179,8 +2231,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <div className="space-y-2">
                   <input
                     type="file"
-                    className="w-full text-[10px] font-bold"
+                    className="w-full text-[10px] font-bold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 rounded-xl"
                     onChange={(e) => handleEvidenceFileSelect(e.target.files?.[0])}
+                    aria-label="Upload evidence file"
                   />
                   {uploadStatus && (
                     <p className={`text-[10px] font-bold ${uploadStatus.includes('failed') ? 'text-red-600' : 'text-zinc-500'}`}>
@@ -2195,48 +2248,53 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   )}
                 </div>
                 <input
-                  className={`w-full p-2.5 rounded-xl text-[10px] font-bold ${evidenceErrors.fileName ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
+                  className={`w-full p-2.5 rounded-xl text-[10px] font-bold placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 ${evidenceErrors.fileName ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent text-zinc-900'}`}
                   placeholder="File Name"
                   value={evidenceForm.fileName}
                   onChange={(e) => {
                     setEvidenceForm(prev => ({ ...prev, fileName: e.target.value }));
                     setEvidenceErrors(prev => ({ ...prev, fileName: '' }));
                   }}
+                  aria-label="Evidence file name"
                 />
                 {evidenceErrors.fileName && (
                   <p className="text-[10px] font-bold text-red-600">{evidenceErrors.fileName}</p>
                 )}
                 <input
-                  className={`w-full p-2.5 rounded-xl text-[10px] font-bold ${evidenceErrors.mimeType ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent'}`}
+                  className={`w-full p-2.5 rounded-xl text-[10px] font-bold placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 ${evidenceErrors.mimeType ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-zinc-50 border border-transparent text-zinc-900'}`}
                   placeholder="MIME Type"
                   value={evidenceForm.mimeType}
                   onChange={(e) => {
                     setEvidenceForm(prev => ({ ...prev, mimeType: e.target.value }));
                     setEvidenceErrors(prev => ({ ...prev, mimeType: '' }));
                   }}
+                  aria-label="Evidence mime type"
                 />
                 {evidenceErrors.mimeType && (
                   <p className="text-[10px] font-bold text-red-600">{evidenceErrors.mimeType}</p>
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <input
-                    className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold border border-transparent"
+                    className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-900 placeholder:text-zinc-400 border border-transparent focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                     placeholder="GPS Lat (optional)"
                     value={evidenceForm.gpsLat}
                     onChange={(e) => setEvidenceForm(prev => ({ ...prev, gpsLat: e.target.value }))}
+                    aria-label="Evidence GPS latitude optional"
                   />
                   <input
-                    className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold border border-transparent"
+                    className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-900 placeholder:text-zinc-400 border border-transparent focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                     placeholder="GPS Lng (optional)"
                     value={evidenceForm.gpsLng}
                     onChange={(e) => setEvidenceForm(prev => ({ ...prev, gpsLng: e.target.value }))}
+                    aria-label="Evidence GPS longitude optional"
                   />
                 </div>
                 <input
-                  className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold border border-transparent"
+                  className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-900 placeholder:text-zinc-400 border border-transparent focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
                   placeholder="Buyer phone (optional)"
                   value={evidenceForm.buyerPhone}
                   onChange={(e) => setEvidenceForm(prev => ({ ...prev, buyerPhone: e.target.value }))}
+                  aria-label="Buyer phone optional"
                 />
                 {evidenceStatus && (
                   <p className={`text-[10px] font-bold ${evidenceStatus.includes('uploaded') ? 'text-emerald-600' : 'text-amber-600'}`}>
@@ -2245,7 +2303,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 )}
                 <button
                   onClick={handleEvidenceUpload}
-                  className="mt-2 w-full py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black uppercase"
+                  className="mt-2 w-full py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black uppercase focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  aria-label="Upload evidence"
                 >
                   Upload Evidence
                 </button>
@@ -2256,7 +2315,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 </button>
                 <button
                   onClick={() => {
-                    setShowDisputeModal(false);
+                    setModal('dispute', false);
                     setDisputeErrors({});
                     setEvidenceErrors({});
                     setEvidenceStatus(null);
@@ -2278,7 +2337,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           <div className="fixed inset-0 z-[70]">
             <div
               className="absolute inset-0 bg-black/30 backdrop-blur-[1px]"
-              onClick={() => setShowAIChat(false)}
+              onClick={() => setModal('ai-chat', false)}
             />
             <motion.div
               initial={{ opacity: 0, y: 20, scale: 0.98 }}
@@ -2286,7 +2345,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               exit={{ opacity: 0, y: 20, scale: 0.98 }}
               className="absolute bottom-4 right-4 w-[min(420px,90vw)] pointer-events-auto"
             >
-              <ProductAIChat product={activeProduct} onClose={() => setShowAIChat(false)} />
+              <ProductAIChat product={activeProduct} onClose={() => setModal('ai-chat', false)} />
             </motion.div>
           </div>
         )}
@@ -2321,7 +2380,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   </div>
                 </div>
                 <button
-                  onClick={() => setShowMapModal(false)}
+                  onClick={() => setModal('map', false)}
                   className="p-2 rounded-full hover:bg-zinc-100"
                 >
                   <X className="w-5 h-5" />
@@ -2500,10 +2559,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     <div className="text-xs font-black text-zinc-900">Save Recorded Path</div>
                     <button
                       onClick={() => {
-                        setShowRecordingPanel(false);
-                        setRecordingPoints([]);
-                        setRecordingDistance(0);
-                        setRecordingStart(null);
+      setModal('recording', false);
+      setRecordingPoints([]);
+      setRecordingDistance(0);
+      setRecordingStart(null);
                       }}
                       className="text-[10px] font-bold text-zinc-400"
                     >

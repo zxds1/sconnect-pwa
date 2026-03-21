@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft } from 'lucide-react';
 import { Feed } from './components/Feed';
@@ -35,6 +35,45 @@ import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
+
+type AppView =
+  | 'feed'
+  | 'assistant'
+  | 'seller'
+  | 'intelligence'
+  | 'profile'
+  | 'shops'
+  | 'search'
+  | 'settings'
+  | 'comparison'
+  | 'rewards'
+  | 'bag'
+  | 'subscriptions'
+  | 'partnerships'
+  | 'data'
+  | 'notifications'
+  | 'group-buys'
+  | 'login'
+  | 'register'
+  | 'password-reset'
+  | 'auth-onboarding';
+
+type OverlayState =
+  | {
+      kind: 'product-detail';
+      productId: string;
+    }
+  | {
+      kind: 'chat';
+      productId: string;
+    }
+  | {
+      kind: 'support-chat';
+      mode: 'duka' | 'seller-ai' | 'brand';
+    }
+  | {
+      kind: 'rewards-qr';
+    };
 
 const numberOrZero = (value: any) => {
   const n = Number(value);
@@ -79,15 +118,44 @@ const buildProductFromSearch = (result: SearchResult, detail?: any): Product => 
 };
 
 export default function App() {
-  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'notifications' | 'group-buys' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
+  const getInitialView = (): AppView => {
     if (typeof window === 'undefined') return 'assistant';
+    const rawHash = window.location.hash.replace(/^#/, '');
+    const hashView = rawHash as AppView;
+    const hashViews: AppView[] = [
+      'feed',
+      'assistant',
+      'seller',
+      'intelligence',
+      'profile',
+      'shops',
+      'search',
+      'settings',
+      'comparison',
+      'rewards',
+      'bag',
+      'subscriptions',
+      'partnerships',
+      'data',
+      'notifications',
+      'group-buys',
+      'login',
+      'register',
+      'password-reset',
+      'auth-onboarding'
+    ];
+    if (hashViews.includes(hashView)) return hashView;
     try {
       const token = localStorage.getItem('soko:auth_token');
       return token ? 'assistant' : 'login';
     } catch {
       return 'assistant';
     }
-  });
+  };
+
+  const [view, setView] = useState<AppView>(getInitialView);
+  const suppressHistoryPushRef = useRef(false);
+  const didInitHistoryRef = useRef(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [navigationPreset, setNavigationPreset] = useState<{
     pathId?: string;
@@ -170,6 +238,12 @@ export default function App() {
   const [pendingUpdateReload, setPendingUpdateReload] = useState(false);
   const [pendingSellerFastTrack, setPendingSellerFastTrack] = useState(false);
   const [openRewardsQrOnMount, setOpenRewardsQrOnMount] = useState(false);
+
+  const pushBrowserState = (nextView: AppView, overlay?: OverlayState) => {
+    if (typeof window === 'undefined') return;
+    const nextUrl = `${window.location.pathname}${window.location.search}#${nextView}`;
+    window.history.pushState({ view: nextView, overlay }, '', nextUrl);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -269,6 +343,68 @@ export default function App() {
       sw.removeEventListener('controllerchange', handleControllerChange);
     };
   }, [pendingUpdateReload]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const nextUrl = `${window.location.pathname}${window.location.search}#${view}`;
+    if (!didInitHistoryRef.current) {
+      window.history.replaceState({ view }, '', nextUrl);
+      didInitHistoryRef.current = true;
+      return;
+    }
+    if (suppressHistoryPushRef.current) {
+      suppressHistoryPushRef.current = false;
+      window.history.replaceState({ view }, '', nextUrl);
+      return;
+    }
+    window.history.pushState({ view }, '', nextUrl);
+  }, [view]);
+
+  const goBack = () => {
+    if (typeof window === 'undefined') {
+      setView('assistant');
+      return;
+    }
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    setView('assistant');
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = (event: PopStateEvent) => {
+      const nextView = (event.state?.view as AppView | undefined) || getInitialView();
+      const overlay = event.state?.overlay as OverlayState | undefined;
+      const nextProductId = overlay && 'productId' in overlay ? overlay.productId : null;
+      const nextProduct = nextProductId ? products.find((item) => item.id === nextProductId) || null : null;
+      suppressHistoryPushRef.current = true;
+      setView(nextView);
+      if (nextProduct) {
+        setSelectedProduct(nextProduct);
+      }
+      setIsChatOpen(false);
+      setIsProductDetailOpen(false);
+      setSupportChatMode(null);
+      setOpenRewardsQrOnMount(false);
+      setNavigationPreset(null);
+      if (overlay?.kind === 'product-detail') {
+        setIsProductDetailOpen(true);
+      }
+      if (overlay?.kind === 'chat') {
+        setIsChatOpen(true);
+      }
+      if (overlay?.kind === 'support-chat') {
+        setSupportChatMode(overlay.mode);
+      }
+      if (overlay?.kind === 'rewards-qr') {
+        setOpenRewardsQrOnMount(true);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [products]);
 
   useEffect(() => {
     if (view === 'login' || view === 'register' || view === 'password-reset' || view === 'auth-onboarding') {
@@ -372,6 +508,7 @@ export default function App() {
   const handleChatOpen = (product: Product) => {
     setSelectedProduct(product);
     setIsChatOpen(true);
+    pushBrowserState(view, { kind: 'chat', productId: product.id });
     handleInteraction(product.id, 'chat');
   };
 
@@ -379,6 +516,7 @@ export default function App() {
     setSelectedProduct(product);
     setNavigationPreset(null);
     setIsProductDetailOpen(true);
+    pushBrowserState(view, { kind: 'product-detail', productId: product.id });
     handleInteraction(product.id, 'view_detail');
   };
 
@@ -455,6 +593,7 @@ export default function App() {
       autoOpen: true
     });
     setIsProductDetailOpen(true);
+    pushBrowserState(view, { kind: 'product-detail', productId: product.id });
   };
 
   const handleAddToBag = async (product: Product) => {
@@ -489,6 +628,41 @@ export default function App() {
   const handleShopClick = (sellerId: string) => {
     setSelectedSellerId(sellerId);
     setView('profile');
+  };
+
+  const openSupportChat = (mode: 'duka' | 'seller-ai' | 'brand') => {
+    setSupportChatMode(mode);
+    pushBrowserState(view, { kind: 'support-chat', mode });
+  };
+
+  const openRewardsQr = () => {
+    setOpenRewardsQrOnMount(true);
+    pushBrowserState('rewards', { kind: 'rewards-qr' });
+  };
+
+  const closeProductDetail = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    setIsProductDetailOpen(false);
+    setNavigationPreset(null);
+  };
+
+  const closeChat = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    setIsChatOpen(false);
+  };
+
+  const closeSupportChat = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    setSupportChatMode(null);
   };
 
   return (
@@ -597,7 +771,7 @@ export default function App() {
               className="h-full w-full bg-white z-50"
             >
               <Login
-                onBack={() => setView('assistant')}
+                onBack={goBack}
                 onRegisterOpen={() => setView('register')}
                 onResetOpen={() => setView('password-reset')}
                 onAuthenticated={() => setView('assistant')}
@@ -614,7 +788,7 @@ export default function App() {
               className="h-full w-full bg-white z-50"
             >
               <Register
-                onBack={() => setView('login')}
+                onBack={goBack}
                 onLoginOpen={() => setView('login')}
                 onAuthenticated={() => setView('auth-onboarding')}
               />
@@ -630,7 +804,7 @@ export default function App() {
               className="h-full w-full bg-white z-50"
             >
               <PasswordReset
-                onBack={() => setView('login')}
+                onBack={goBack}
                 onLoginOpen={() => setView('login')}
               />
             </motion.div>
@@ -645,7 +819,7 @@ export default function App() {
               className="h-full w-full bg-white z-50"
             >
               <AuthOnboarding
-                onBack={() => setView('register')}
+                onBack={goBack}
                 onFinish={(intent) => {
                   if (intent === 'seller') {
                     setPendingSellerFastTrack(true);
@@ -669,7 +843,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <ComparisonView 
-                onClose={() => setView('search')}
+                onClose={goBack}
                 onProductOpen={handleProductOpen}
               />
             </motion.div>
@@ -686,6 +860,14 @@ export default function App() {
               <Rewards
                 openQrOnMount={openRewardsQrOnMount}
                 onOpenQrHandled={() => setOpenRewardsQrOnMount(false)}
+                onOpenQrRequested={openRewardsQr}
+                onCloseQrRequested={() => {
+                  if (typeof window !== 'undefined' && window.history.state?.overlay?.kind === 'rewards-qr') {
+                    window.history.back();
+                    return;
+                  }
+                  setOpenRewardsQrOnMount(false);
+                }}
               />
             </motion.div>
           )}
@@ -699,7 +881,7 @@ export default function App() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="h-full w-full bg-white z-40"
             >
-              <Subscriptions onBack={() => setView('assistant')} />
+              <Subscriptions onBack={goBack} />
             </motion.div>
           )}
 
@@ -712,7 +894,7 @@ export default function App() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="h-full w-full bg-white z-40"
             >
-                <Partnerships onBack={() => setView('assistant')} />
+                <Partnerships onBack={goBack} />
               </motion.div>
             )}
 
@@ -726,7 +908,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <Bag
-                onBack={() => setView('assistant')}
+                onBack={goBack}
                 onOpenProduct={handleProductOpen}
               />
             </motion.div>
@@ -742,7 +924,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <div className="flex items-center p-4 border-b bg-white sticky top-0 z-10">
-                <button onClick={() => setView('assistant')} className="p-2 hover:bg-zinc-100 rounded-full">
+                <button onClick={goBack} className="p-2 hover:bg-zinc-100 rounded-full">
                   <ArrowLeft className="w-6 h-6" />
                 </button>
                 <img
@@ -758,9 +940,9 @@ export default function App() {
                 onToast={setToast}
                 verifiedSellerIds={verifiedSellerIds}
                 onVerifiedSellerIdsChange={setVerifiedSellerIds}
-                onOpenSellerChat={() => setSupportChatMode('seller-ai')}
-                onOpenSupportChat={() => setSupportChatMode('duka')}
-                onOpenSupplierChat={() => setSupportChatMode('brand')}
+                onOpenSellerChat={() => openSupportChat('seller-ai')}
+                onOpenSupportChat={() => openSupportChat('duka')}
+                onOpenSupplierChat={() => openSupportChat('brand')}
               />
             </motion.div>
           )}
@@ -775,14 +957,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <Profile 
-                onBack={() => {
-                  if (selectedSellerId) {
-                    setSelectedSellerId(null);
-                    setView('assistant');
-                  } else {
-                    setView('assistant');
-                  }
-                }}
+                onBack={goBack}
                 onSettingsOpen={() => setView('settings')}
                 onOpenSellerStudio={handleOpenSellerStudio}
                 onSellerAccountCreated={() => {
@@ -811,7 +986,7 @@ export default function App() {
               className="h-full w-full bg-white z-50"
             >
               <div className="flex items-center p-4 border-b bg-white sticky top-0 z-10">
-                <button onClick={() => setView('profile')} className="p-2 hover:bg-zinc-100 rounded-full">
+                <button onClick={goBack} className="p-2 hover:bg-zinc-100 rounded-full">
                   <ArrowLeft className="w-6 h-6" />
                 </button>
                 <img
@@ -827,8 +1002,8 @@ export default function App() {
                 onOpenProfile={() => setView('profile')}
                 onOpenSecurity={() => setView('password-reset')}
                 onOpenPayments={() => setView('subscriptions')}
-                onOpenSupport={() => setSupportChatMode('duka')}
-                onOpenPolicies={() => setSupportChatMode('duka')}
+                onOpenSupport={() => openSupportChat('duka')}
+                onOpenPolicies={() => openSupportChat('duka')}
               />
             </motion.div>
           )}
@@ -842,7 +1017,7 @@ export default function App() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="h-full w-full bg-white z-50"
             >
-              <Notifications onBack={() => setView('settings')} />
+              <Notifications onBack={goBack} />
             </motion.div>
           )}
 
@@ -855,7 +1030,7 @@ export default function App() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="h-full w-full bg-white z-50"
             >
-              <DataDashboard onBack={() => setView('settings')} />
+              <DataDashboard onBack={goBack} />
             </motion.div>
           )}
 
@@ -868,7 +1043,7 @@ export default function App() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="h-full w-full bg-white z-50"
             >
-              <GroupBuys onBack={() => setView('assistant')} />
+              <GroupBuys onBack={goBack} />
             </motion.div>
           )}
 
@@ -880,10 +1055,10 @@ export default function App() {
           {isChatOpen && (
             <Chat 
               product={selectedProduct} 
-              onClose={() => setIsChatOpen(false)}
+              onClose={closeChat}
               onEscalate={() => {
                 alert("Escalating to seller... A human representative will join shortly.");
-                setIsChatOpen(false);
+                closeChat();
               }}
             />
           )}
@@ -894,15 +1069,11 @@ export default function App() {
           {isProductDetailOpen && selectedProduct && (
             <ProductDetail 
               product={selectedProduct} 
-              onClose={() => {
-                setIsProductDetailOpen(false);
-                setNavigationPreset(null);
-              }}
+              onClose={closeProductDetail}
               onChatOpen={(product) => {
-                setIsProductDetailOpen(false);
                 handleChatOpen(product);
               }}
-              onOpenSupportChat={() => setSupportChatMode('duka')}
+              onOpenSupportChat={() => openSupportChat('duka')}
               onAddToComparison={handleAddToComparison}
               isCompared={comparisonList.some(p => p.id === selectedProduct.id)}
               onBuyNow={handleBuyNow}
@@ -993,17 +1164,17 @@ export default function App() {
 
       {view !== 'assistant' && view !== 'login' && view !== 'register' && view !== 'password-reset' && view !== 'auth-onboarding' && (
         <button
-          onClick={() => setView('assistant')}
+          onClick={goBack}
           className="fixed bottom-6 left-6 z-[90] bg-zinc-900 text-white px-4 py-3 rounded-full text-xs font-bold shadow-2xl"
         >
-          Back to Assistant
+          Back
         </button>
       )}
 
       {supportChatMode && (
         <SupportChat
           mode={supportChatMode}
-          onClose={() => setSupportChatMode(null)}
+          onClose={closeSupportChat}
         />
       )}
     </div>

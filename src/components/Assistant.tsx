@@ -2261,13 +2261,13 @@ useEffect(() => {
             <div className="flex items-center gap-2">
               <button
                 onClick={isRecording ? stopRecording : startRecording}
-                className={`h-11 w-11 rounded-full flex items-center justify-center ${isRecording ? 'bg-emerald-500 text-white' : 'bg-white/10'}`}
+                className={`h-11 w-11 rounded-full flex items-center justify-center ${isRecording ? 'bg-emerald-500 text-white' : 'bg-white/10'} focus:outline-none focus:ring-2 focus:ring-emerald-400/40`}
                 aria-label="Voice message"
               >
                 <Mic className="w-5 h-5" />
               </button>
               <input
-                className="flex-1 min-w-0 h-11 bg-white/10 rounded-full px-4 text-sm outline-none focus:ring-2 focus:ring-emerald-400/40 placeholder:text-white/40"
+                className="flex-1 min-w-0 h-11 bg-white/10 rounded-full px-4 text-sm text-white placeholder:text-white/40 caret-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400/40"
                 placeholder="Ask Sconnect to search, compare, or buy..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -2286,21 +2286,21 @@ useEffect(() => {
               />
               <button
                 onClick={() => mediaInputRef.current?.click()}
-                className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10"
+                className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                 aria-label="Add media"
               >
                 <Plus className="w-5 h-5" />
               </button>
               <button
                 onClick={openCamera}
-                className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10"
+                className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                 aria-label="Open camera"
               >
                 <Camera className="w-5 h-5" />
               </button>
               <button
                 onClick={handleSend}
-                className="h-11 w-11 rounded-full bg-emerald-500 flex items-center justify-center text-white"
+                className="h-11 w-11 rounded-full bg-emerald-500 flex items-center justify-center text-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 aria-label="Send"
               >
                 <Send className="w-5 h-5" />
@@ -2314,7 +2314,9 @@ useEffect(() => {
         <div className="fixed inset-0 z-[90] bg-black/80 flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 text-white">
             <span className="text-sm font-bold">Camera</span>
-            <button onClick={closeCamera} className="text-white/80 hover:text-white">Close</button>
+            <button onClick={closeCamera} className="rounded-full px-2 py-1 text-white/80 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/30" aria-label="Close camera">
+              Close
+            </button>
           </div>
           <div className="flex-1 flex items-center justify-center px-4">
             <div className="w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden border border-white/10">
@@ -2367,7 +2369,7 @@ useEffect(() => {
                       type="button"
                       onClick={() => setProviderMenuOpen((prev) => !prev)}
                       disabled={!allowModelOverride}
-                      className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px] text-left disabled:opacity-50"
+                      className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px] text-left text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                     >
                       {llmProvider
                         ? (modelProviders.find((p) => p.id === llmProvider)?.label || llmProvider)
@@ -2376,7 +2378,7 @@ useEffect(() => {
                     {providerMenuOpen && (
                       <div className="absolute z-10 mt-2 w-full rounded-2xl border border-white/10 bg-slate-950 p-2 space-y-2">
                         <input
-                          className="w-full h-9 rounded-xl bg-white/10 px-3 text-[11px]"
+                          className="w-full h-9 rounded-xl bg-white/10 px-3 text-[11px] text-white placeholder:text-white/40 caret-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                           placeholder="Search providers..."
                           value={providerSearch}
                           onChange={(e) => setProviderSearch(e.target.value)}
@@ -2424,7 +2426,7 @@ useEffect(() => {
                       type="button"
                       onClick={() => setModelMenuOpen((prev) => !prev)}
                       disabled={!allowModelOverride || !llmProvider}
-                      className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px] text-left disabled:opacity-50"
+                      className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px] text-left text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                     >
                       {llmModel
                         ? (providerModels.find((m) => m.id === llmModel)?.label || llmModel)
@@ -2433,7 +2435,7 @@ useEffect(() => {
                     {modelMenuOpen && (
                       <div className="absolute z-10 mt-2 w-full rounded-2xl border border-white/10 bg-slate-950 p-2 space-y-2">
                         <input
-                          className="w-full h-9 rounded-xl bg-white/10 px-3 text-[11px]"
+                          className="w-full h-9 rounded-xl bg-white/10 px-3 text-[11px] text-white placeholder:text-white/40 caret-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                           placeholder="Search models..."
                           value={modelSearch}
                           onChange={(e) => setModelSearch(e.target.value)}

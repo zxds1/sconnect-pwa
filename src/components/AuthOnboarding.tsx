@@ -3,8 +3,8 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Sparkles, Store, ShoppingBag } from 'lucide-react';
 import { postAssistantEvent } from '../lib/assistantApi';
 import { postAnalyticsEvent } from '../lib/analyticsApi';
-import { setSellerShopType as setSellerShopTypeApi } from '../lib/sellerOnboardingApi';
-import { updateSellerProfile } from '../lib/sellerProfileApi';
+import { getSellerOnboardingState, setSellerShopType as setSellerShopTypeApi } from '../lib/sellerOnboardingApi';
+import { getSellerProfile, updateSellerProfile } from '../lib/sellerProfileApi';
 
 interface AuthOnboardingProps {
   onBack?: () => void;
@@ -49,6 +49,44 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
   React.useEffect(() => {
     trackEvent({ action: 'view' });
     trackAnalytics({ action: 'view' });
+  }, []);
+
+  React.useEffect(() => {
+    let ignore = false;
+    const loadSellerSetup = async () => {
+      try {
+        const [onboarding, profile] = await Promise.all([
+          getSellerOnboardingState().catch(() => null),
+          getSellerProfile().catch(() => null),
+        ]);
+        if (ignore) return;
+        if (onboarding?.shop_type) {
+          setSellerShopType(onboarding.shop_type as typeof sellerShopType);
+        }
+        const resolvedMode = profile?.seller_mode || onboarding?.seller_mode;
+        if (resolvedMode) {
+          setSellerMode(resolvedMode as typeof sellerMode);
+          setIntent('seller');
+        }
+        if (profile?.whatsapp_number || onboarding?.whatsapp_number) {
+          setSellerWhatsApp(profile?.whatsapp_number || onboarding?.whatsapp_number || '');
+        }
+        if (typeof profile?.delivery_radius_km === 'number' || typeof onboarding?.delivery_radius_km === 'number') {
+          setSellerDeliveryRadius(String(profile?.delivery_radius_km ?? onboarding?.delivery_radius_km ?? ''));
+        }
+        if (profile?.market_name) setSellerMarketName(profile.market_name);
+        if (profile?.visual_marker) setSellerVisualMarker(profile.visual_marker);
+        if (onboarding?.shop_type || resolvedMode || profile?.whatsapp_number) {
+          setIntent('seller');
+        }
+      } catch {
+        // Best effort only; the form still works without prefill.
+      }
+    };
+    loadSellerSetup();
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   const handleContinue = async () => {

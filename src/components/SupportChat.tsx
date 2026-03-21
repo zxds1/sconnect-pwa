@@ -737,12 +737,18 @@ export const SupportChat: React.FC<{
         <div className="flex items-center gap-1">
           <button
             onClick={() => setIsMinimized(true)}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors"
+            className="p-2 hover:bg-white/10 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-white/30"
             title="Minimize"
+            aria-label="Minimize chat"
           >
             <Minus className="w-5 h-5" />
           </button>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Close">
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-white/10 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-white/30"
+            title="Close"
+            aria-label="Close support chat"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -895,23 +901,26 @@ export const SupportChat: React.FC<{
           <button
             onClick={handlePickAttachment}
             disabled={uploading || !threadId}
-            className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50"
+            className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+            aria-label="Attach a file"
           >
             <Paperclip className="w-4 h-4" />
           </button>
           <button
             onClick={openCamera}
             disabled={uploading || !threadId}
-            className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50"
+            className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
             title="Open camera"
+            aria-label="Open camera"
           >
             <Camera className="w-4 h-4" />
           </button>
           <button
             onClick={isRecording ? handleStopRecording : handleTranscribe}
             disabled={transcribing}
-            className={`p-2 rounded-full ${isRecording ? 'bg-red-500 text-white' : 'bg-[#eaf2ff] text-[#1976D2]'} disabled:opacity-50`}
+            className={`p-2 rounded-full ${isRecording ? 'bg-red-500 text-white' : 'bg-[#eaf2ff] text-[#1976D2]'} disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30`}
             title={isRecording ? 'Stop recording' : 'Record voice'}
+            aria-label={isRecording ? 'Stop voice recording' : 'Record voice message'}
           >
             <Mic className="w-4 h-4" />
           </button>
@@ -935,12 +944,14 @@ export const SupportChat: React.FC<{
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Type a message..."
-            className="flex-1 px-4 py-3 bg-[#f1f6ff] rounded-full focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40 text-sm"
+            aria-label="Message input"
+            className="flex-1 px-4 py-3 bg-[#f1f6ff] rounded-full text-sm text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || loading || !threadId}
-            className="p-3 bg-[#1976D2] text-white rounded-full disabled:opacity-50 transition-opacity"
+            className="p-3 bg-[#1976D2] text-white rounded-full disabled:opacity-50 transition-opacity focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
+            aria-label="Send message"
           >
             <Send className="w-5 h-5" />
           </button>
@@ -951,7 +962,8 @@ export const SupportChat: React.FC<{
             <button
               onClick={handleEscalate}
               disabled={escalating || !threadId || !!ticketId}
-              className="px-2 py-1 rounded-full border border-[#d6e6fa] text-[#1976D2] disabled:opacity-50"
+              className="px-2 py-1 rounded-full border border-[#d6e6fa] text-[#1976D2] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+              aria-label={ticketId ? 'Chat already escalated' : 'Escalate chat'}
             >
               {ticketId ? 'Escalated' : escalating ? 'Escalating…' : 'Escalate'}
             </button>
@@ -964,7 +976,13 @@ export const SupportChat: React.FC<{
       <div className="fixed inset-0 z-[60] bg-black/80 flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 text-white">
           <span className="text-sm font-bold">Camera</span>
-          <button onClick={closeCamera} className="text-white/80 hover:text-white">Close</button>
+          <button
+            onClick={closeCamera}
+            className="rounded-full px-2 py-1 text-white/80 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+            aria-label="Close camera"
+          >
+            Close
+          </button>
         </div>
         <div className="flex-1 flex items-center justify-center px-4">
           <div className="w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden border border-white/10">
@@ -977,14 +995,16 @@ export const SupportChat: React.FC<{
         <div className="flex items-center justify-center gap-4 px-4 pb-6">
           <button
             onClick={closeCamera}
-            className="px-4 py-2 rounded-full bg-white/10 text-white text-[10px] font-black"
+            className="px-4 py-2 rounded-full bg-white/10 text-white text-[10px] font-black focus:outline-none focus:ring-2 focus:ring-white/30"
+            aria-label="Cancel camera"
           >
             Cancel
           </button>
           <button
             onClick={handleCapturePhoto}
             disabled={cameraBusy}
-            className="px-6 py-2 rounded-full bg-emerald-500 text-white text-[10px] font-black disabled:opacity-50"
+            className="px-6 py-2 rounded-full bg-emerald-500 text-white text-[10px] font-black disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+            aria-label="Capture photo"
           >
             Capture
           </button>

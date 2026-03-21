@@ -165,12 +165,13 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
             <button
               onClick={handleEscalate}
               disabled={isEscalating || !threadId}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors text-emerald-300"
+              className="p-2 hover:bg-white/10 rounded-full transition-colors text-emerald-300 focus:outline-none focus:ring-2 focus:ring-white/30 disabled:opacity-50"
               title="Escalate to seller"
+              aria-label="Escalate to seller"
             >
               <PhoneCall className="w-5 h-5" />
             </button>
-            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-white/30" aria-label="Close product chat">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -274,19 +275,21 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
           <div className="relative">
             <input
               type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Ask about this product..."
-              className="w-full pl-4 pr-12 py-3 bg-[#f1f6ff] rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || isLoading || !threadId}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-zinc-900 text-white rounded-lg disabled:opacity-50 transition-opacity"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Ask about this product..."
+            aria-label="Message input"
+            className="w-full pl-4 pr-12 py-3 bg-[#f1f6ff] rounded-xl text-xs font-medium text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isLoading || !threadId}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-zinc-900 text-white rounded-lg disabled:opacity-50 transition-opacity focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            aria-label="Send message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
           </div>
         </div>
       </motion.div>

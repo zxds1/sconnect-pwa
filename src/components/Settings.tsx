@@ -55,25 +55,13 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     watched_items: false
   });
   const [theme, setTheme] = React.useState<'light' | 'dark' | 'system'>(() => {
-    try {
-      const stored = localStorage.getItem('soko:theme');
-      if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
-    } catch {}
     return 'system';
   });
   const [voiceFeedback, setVoiceFeedback] = React.useState(() => {
-    try {
-      return localStorage.getItem('soko:voice_feedback') === 'true';
-    } catch {
-      return false;
-    }
+    return false;
   });
   const [voiceDirections, setVoiceDirections] = React.useState(() => {
-    try {
-      return localStorage.getItem('soko:voice_directions') === 'true';
-    } catch {
-      return false;
-    }
+    return false;
   });
   const [uiPrefsLoaded, setUiPrefsLoaded] = React.useState(false);
   const [dataSummary, setDataSummary] = React.useState({
@@ -188,6 +176,7 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
         if (comparison?.comparison_profile) {
           setComparisonProfile(comparison.comparison_profile);
         }
+        setUiPrefsLoaded(true);
       } catch {
         if (!ignore) {
           setDataSummary({ searches: 0, receipts: 0, purchases: 0, reviews: 0 });
@@ -338,17 +327,11 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
 
   React.useEffect(() => {
     if (!uiPrefsLoaded) return;
-    try {
-      localStorage.setItem('soko:voice_feedback', voiceFeedback ? 'true' : 'false');
-    } catch {}
     void persistUiPrefs({ voiceFeedback });
   }, [voiceFeedback, uiPrefsLoaded]);
 
   React.useEffect(() => {
     if (!uiPrefsLoaded) return;
-    try {
-      localStorage.setItem('soko:voice_directions', voiceDirections ? 'true' : 'false');
-    } catch {}
     void persistUiPrefs({ voiceDirections });
   }, [voiceDirections, uiPrefsLoaded]);
 
@@ -357,9 +340,6 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const resolved = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
     document.documentElement.dataset.theme = resolved;
-    try {
-      localStorage.setItem('soko:theme', theme);
-    } catch {}
     void persistUiPrefs({ theme });
   }, [theme, uiPrefsLoaded]);
 

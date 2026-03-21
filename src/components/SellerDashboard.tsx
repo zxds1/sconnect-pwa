@@ -399,6 +399,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const mediaDrawerInputRef = useRef<HTMLInputElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState('onboarding');
+  const sellerTabHistoryReadyRef = useRef(false);
+  const sellerTabSuppressPushRef = useRef(false);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [seller, setSeller] = useState<Seller>(EMPTY_SELLER);
@@ -460,6 +462,39 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [campaignStatus, setCampaignStatus] = useState<string | null>(null);
   const [campaignLoading, setCampaignLoading] = useState(false);
   const [referralPhone, setReferralPhone] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = (event: PopStateEvent) => {
+      const nextTab = String(event.state?.sellerTab || '');
+      if (!nextTab) return;
+      sellerTabSuppressPushRef.current = true;
+      setActiveTab(nextTab);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const nextState = { ...(window.history.state || {}), sellerTab: activeTab };
+    const nextUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (!sellerTabHistoryReadyRef.current) {
+      window.history.replaceState(nextState, '', nextUrl);
+      sellerTabHistoryReadyRef.current = true;
+      return;
+    }
+    if (sellerTabSuppressPushRef.current) {
+      sellerTabSuppressPushRef.current = false;
+      window.history.replaceState(nextState, '', nextUrl);
+      return;
+    }
+    window.history.pushState(nextState, '', nextUrl);
+  }, [activeTab]);
+
+  const selectTab = (tabId: string) => {
+    setActiveTab(tabId);
+  };
 
   useEffect(() => {
     if (!seller.id) return;
@@ -4472,7 +4507,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => selectTab(tab.id)}
             className={`flex-none px-6 flex flex-col items-center py-3 gap-1 transition-colors ${
               activeTab === tab.id ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-zinc-400'
             }`}
@@ -4692,7 +4727,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Delivery Details</p>
                   <p className="text-sm font-bold text-zinc-900">Share how buyers can reach you</p>
-                  <p className="text-[10px] text-zinc-500">Required for all seller modes.</p>
+                  <p className="text-[10px] text-zinc-500">Required for all seller modes. Save once and reuse it everywhere.</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -4934,23 +4969,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 )}
                 <label className="text-[10px] font-bold text-zinc-500">
                   Daily Latitude
-                  <input
-                    type="number"
-                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                    value={dailyLat}
-                    onChange={(e) => setDailyLat(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="-4.0435"
-                  />
+                    <input
+                      type="number"
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={dailyLat}
+                      onChange={(e) => setDailyLat(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="-4.0435"
+                    />
                 </label>
                 <label className="text-[10px] font-bold text-zinc-500">
                   Daily Longitude
-                  <input
-                    type="number"
-                    className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                    value={dailyLng}
-                    onChange={(e) => setDailyLng(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="39.6682"
-                  />
+                    <input
+                      type="number"
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={dailyLng}
+                      onChange={(e) => setDailyLng(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="39.6682"
+                    />
                 </label>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -4999,137 +5034,137 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     </select>
                   </label>
                   {isShopify && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Shop Domain
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.shop_domain || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, shop_domain: e.target.value }))}
-                        placeholder="yourstore.myshopify.com"
-                      />
-                    </label>
-                  )}
-                  {(isWoo || isOpenCart || isCustom || isMarketplace) && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Store Base URL
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.api_base_url || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_base_url: e.target.value }))}
-                        placeholder="https://store.example.com"
-                      />
-                    </label>
-                  )}
-                  {!isCSV && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      API Key / Token
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.api_key || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_key: e.target.value }))}
-                        placeholder={isShopify ? 'OAuth access token (auto after auth)' : 'secure token'}
-                      />
-                    </label>
-                  )}
-                  {(isWoo || isCustom || isMarketplace) && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      API Secret
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.api_secret || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_secret: e.target.value }))}
-                        placeholder="secret key"
-                      />
-                    </label>
-                  )}
-                  {(isCustom || isMarketplace || isOpenCart) && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Products Endpoint
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.products_endpoint || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, products_endpoint: e.target.value }))}
-                        placeholder="/api/products"
-                      />
-                    </label>
-                  )}
-                  {(isCustom || isMarketplace || isOpenCart) && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Orders Endpoint
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.orders_endpoint || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, orders_endpoint: e.target.value }))}
-                        placeholder="/api/orders"
-                      />
-                    </label>
-                  )}
-                  {(isCustom || isMarketplace) && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Demand Endpoint (optional)
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.demand_endpoint || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, demand_endpoint: e.target.value }))}
-                        placeholder="/api/demand"
-                      />
-                    </label>
-                  )}
-                  {isCSV && (
-                    <label className="text-[10px] font-bold text-zinc-500 sm:col-span-2">
-                      CSV Import URL
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.csv_import_url || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, csv_import_url: e.target.value }))}
-                        placeholder="https://files.example.com/products.csv"
-                      />
-                    </label>
-                  )}
-                  {!isCSV && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Webhook Secret
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.webhook_secret || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_secret: e.target.value }))}
-                        placeholder="auto-generated secret"
-                      />
-                    </label>
-                  )}
-                  {!isCSV && (
-                    <label className="text-[10px] font-bold text-zinc-500 sm:col-span-2">
-                      Webhook URL
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.webhook_url || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_url: e.target.value }))}
-                        placeholder="https://yourstore.com/sokoconnect/webhook"
-                      />
-                    </label>
-                  )}
-                  {isShopify && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      OAuth Code (after auth)
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.auth_code || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, auth_code: e.target.value }))}
-                        placeholder="Paste Shopify auth code"
-                      />
-                    </label>
-                  )}
-                  {isShopify && (
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Scopes (optional)
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={onlineConnectForm.scopes || ''}
-                        onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, scopes: e.target.value }))}
-                        placeholder="read_products,read_orders,read_customers"
-                      />
-                    </label>
-                  )}
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Shop Domain
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.shop_domain || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, shop_domain: e.target.value }))}
+                      placeholder="yourstore.myshopify.com"
+                    />
+                  </label>
+                )}
+                {(isWoo || isOpenCart || isCustom || isMarketplace) && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Store Base URL
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.api_base_url || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_base_url: e.target.value }))}
+                      placeholder="https://store.example.com"
+                    />
+                  </label>
+                )}
+                {!isCSV && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    API Key / Token
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.api_key || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_key: e.target.value }))}
+                      placeholder={isShopify ? 'OAuth access token (auto after auth)' : 'secure token'}
+                    />
+                  </label>
+                )}
+                {(isWoo || isCustom || isMarketplace) && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    API Secret
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.api_secret || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, api_secret: e.target.value }))}
+                      placeholder="secret key"
+                    />
+                  </label>
+                )}
+                {(isCustom || isMarketplace || isOpenCart) && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Products Endpoint
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.products_endpoint || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, products_endpoint: e.target.value }))}
+                      placeholder="/api/products"
+                    />
+                  </label>
+                )}
+                {(isCustom || isMarketplace || isOpenCart) && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Orders Endpoint
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.orders_endpoint || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, orders_endpoint: e.target.value }))}
+                      placeholder="/api/orders"
+                    />
+                  </label>
+                )}
+                {(isCustom || isMarketplace) && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Demand Endpoint (optional)
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.demand_endpoint || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, demand_endpoint: e.target.value }))}
+                      placeholder="/api/demand"
+                    />
+                  </label>
+                )}
+                {isCSV && (
+                  <label className="text-[10px] font-bold text-zinc-500 sm:col-span-2">
+                    CSV Import URL
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.csv_import_url || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, csv_import_url: e.target.value }))}
+                      placeholder="https://files.example.com/products.csv"
+                    />
+                  </label>
+                )}
+                {!isCSV && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Webhook Secret
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.webhook_secret || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_secret: e.target.value }))}
+                      placeholder="auto-generated secret"
+                    />
+                  </label>
+                )}
+                {!isCSV && (
+                  <label className="text-[10px] font-bold text-zinc-500 sm:col-span-2">
+                    Webhook URL
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.webhook_url || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_url: e.target.value }))}
+                      placeholder="https://yourstore.com/sokoconnect/webhook"
+                    />
+                  </label>
+                )}
+                {isShopify && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    OAuth Code (after auth)
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.auth_code || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, auth_code: e.target.value }))}
+                      placeholder="Paste Shopify auth code"
+                    />
+                  </label>
+                )}
+                {isShopify && (
+                  <label className="text-[10px] font-bold text-zinc-500">
+                    Scopes (optional)
+                    <input
+                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
+                      value={onlineConnectForm.scopes || ''}
+                      onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, scopes: e.target.value }))}
+                      placeholder="read_products,read_orders,read_customers"
+                    />
+                  </label>
+                )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -7255,6 +7290,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     onChange={(e) => setCampaignForm(prev => ({ ...prev, name: e.target.value }))}
                     className="w-full p-3 bg-zinc-50 border-none rounded-xl text-xs font-bold"
                   />
+                  <p className="text-[9px] text-zinc-400 font-bold">Use a name you will recognize later.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -7305,6 +7341,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                       onChange={(e) => setCampaignForm(prev => ({ ...prev, budget: Number(e.target.value) }))}
                       className="w-full p-3 bg-zinc-50 border-none rounded-xl text-xs font-bold"
                     />
+                    <p className="text-[9px] text-zinc-400 font-bold">This is the total amount you want to spend.</p>
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black uppercase text-zinc-400">Duration (days)</label>
@@ -8118,21 +8155,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   />
                   <input
                     type="number"
-                    placeholder="Max unit cost"
                     className="w-full p-2.5 bg-zinc-50 border-none rounded-xl text-xs font-bold"
                     value={supplierFilters.maxUnitCost}
                     onChange={(e) => setSupplierFilters(prev => ({ ...prev, maxUnitCost: Number(e.target.value) }))}
                   />
                   <input
                     type="number"
-                    placeholder="Max MOQ"
                     className="w-full p-2.5 bg-zinc-50 border-none rounded-xl text-xs font-bold"
                     value={supplierFilters.maxMOQ}
                     onChange={(e) => setSupplierFilters(prev => ({ ...prev, maxMOQ: Number(e.target.value) }))}
                   />
                   <input
                     type="number"
-                    placeholder="Max lead time"
                     className="w-full p-2.5 bg-zinc-50 border-none rounded-xl text-xs font-bold"
                     value={supplierFilters.maxLeadTime}
                     onChange={(e) => setSupplierFilters(prev => ({ ...prev, maxLeadTime: Number(e.target.value) }))}
@@ -8841,11 +8875,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Phone Number</label>
                   <input 
                     type="tel" 
-                    placeholder="+254..." 
                     value={referralPhone}
                     onChange={(e) => setReferralPhone(e.target.value)}
                     className="w-full p-4 bg-zinc-100 rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
+                  <p className="text-[9px] text-zinc-400 font-bold">Add the number you want to invite or share with.</p>
                 </div>
               </div>
               <div className="flex gap-3">
