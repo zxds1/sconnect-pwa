@@ -3,6 +3,7 @@ import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug
 import { Product } from '../types';
 import {
   createMessage,
+  createMessageFeedback,
   createThread,
   deleteThread,
   getAssistantPreferences,
@@ -86,6 +87,9 @@ type AssistantChat = {
 };
 
 type SummaryStat = Record<string, any>;
+
+const feedbackIntents = ['general', 'shopping', 'compare', 'bag', 'rfq', 'seller', 'support', 'search', 'analytics', 'ops', 'admin', 'compliance'];
+const feedbackProfiles = ['default', 'buyer', 'compare', 'bag', 'rfq', 'seller', 'support', 'search', 'analytics', 'ops', 'admin', 'compliance'];
 
 interface AssistantProps {
   products: Product[];
@@ -201,6 +205,15 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [rewardStreaks, setRewardStreaks] = useState<RewardsStreak[]>([]);
   const [notificationSummary, setNotificationSummary] = useState<NotificationListResponse | null>(null);
   const [favoriteShops, setFavoriteShops] = useState<any[]>([]);
+  const [messageFeedbackTarget, setMessageFeedbackTarget] = useState<{ messageId: string; threadId: string } | null>(null);
+  const [messageFeedbackRating, setMessageFeedbackRating] = useState('3');
+  const [messageFeedbackOutcome, setMessageFeedbackOutcome] = useState('needs_correction');
+  const [messageFeedbackComment, setMessageFeedbackComment] = useState('');
+  const [messageFeedbackCorrection, setMessageFeedbackCorrection] = useState('');
+  const [messageFeedbackCorrectIntent, setMessageFeedbackCorrectIntent] = useState('support');
+  const [messageFeedbackCorrectProfile, setMessageFeedbackCorrectProfile] = useState('support');
+  const [messageFeedbackUseInPlanner, setMessageFeedbackUseInPlanner] = useState(true);
+  const [messageFeedbackSaving, setMessageFeedbackSaving] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
@@ -1268,6 +1281,52 @@ export const Assistant: React.FC<AssistantProps> = ({
     }
   };
 
+  const openMessageFeedback = (messageId: string) => {
+    setMessageFeedbackTarget({ messageId, threadId: activeChatId });
+    setMessageFeedbackRating('3');
+    setMessageFeedbackOutcome('needs_correction');
+    setMessageFeedbackComment('');
+    setMessageFeedbackCorrection('');
+    setMessageFeedbackCorrectIntent('support');
+    setMessageFeedbackCorrectProfile('support');
+    setMessageFeedbackUseInPlanner(true);
+  };
+
+  const submitMessageFeedback = async (quick = false, messageIdOverride?: string) => {
+    const targetMessageId = messageIdOverride || messageFeedbackTarget?.messageId;
+    const targetThreadId = messageFeedbackTarget?.threadId || activeChatId;
+    if (!targetMessageId || !targetThreadId) return;
+    setMessageFeedbackSaving(true);
+    try {
+      let correction: Record<string, any> | undefined;
+      const rawCorrection = messageFeedbackCorrection.trim();
+      if (!quick && rawCorrection) {
+        correction = JSON.parse(rawCorrection);
+      }
+      await createMessageFeedback(targetThreadId, targetMessageId, {
+        rating: quick ? 5 : Math.max(1, Math.min(5, Number(messageFeedbackRating) || 3)),
+        outcome: quick ? 'helpful' : messageFeedbackOutcome.trim() || undefined,
+        comment: quick ? 'Helpful' : messageFeedbackComment.trim() || undefined,
+        user_response_text: quick ? undefined : messageFeedbackComment.trim() || undefined,
+        correction: quick ? undefined : correction,
+        correct_intent: quick ? undefined : messageFeedbackCorrectIntent.trim() || undefined,
+        correct_agent_profile: quick ? undefined : messageFeedbackCorrectProfile.trim() || undefined,
+        use_in_planner: quick ? true : messageFeedbackUseInPlanner,
+      });
+      setMessageFeedbackTarget(null);
+      setMessageFeedbackRating('3');
+      setMessageFeedbackOutcome('needs_correction');
+      setMessageFeedbackComment('');
+      setMessageFeedbackCorrection('');
+      setMessageFeedbackUseInPlanner(true);
+      onToast(quick ? 'Marked as helpful.' : 'Correction sent to the assistant.');
+    } catch (err: any) {
+      onToast(err?.message || 'Unable to save message feedback.');
+    } finally {
+      setMessageFeedbackSaving(false);
+    }
+  };
+
   const handleAssistantMedia = React.useCallback(async (file: File) => {
     if (!activeChatId) return;
     if (mediaUploading) return;
@@ -2191,6 +2250,111 @@ useEffect(() => {
                             {action.label}
                           </button>
                         ))}
+                      </div>
+                    )}
+                    {msg.role === 'assistant' && msg.id && (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void submitMessageFeedback(true, msg.id!)}
+                            disabled={messageFeedbackSaving && (messageFeedbackTarget?.messageId === msg.id || messageFeedbackTarget == null)}
+                            className="px-3 py-2 bg-emerald-500/10 rounded-full text-[10px] font-bold hover:bg-emerald-500/20 transition-colors"
+                          >
+                            Helpful
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openMessageFeedback(msg.id!)}
+                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                          >
+                            Correct this
+                          </button>
+                        </div>
+                        {messageFeedbackTarget?.messageId === msg.id && (
+                          <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">Correction feedback</div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <label className="grid gap-1 text-[11px]">
+                                <span>Rating</span>
+                                <select className="input" value={messageFeedbackRating} onChange={(e) => setMessageFeedbackRating(e.target.value)}>
+                                  <option value="5">5 - excellent</option>
+                                  <option value="4">4 - good</option>
+                                  <option value="3">3 - partial</option>
+                                  <option value="2">2 - weak</option>
+                                  <option value="1">1 - wrong</option>
+                                </select>
+                              </label>
+                              <label className="grid gap-1 text-[11px]">
+                                <span>Outcome</span>
+                                <input className="input" value={messageFeedbackOutcome} onChange={(e) => setMessageFeedbackOutcome(e.target.value)} placeholder="correct, partial, wrong" />
+                              </label>
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <label className="grid gap-1 text-[11px]">
+                                <span>Correct intent</span>
+                                <select className="input" value={messageFeedbackCorrectIntent} onChange={(e) => setMessageFeedbackCorrectIntent(e.target.value)}>
+                                  {feedbackIntents.map((intent) => (
+                                    <option key={intent} value={intent}>{intent}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="grid gap-1 text-[11px]">
+                                <span>Correct profile</span>
+                                <select className="input" value={messageFeedbackCorrectProfile} onChange={(e) => setMessageFeedbackCorrectProfile(e.target.value)}>
+                                  {feedbackProfiles.map((profile) => (
+                                    <option key={profile} value={profile}>{profile}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+                            <label className="flex items-center gap-2 text-[11px]">
+                              <input
+                                type="checkbox"
+                                checked={messageFeedbackUseInPlanner}
+                                onChange={(e) => setMessageFeedbackUseInPlanner(e.target.checked)}
+                              />
+                              <span>Use this correction in the next planner prompt</span>
+                            </label>
+                            <label className="grid gap-1 text-[11px]">
+                              <span>Comment</span>
+                              <textarea
+                                className="input"
+                                rows={3}
+                                value={messageFeedbackComment}
+                                onChange={(e) => setMessageFeedbackComment(e.target.value)}
+                                placeholder="What should the assistant have answered instead?"
+                              />
+                            </label>
+                            <label className="grid gap-1 text-[11px]">
+                              <span>Correction JSON</span>
+                              <textarea
+                                className="input"
+                                rows={4}
+                                value={messageFeedbackCorrection}
+                                onChange={(e) => setMessageFeedbackCorrection(e.target.value)}
+                                placeholder='{"correct_intent":"support","correct_agent_profile":"support"}'
+                              />
+                            </label>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void submitMessageFeedback(false)}
+                                disabled={messageFeedbackSaving}
+                                className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                              >
+                                Save correction
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMessageFeedbackTarget(null)}
+                                className="px-3 py-2 bg-transparent rounded-full text-[10px] font-bold border border-white/10 hover:bg-white/10 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

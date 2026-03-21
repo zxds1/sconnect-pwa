@@ -29,6 +29,9 @@ export default defineConfig(({mode}) => {
       react(),
       tailwindcss(),
       VitePWA({
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.ts',
         registerType: 'autoUpdate',
         injectRegister: 'auto',
         minify: false,
@@ -61,106 +64,8 @@ export default defineConfig(({mode}) => {
             }
           ]
         },
-        workbox: {
+        injectManifest: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff2}'],
-          runtimeCaching: [
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/intelligence(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-intelligence',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 50,
-                  maxAgeSeconds: 10
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/search(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-search',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 100,
-                  maxAgeSeconds: 300
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/analytics\/(?:dashboard|funnel|inventory|buyers|market|anomalies)(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-analytics',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 50,
-                  maxAgeSeconds: 15
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/seller\/(?:growth|financial|channel-mix|market|customers|alerts|live-buyers|peak-hours|timeseries|sales|top-products)(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-seller-analytics',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 100,
-                  maxAgeSeconds: 15
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/feed(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-feed',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 40,
-                  maxAgeSeconds: 30
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/groupbuy\/instances(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-groupbuy-instances',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 40,
-                  maxAgeSeconds: 300
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/paths(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-paths',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 40,
-                  maxAgeSeconds: 3600
-                }
-              }
-            },
-            {
-              urlPattern: /^https?:\/\/.*\/v1\/navigation(?:\/|$)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-navigation',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 30,
-                  maxAgeSeconds: 3600
-                }
-              }
-            }
-          ]
         },
         devOptions: {
           enabled: isDev

@@ -52,12 +52,14 @@ a {
 }
 
 .nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
   padding: 10px 12px;
   border-radius: 12px;
   color: var(--muted);
   margin-bottom: 8px;
   border: 1px solid transparent;
+  gap: 10px;
 }
 
 .nav-item.active {

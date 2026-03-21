@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
+import { listAssistantRuns } from "../lib/assistantRunsApi";
 
 const navItems = [
   { path: "/", label: "Dashboard" },
@@ -18,6 +20,24 @@ const navItems = [
 ];
 
 export const Sidebar = () => {
+  const [needsReviewCount, setNeedsReviewCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listAssistantRuns({ needs_review: true, limit: 100 })
+      .then((resp) => {
+        if (!active) return;
+        setNeedsReviewCount(resp.items?.length ?? 0);
+      })
+      .catch(() => {
+        if (!active) return;
+        setNeedsReviewCount(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <aside className="sidebar">
       <h1>SokoConnect Admin</h1>
@@ -29,7 +49,12 @@ export const Sidebar = () => {
             to={item.path}
             className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           >
-            {item.label}
+            <span>{item.label}</span>
+            {item.path === "/assistant-models" && needsReviewCount !== null && needsReviewCount > 0 && (
+              <span className="badge warn" style={{ marginLeft: "auto" }}>
+                {needsReviewCount}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

@@ -9,6 +9,8 @@ const OPS_KEYS = [
   { key: "pricing.anomaly_warning", label: "Pricing Anomaly Warning" },
   { key: "partnerships.brand_chat", label: "Partnerships Brand Chat" },
   { key: "content.onboarding", label: "Onboarding Content" },
+  { key: "assistant.prompt_options", label: "Assistant Prompt Options" },
+  { key: "assistant.agentic_options", label: "Assistant Agentic Options" },
 ];
 
 export const OpsConfigs = () => {
@@ -137,6 +139,21 @@ export const OpsConfigs = () => {
             if (!isString(model?.id)) return "Each model needs an id.";
           }
         }
+        return null;
+      case "assistant.prompt_options":
+        if (typeof value?.enabled !== "boolean") return "enabled must be true/false.";
+        if (!isString(value?.system_version)) return "system_version is required.";
+        if (typeof value?.agent_versions !== "object" || value?.agent_versions === null) return "agent_versions must be an object.";
+        if (typeof value?.template_versions !== "object" || value?.template_versions === null) return "template_versions must be an object.";
+        if (typeof value?.profile_map !== "object" || value?.profile_map === null) return "profile_map must be an object.";
+        return null;
+      case "assistant.agentic_options":
+        if (typeof value?.enabled !== "boolean") return "enabled must be true/false.";
+        if (typeof value?.confirm_side_effects !== "boolean") return "confirm_side_effects must be true/false.";
+        if (typeof value?.allow_autonomous_reads !== "boolean") return "allow_autonomous_reads must be true/false.";
+        if (typeof value?.intent_profiles !== "object" || value?.intent_profiles === null) return "intent_profiles must be an object.";
+        if (typeof value?.confirmable_tool_actions !== "object" || value?.confirmable_tool_actions === null) return "confirmable_tool_actions must be an object.";
+        if (typeof value?.read_only_tool_actions !== "object" || value?.read_only_tool_actions === null) return "read_only_tool_actions must be an object.";
         return null;
       case "route_multipliers":
         return (

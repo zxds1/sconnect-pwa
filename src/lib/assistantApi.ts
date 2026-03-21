@@ -58,6 +58,25 @@ export type AssistantToolHistory = {
   created_at?: string;
 };
 
+export type AssistantMessageFeedback = {
+  id: string;
+  tenant_id: string;
+  thread_id: string;
+  user_id: string;
+  assistant_message_id: string;
+  run_id?: string;
+  rating: number;
+  outcome?: string;
+  comment?: string;
+  user_response_text?: string;
+  correct_intent?: string;
+  correct_agent_profile?: string;
+  use_in_planner?: boolean;
+  correction?: Record<string, any>;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type AssistantMemory = {
   id: string;
   key: string;
@@ -212,6 +231,25 @@ export const runVisionSearch = async (body: { image_url: string; query?: string 
 
 export const executeTool = async (body: { tool: string; params?: Record<string, any>; thread_id?: string }): Promise<any> =>
   apiFetch('/v1/assistant/tools/execute', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const createMessageFeedback = async (
+  threadId: string,
+  messageId: string,
+  body: {
+    rating: number;
+    outcome?: string;
+    comment?: string;
+    user_response_text?: string;
+    correction?: Record<string, any>;
+    correct_intent?: string;
+    correct_agent_profile?: string;
+    use_in_planner?: boolean;
+  },
+): Promise<AssistantMessageFeedback> =>
+  apiFetch(`/v1/assistant/threads/${threadId}/messages/${messageId}/feedback`, {
     method: 'POST',
     body: JSON.stringify(body),
   });

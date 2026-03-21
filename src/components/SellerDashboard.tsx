@@ -5125,6 +5125,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <label className="text-[10px] font-bold text-zinc-500">
                     Webhook Secret
                     <input
+                      type="password"
+                      autoComplete="new-password"
                       className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
                       value={onlineConnectForm.webhook_secret || ''}
                       onChange={(e) => setOnlineConnectForm(prev => ({ ...prev, webhook_secret: e.target.value }))}
