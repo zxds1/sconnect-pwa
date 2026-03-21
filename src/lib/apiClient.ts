@@ -1,3 +1,10 @@
+import {
+  buildApiCacheKey,
+  getCachedJson,
+  invalidateCachedJson,
+  setCachedJson,
+} from './apiCache';
+
 export type ApiError = {
   status: number;
   code?: string;
@@ -26,6 +33,14 @@ const setStored = (key: string, value: string) => {
   try {
     localStorage.setItem(key, value);
   } catch {}
+};
+
+const getHeaderValue = (headers: HeadersInit | undefined, key: string) => {
+  try {
+    return new Headers(headers ?? {}).get(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 const getBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
@@ -66,6 +81,79 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   } as HeadersInit;
 };
 
+type CachePolicy = {
+  ttlMs: number;
+  preferIndexedDb?: boolean;
+};
+
+const getCachePolicy = (path: string): CachePolicy | null => {
+  const pathOnly = path.split('?')[0];
+  const rules: Array<{ pattern: RegExp; policy: CachePolicy }> = [
+    { pattern: /^\/v1\/intelligence(?:\/|$)/, policy: { ttlMs: 5_000, preferIndexedDb: true } },
+    { pattern: /^\/v1\/search\/(?:suggestions|trending|recommendations|saved|recent|watchlist|alerts)(?:\/|$)/, policy: { ttlMs: 5 * 60_000 } },
+    { pattern: /^\/v1\/search(?:\/|$)/, policy: { ttlMs: 5_000, preferIndexedDb: true } },
+    { pattern: /^\/v1\/analytics\/(?:dashboard|funnel|inventory|buyers|market|anomalies)(?:\/|$)/, policy: { ttlMs: 15_000 } },
+    { pattern: /^\/v1\/seller\/(?:growth|financial|channel-mix|market|customers|alerts|live-buyers|peak-hours|timeseries|sales|top-products)(?:\/|$)/, policy: { ttlMs: 15_000, preferIndexedDb: true } },
+    { pattern: /^\/v1\/feed(?:\/|$)/, policy: { ttlMs: 5_000, preferIndexedDb: true } },
+    { pattern: /^\/v1\/cart\/(?:summary|insights|taxes|recommendations|recovery\/status)/, policy: { ttlMs: 5_000 } },
+    { pattern: /^\/v1\/profile\/insights(?:\/|$)/, policy: { ttlMs: 5_000 } },
+    { pattern: /^\/v1\/seller\/(?:rank|metrics|marketing\/kpis|marketing\/demand-hotspots)/, policy: { ttlMs: 5_000 } },
+    { pattern: /^\/v1\/groupbuy\/instances(?:\/|$)/, policy: { ttlMs: 5 * 60_000 } },
+    { pattern: /^\/v1\/profile(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
+    { pattern: /^\/v1\/seller\/profile(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
+    { pattern: /^\/v1\/seller\/products(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
+    { pattern: /^\/v1\/notifications(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
+    { pattern: /^\/v1\/rewards\/(?:balance|streaks|ledger|receipts|fraud-alerts|referrals|stars\/summary|stars\/leaderboard)(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
+    { pattern: /^\/v1\/settings\/(?:comparison-preferences|ui-preferences|data-summary)(?:\/|$)/, policy: { ttlMs: 10 * 60_000 } },
+    { pattern: /^\/v1\/ops\/configs(?:\/|$)/, policy: { ttlMs: 60 * 60_000 } },
+    { pattern: /^\/v1\/paths(?:\/|$)/, policy: { ttlMs: 60 * 60_000, preferIndexedDb: true } },
+    { pattern: /^\/v1\/navigation(?:\/|$)/, policy: { ttlMs: 60 * 60_000, preferIndexedDb: true } },
+  ];
+  const match = rules.find(({ pattern }) => pattern.test(pathOnly));
+  return match?.policy ?? null;
+};
+
+const getInvalidationPrefixes = (path: string) => {
+  const pathOnly = path.split('?')[0];
+  if (/^\/v1\/search(?:\/|$)/.test(pathOnly) || /^\/v1\/paths(?:\/|$)/.test(pathOnly) || /^\/v1\/navigation(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/search', '/v1/intelligence', '/v1/paths', '/v1/navigation'];
+  }
+  if (/^\/v1\/analytics(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/analytics'];
+  }
+  if (/^\/v1\/seller(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/seller', '/v1/analytics'];
+  }
+  if (/^\/v1\/profile(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/profile'];
+  }
+  if (/^\/v1\/seller\/(?:profile|products|rank|metrics|marketing)(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/seller/profile', '/v1/seller/products', '/v1/seller/rank', '/v1/seller/metrics', '/v1/seller/marketing'];
+  }
+  if (/^\/v1\/cart(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/cart'];
+  }
+  if (/^\/v1\/groupbuy(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/groupbuy'];
+  }
+  if (/^\/v1\/feed(?:\/|$)/.test(pathOnly) || /^\/v1\/posts(?:\/|$)/.test(pathOnly) || /^\/v1\/live(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/feed', '/v1/posts', '/v1/live', '/v1/following'];
+  }
+  if (/^\/v1\/rewards(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/rewards'];
+  }
+  if (/^\/v1\/notifications(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/notifications'];
+  }
+  if (/^\/v1\/settings(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/settings'];
+  }
+  if (/^\/v1\/assistant(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/assistant'];
+  }
+  return [];
+};
+
 const parseError = async (res: Response): Promise<ApiError> => {
   const error: ApiError = { status: res.status };
   try {
@@ -92,9 +180,29 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
     throw new Error('Tenant ID is required. Please select your tenant.');
   }
 
+  const method = (options.method || 'GET').toUpperCase();
+  const requestHeaders = buildHeaders(options.headers);
+  const cachePolicy = method === 'GET' ? getCachePolicy(path) : null;
+  const locationConsent = getHeaderValue(requestHeaders, 'X-Location-Consent') ?? '';
+  const cacheKey = buildApiCacheKey({
+    method,
+    path,
+    tenantId,
+    userId: getUserId(),
+    role: getRole(),
+    locationConsent,
+  });
+
+  if (cachePolicy) {
+    const cached = await getCachedJson<T>(cacheKey);
+    if (cached !== null) {
+      return cached;
+    }
+  }
+
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: buildHeaders(options.headers),
+    headers: requestHeaders,
   });
 
   if (!res.ok) {
@@ -105,7 +213,19 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
     return undefined as T;
   }
 
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+  if (cachePolicy) {
+    await setCachedJson(cacheKey, data, cachePolicy.ttlMs, cachePolicy.preferIndexedDb ?? false);
+  }
+
+  if (method !== 'GET') {
+    const prefixes = getInvalidationPrefixes(path);
+    if (prefixes.length > 0) {
+      await invalidateCachedJson(prefixes);
+    }
+  }
+
+  return data;
 };
 
 export const apiFetchRaw = async (path: string, options: RequestInit = {}): Promise<Response> => {

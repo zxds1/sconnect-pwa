@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { adminFetch } from "../lib/adminApi";
+import { getSearchCacheMetrics } from "../lib/adminApi";
 import { getPartnerStatus, listPartners, type PartnerRecord } from "../lib/partnersAdminApi";
 
 type PartnerIssue = {
@@ -26,11 +27,13 @@ export const Dashboard = () => {
   });
   const [pausedPartners, setPausedPartners] = useState<PartnerIssue[]>([]);
   const [failedPartners, setFailedPartners] = useState<PartnerIssue[]>([]);
+  const [cacheMetrics, setCacheMetrics] = useState<any>(null);
 
   useEffect(() => {
     adminFetch("/kpis").then(setKpis).catch(() => null);
     adminFetch("/alerts").then((data) => setAlerts(data.alerts || [])).catch(() => null);
     adminFetch("/risk/scores?limit=5").then((data) => setRisk(data.scores || [])).catch(() => null);
+    getSearchCacheMetrics().then(setCacheMetrics).catch(() => null);
     listPartners()
       .then(async (items: PartnerRecord[]) => {
         const valid = items.filter((item) => Boolean(item.id || item.partner_id));
@@ -96,6 +99,14 @@ export const Dashboard = () => {
         <div className="card">
           <h3>Active Alerts</h3>
           <strong>{kpis?.active_alerts ?? "—"}</strong>
+        </div>
+        <div className="card">
+          <h3>Search Cache</h3>
+          <strong>{cacheMetrics?.cache_hit_rate_pct ?? "—"}%</strong>
+          <p className="muted">
+            {cacheMetrics?.cache_hits ?? 0} hits, {cacheMetrics?.cache_misses ?? 0} misses, {cacheMetrics?.cache_writes ?? 0} writes
+          </p>
+          <p className="muted">Total queries: {cacheMetrics?.total_queries ?? "—"}</p>
         </div>
         <div className="card">
           <h3>Partnership APIs</h3>

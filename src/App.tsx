@@ -29,7 +29,7 @@ import { Product } from './types';
 import { completeOnboarding, getOnboardingState } from './lib/onboardingApi';
 import { addCompareItem, getCompareList, removeCompareItem } from './lib/compareApi';
 import { getProduct } from './lib/catalogApi';
-import { searchRecommendations, type SearchResult } from './lib/searchApi';
+import { getIntelligence, type SearchResult } from './lib/searchApi';
 import { getShopProducts, searchShops } from './lib/shopDirectoryApi';
 import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
@@ -185,7 +185,8 @@ export default function App() {
     let alive = true;
     const loadProducts = async () => {
       try {
-        const recs = await searchRecommendations();
+        const intelligence = await getIntelligence({ limit: 12 }).catch(() => null);
+        const recs = (intelligence?.products?.length ? intelligence.products : intelligence?.recommendations) || [];
         const mapped = await Promise.all(
           recs.map(async (item) => {
             try {

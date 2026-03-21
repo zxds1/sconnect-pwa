@@ -1,4 +1,5 @@
 export const adminBaseUrl = import.meta.env.VITE_ADMIN_API_URL || "/v1/admin";
+export const coreBaseUrl = import.meta.env.VITE_API_BASE_URL || "/v1";
 
 export type AdminSession = {
   accessToken: string;
@@ -45,3 +46,34 @@ export const adminFetch = async (path: string, options: RequestInit = {}) => {
   }
   return resp.json();
 };
+
+export const coreFetch = async (path: string, options: RequestInit = {}) => {
+  const session = getSession();
+  const headers = new Headers(options.headers || {});
+  if (session?.accessToken) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
+  }
+  if (session?.tenantId) headers.set("X-Tenant-Id", session.tenantId);
+  if (session?.userId) headers.set("X-User-Id", session.userId);
+  if (session?.roles?.length) headers.set("X-Role", session.roles[0]);
+  headers.set("Content-Type", "application/json");
+
+  const resp = await fetch(`${coreBaseUrl}${path}`, {
+    ...options,
+    headers,
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data?.error?.message || "Request failed");
+  }
+  return resp.json();
+};
+
+export const getSearchCacheMetrics = async (): Promise<{
+  total_queries?: number;
+  cache_hits?: number;
+  cache_misses?: number;
+  cache_writes?: number;
+  cache_hit_rate?: number;
+  cache_hit_rate_pct?: number;
+}> => coreFetch("/search/metrics");

@@ -18,6 +18,53 @@ export type SearchResponse = {
   cached?: boolean;
 };
 
+export type IntelligenceSeller = {
+  seller_id: string;
+  seller_name: string;
+  logo_url?: string;
+  category_ids?: string[];
+  address?: string;
+  lat?: number;
+  lng?: number;
+  distance_km?: number;
+  verified?: boolean;
+  rank_score?: number;
+  average_rating?: number;
+  products_synced?: number;
+};
+
+export type IntelligenceGroupBuy = {
+  id: string;
+  seller_id: string;
+  seller_name: string;
+  product_id: string;
+  product_name: string;
+  target_quantity: number;
+  current_size: number;
+  status: string;
+  expiry_at?: string;
+  created_at: string;
+};
+
+export type IntelligencePath = {
+  path_id: string;
+  route_wkt?: string;
+  usage_count?: number;
+  last_used_at?: string;
+};
+
+export type IntelligenceResponse = {
+  query_id?: string;
+  cached?: boolean;
+  query?: string;
+  products?: SearchResult[];
+  sellers?: IntelligenceSeller[];
+  group_buys?: IntelligenceGroupBuy[];
+  paths?: IntelligencePath[];
+  trending?: string[];
+  recommendations?: SearchResult[];
+};
+
 export type SavedSearch = {
   id: string;
   query: string;
@@ -157,6 +204,26 @@ export const searchTrending = async (): Promise<string[]> =>
 
 export const searchRecommendations = async (): Promise<SearchResult[]> =>
   unwrapList(await apiFetch('/v1/search/recommendations'));
+
+export const getIntelligence = async (params: {
+  q?: string;
+  lat?: number;
+  lng?: number;
+  radius?: number;
+  category?: string;
+  status?: string;
+  limit?: number;
+  locationConsent?: boolean;
+} = {}): Promise<IntelligenceResponse> =>
+  apiFetch(`/v1/intelligence${buildQuery({
+    q: params.q,
+    lat: params.lat,
+    lng: params.lng,
+    radius: params.radius,
+    category: params.category,
+    status: params.status,
+    limit: params.limit,
+  })}`, withLocationConsent(params.locationConsent));
 
 export const searchMap = async (params: {
   q?: string;

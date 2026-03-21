@@ -44,8 +44,7 @@ import {
   listSavedSearches,
   listSearchAlerts,
   listWatchlist,
-  searchTrending,
-  searchRecommendations
+  getIntelligence
 } from '../lib/searchApi';
 import { searchShops } from '../lib/shopDirectoryApi';
 import { getCartInsights, getCartSummary, getCartRecommendations, getCartAlerts } from '../lib/cartApi';
@@ -1438,13 +1437,12 @@ export const Assistant: React.FC<AssistantProps> = ({
     let alive = true;
     const loadBuyerSignals = async () => {
       try {
+        const intelligence = await getIntelligence({ limit: 12 }).catch(() => null);
         const [
           recent,
           saved,
           alerts,
           watch,
-          trending,
-          recs,
           insights,
           summary,
           cartRecommendations,
@@ -1459,8 +1457,6 @@ export const Assistant: React.FC<AssistantProps> = ({
           listSavedSearches().catch(() => []),
           listSearchAlerts().catch(() => []),
           listWatchlist().catch(() => []),
-          searchTrending().catch(() => []),
-          searchRecommendations().catch(() => []),
           getCartInsights().catch(() => null),
           getCartSummary().catch(() => null),
           getCartRecommendations().catch(() => []),
@@ -1476,8 +1472,8 @@ export const Assistant: React.FC<AssistantProps> = ({
         setSavedSearches(saved as any[]);
         setSearchAlerts(alerts as any[]);
         setWatchlist(watch as any[]);
-        setTrendingSearches(trending as string[]);
-        setSearchRecs(recs as any[]);
+        setTrendingSearches((intelligence?.trending || []) as string[]);
+        setSearchRecs((intelligence?.recommendations || []) as any[]);
         setCartInsights(insights as any);
         setCartSummary(summary as any);
         setCartRecs(cartRecommendations as any[]);
