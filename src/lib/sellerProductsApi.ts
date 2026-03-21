@@ -14,6 +14,7 @@ export type SellerProduct = {
   is_featured?: boolean;
   group_buy_eligible?: boolean;
   group_buy_tiers?: Array<{ qty: number; price: number; discount?: string }>;
+  expiry_date?: string | null;
   updated_at?: string;
 };
 
@@ -29,6 +30,14 @@ export type SellerLowStock = {
   seller_product_id?: string;
   stock_level?: number;
   status?: string;
+};
+
+export type SellerRecommendation = {
+  id?: string;
+  type?: string;
+  payload?: Record<string, any>;
+  status?: string;
+  created_at?: string;
 };
 
 const unwrapList = <T>(data: any): T[] => {
@@ -52,6 +61,7 @@ export const createSellerProduct = async (payload: {
   is_featured?: boolean;
   group_buy_eligible?: boolean;
   group_buy_tiers?: Array<{ qty: number; price: number; discount?: string }>;
+  expiry_date?: string | null;
 }): Promise<SellerProduct> =>
   apiFetch('/v1/seller/products', {
     method: 'POST',
@@ -69,6 +79,7 @@ export const updateSellerProduct = async (id: string, payload: {
   is_featured?: boolean;
   group_buy_eligible?: boolean;
   group_buy_tiers?: Array<{ qty: number; price: number; discount?: string }>;
+  expiry_date?: string | null;
 }): Promise<SellerProduct> =>
   apiFetch(`/v1/seller/products/${id}`,
     {
@@ -121,3 +132,12 @@ export const listSellerProductInsights = async (): Promise<SellerProductInsight[
 
 export const listSellerLowStock = async (): Promise<SellerLowStock[]> =>
   unwrapList(await apiFetch('/v1/seller/products/low-stock'));
+
+export const listSellerRecommendations = async (recType: 'products' | 'pricing' | 'stock' = 'stock'): Promise<SellerRecommendation[]> =>
+  unwrapList(await apiFetch(`/v1/seller/recommendations/${recType}`));
+
+export const acceptSellerRecommendation = async (recommendationId: string) =>
+  apiFetch('/v1/seller/recommendations/accept', {
+    method: 'POST',
+    body: JSON.stringify({ recommendation_id: recommendationId }),
+  });

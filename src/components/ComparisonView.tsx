@@ -26,7 +26,7 @@ import {
   CompareHistoryItem,
   removeCompareItem
 } from '../lib/compareApi';
-import { getComparisonPreferences, updateComparisonPreferences } from '../lib/settingsApi';
+import { getComparisonPreferences, updateComparisonPreferences, getUiPreferences, updateUiPreferences } from '../lib/settingsApi';
 
 type CompareProductView = {
   id: string;
@@ -331,11 +331,19 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
   }, []);
 
   useEffect(() => {
-    try {
-      setVoiceDirectionsEnabled(localStorage.getItem('soko:voice_directions') === 'true');
-    } catch {
-      setVoiceDirectionsEnabled(false);
-    }
+    let alive = true;
+    getUiPreferences()
+      .then((prefs) => {
+        if (!alive) return;
+        setVoiceDirectionsEnabled(Boolean(prefs?.voice_directions_enabled));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setVoiceDirectionsEnabled(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1270,9 +1278,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                     onClick={() => {
                       const next = !voiceDirectionsEnabled;
                       setVoiceDirectionsEnabled(next);
-                      try {
-                        localStorage.setItem('soko:voice_directions', String(next));
-                      } catch {}
+                      void updateUiPreferences({ voice_directions_enabled: next }).catch(() => {});
                     }}
                     className={`px-3 py-1 rounded-full ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
                   >

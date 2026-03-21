@@ -59,6 +59,7 @@ export const Chat: React.FC<ChatProps> = ({ product, onClose, onEscalate }) => {
       try {
         const thread = await createChatThread({
           topic: `support:${product.id}`,
+          seller_id: product.sellerId,
         });
         if (!alive) return;
         const id = thread?.id || thread?.thread_id || thread?.threadId;
@@ -127,7 +128,7 @@ export const Chat: React.FC<ChatProps> = ({ product, onClose, onEscalate }) => {
             </div>
             <div>
               <h3 className="font-bold text-sm">SokoConnect Support</h3>
-              <p className="text-[10px] opacity-60">Duka Support • AI + Human</p>
+              <p className="text-[10px] opacity-60">Product chat • AI + seller escalation</p>
             </div>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-bold">
@@ -140,7 +141,7 @@ export const Chat: React.FC<ChatProps> = ({ product, onClose, onEscalate }) => {
             <button
               onClick={handleEscalate}
               className="p-2 hover:bg-white/10 rounded-full transition-colors text-emerald-400"
-              title="Escalate to Seller"
+              title="Escalate to seller"
             >
               <PhoneCall className="w-5 h-5" />
             </button>

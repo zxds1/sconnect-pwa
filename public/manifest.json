@@ -3,6 +3,8 @@
   "short_name": "Sconnect",
   "description": "Sconnect commerce intelligence platform with AI and data insights.",
   "start_url": "/",
+  "scope": "/",
+  "id": "/",
   "display": "standalone",
   "background_color": "#0b0b0d",
   "theme_color": "#0b0b0d",
@@ -16,6 +18,11 @@
       "src": "/logo.jpg",
       "sizes": "512x512",
       "type": "image/jpeg"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
     }
   ]
 }

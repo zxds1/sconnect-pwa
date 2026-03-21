@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Crown, Trophy, ArrowRight, Star, Sparkles, QrCode, ShieldCheck, MapPin, Wallet, Camera as CameraIcon, Receipt, Gift, Upload } from 'lucide-react';
+import { Crown, Trophy, ArrowRight, Star, Sparkles, QrCode, MapPin, Wallet, Camera as CameraIcon, Receipt, Gift, Upload, ShieldCheck } from 'lucide-react';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 import {
   createReferral,
   getRewardsBalance,
@@ -30,37 +31,27 @@ import {
 import { requestUploadPresign } from '../lib/uploadsApi';
 import { getOCRStatus, runOCR } from '../lib/assistantApi';
 import { listSellerProducts, SellerProduct } from '../lib/sellerProductsApi';
-
-const MILESTONES = [
-  { stars: 50, label: 'Free Pro Month' },
-  { stars: 100, label: 'Featured Duka' },
-  { stars: 250, label: 'KSh5k Voucher' },
-  { stars: 500, label: 'Neighborhood Champion' }
-];
+import { getOpsConfig } from '../lib/opsConfigApi';
 
 interface RewardsProps {
-  buyerBalance: number;
-  onBuyerBalanceChange: (next: number) => void;
-  buyerPayouts: Array<{ id: string; amount: number; reason: string; timestamp: number }>;
-  onBuyerPayoutsChange: (next: Array<{ id: string; amount: number; reason: string; timestamp: number }>) => void;
+  openQrOnMount?: boolean;
+  onOpenQrHandled?: () => void;
 }
 
-export const Rewards: React.FC<RewardsProps> = ({
-  buyerBalance,
-  onBuyerBalanceChange,
-  buyerPayouts,
-  onBuyerPayoutsChange
-}) => {
+export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled }) => {
   const [starsSummary, setStarsSummary] = useState<RewardsStarsSummary | null>(null);
   const [leaderboard, setLeaderboard] = useState<RewardsLeaderboardEntry[]>([]);
   const currentStars = Number(starsSummary?.stars_total ?? 0);
   const currentRank = Number(starsSummary?.rank ?? 0);
   const [activeTab, setActiveTab] = useState<'stars' | 'wallet' | 'receipts'>('stars');
-  const [buyerCoins, setBuyerCoins] = useState(buyerBalance || 0);
+  const [buyerCoins, setBuyerCoins] = useState(0);
+  const [buyerPayouts, setBuyerPayouts] = useState<Array<{ id: string; amount: number; reason: string; timestamp: number }>>([]);
+  const [milestones, setMilestones] = useState<Array<{ stars: number; label: string }>>([]);
+  const [walletOffers, setWalletOffers] = useState<Array<{ label: string; cost: number }>>([]);
+  const [walletHint, setWalletHint] = useState('');
+  const [referralConfig, setReferralConfig] = useState<{ currency?: string; shop?: number; supplier?: number; next_bonus_invites?: number; next_bonus_amount?: number; pair_bonus_amount?: number } | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrStep, setQrStep] = useState<'scan' | 'product' | 'price' | 'reward'>('scan');
-  const [qrMode, setQrMode] = useState<'receipt' | 'manual'>('receipt');
-  const [verificationMethod, setVerificationMethod] = useState<'counter_photo' | 'product_select' | 'neighbor'>('counter_photo');
   const [survey, setSurvey] = useState({ price: '', stock: 'Full', repeat: 'Yes', cleanliness: 4, product: '' });
   const [quantity, setQuantity] = useState(1);
   const [sellerId, setSellerId] = useState('');
@@ -72,6 +63,8 @@ export const Rewards: React.FC<RewardsProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scanActiveRef = useRef(false);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const zxingControlsRef = useRef<any>(null);
   const [gpsStatus, setGpsStatus] = useState<'idle' | 'checking' | 'verified' | 'failed'>('idle');
   const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
   const [fraudWarning, setFraudWarning] = useState<string | null>(null);
@@ -99,20 +92,13 @@ export const Rewards: React.FC<RewardsProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const flag = localStorage.getItem('soko:open_qr');
-      if (flag === 'true') {
+    if (openQrOnMount) {
         setActiveTab('wallet');
         setShowQrModal(true);
         setQrStep('scan');
-        localStorage.removeItem('soko:open_qr');
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    setBuyerCoins(buyerBalance || 0);
-  }, [buyerBalance]);
+        onOpenQrHandled?.();
+    }
+  }, [openQrOnMount, onOpenQrHandled]);
 
   useEffect(() => {
     if (!sellerId && qrPayload) {
@@ -122,6 +108,43 @@ export const Rewards: React.FC<RewardsProps> = ({
       }
     }
   }, [qrPayload, sellerId]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      getOpsConfig('rewards.milestones').catch(() => null),
+      getOpsConfig('rewards.wallet_offers').catch(() => null),
+      getOpsConfig('rewards.wallet_copy').catch(() => null),
+      getOpsConfig('rewards.referrals').catch(() => null),
+    ])
+      .then(([milestonesResp, offersResp, walletCopyResp, referralsResp]) => {
+        if (!active) return;
+        const items = Array.isArray(milestonesResp?.value) ? milestonesResp.value : [];
+        setMilestones(items);
+        const offers = Array.isArray(offersResp?.value) ? offersResp.value : [];
+        setWalletOffers(
+          offers
+            .map((item: any) => ({
+              label: String(item?.label || ''),
+              cost: Number(item?.cost ?? 0),
+            }))
+            .filter((item: any) => item.label && Number.isFinite(item.cost) && item.cost > 0)
+        );
+        const hint = String((walletCopyResp as any)?.value?.wallet_hint || '');
+        setWalletHint(hint);
+        setReferralConfig((referralsResp as any)?.value ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMilestones([]);
+        setWalletOffers([]);
+        setWalletHint('');
+        setReferralConfig(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -144,8 +167,8 @@ export const Rewards: React.FC<RewardsProps> = ({
         if (!alive) return;
         const coins = Number(balanceResp?.balance ?? 0);
         setBuyerCoins(Number.isFinite(coins) ? coins : 0);
-        onBuyerBalanceChange(Number.isFinite(coins) ? coins : 0);
-        onBuyerPayoutsChange((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
+        setBuyerCoins(Number.isFinite(coins) ? coins : 0);
+        setBuyerPayouts((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
           id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
           amount: Number(entry.amount || 0),
           reason: entry.type || entry.reason || 'Reward',
@@ -181,18 +204,17 @@ export const Rewards: React.FC<RewardsProps> = ({
     return () => {
       alive = false;
     };
-  }, [onBuyerBalanceChange, onBuyerPayoutsChange]);
+  }, []);
 
   const applyBalanceFromResponse = (balanceResp: any) => {
     const coins = Number(balanceResp?.balance ?? 0);
     if (Number.isFinite(coins)) {
       setBuyerCoins(coins);
-      onBuyerBalanceChange(coins);
     }
   };
 
   const applyLedgerFromResponse = (ledgerResp: RewardsLedgerEntry[]) => {
-    onBuyerPayoutsChange((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
+    setBuyerPayouts((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
       id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
       amount: Number(entry.amount || 0),
       reason: entry.reason || entry.type || 'Reward',
@@ -245,8 +267,23 @@ export const Rewards: React.FC<RewardsProps> = ({
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop());
     }
+    if (zxingControlsRef.current?.stop) {
+      try {
+        zxingControlsRef.current.stop();
+      } catch {}
+    }
+    if (zxingReaderRef.current) {
+      try {
+        (zxingReaderRef.current as any).reset?.();
+      } catch {}
+    }
+    zxingControlsRef.current = null;
+    zxingReaderRef.current = null;
     setMediaStream(null);
     setCameraActive(false);
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
   };
 
   const startScanner = async () => {
@@ -257,40 +294,67 @@ export const Rewards: React.FC<RewardsProps> = ({
       setScanStatus('error');
       return;
     }
-    if (!(window as any).BarcodeDetector) {
-      setScanError('QR scanner not supported in this browser.');
+    if (typeof window !== 'undefined' && !window.isSecureContext && window.location.hostname !== 'localhost') {
+      setScanError('Camera access requires HTTPS.');
       setScanStatus('error');
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      setMediaStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setCameraActive(true);
       scanActiveRef.current = true;
-      const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-      const tick = async () => {
-        if (!scanActiveRef.current || !videoRef.current) return;
-        try {
-          const barcodes = await detector.detect(videoRef.current);
-          if (barcodes?.length) {
-            const raw = barcodes[0].rawValue || '';
-            if (raw) {
-              setQrPayload(raw);
-              setScanStatus('found');
-              stopScanner();
-              return;
-            }
-          }
-        } catch {}
-        if (scanActiveRef.current) {
-          setTimeout(tick, 500);
+      if ((window as any).BarcodeDetector) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        setCameraActive(true);
+        setMediaStream(stream);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+        if (!videoRef.current) {
+          throw new Error('Camera view unavailable.');
         }
-      };
-      tick();
+        videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        await videoRef.current.play();
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        const tick = async () => {
+          if (!scanActiveRef.current || !videoRef.current) return;
+          try {
+            const barcodes = await detector.detect(videoRef.current);
+            if (barcodes?.length) {
+              const raw = barcodes[0].rawValue || '';
+              if (raw) {
+                setQrPayload(raw);
+                setScanStatus('found');
+                stopScanner();
+                return;
+              }
+            }
+          } catch {}
+          if (scanActiveRef.current) {
+            setTimeout(tick, 500);
+          }
+        };
+        tick();
+        return;
+      }
+      const reader = new BrowserMultiFormatReader();
+      zxingReaderRef.current = reader;
+      setCameraActive(true);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      if (!videoRef.current) {
+        throw new Error('Camera view unavailable.');
+      }
+      videoRef.current.muted = true;
+      const controls = await reader.decodeFromConstraints(
+        { video: { facingMode: 'environment' } },
+        videoRef.current,
+        (result) => {
+          if (!result) return;
+          const raw = result.getText?.() || '';
+          if (!raw) return;
+          setQrPayload(raw);
+          setScanStatus('found');
+          stopScanner();
+        }
+      );
+      zxingControlsRef.current = controls;
     } catch (err: any) {
       setScanError(err?.message || 'Unable to access camera.');
       setScanStatus('error');
@@ -447,10 +511,13 @@ export const Rewards: React.FC<RewardsProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       setReceiptScanStream(stream);
       setReceiptScanOpen(true);
-      if (receiptVideoRef.current) {
-        receiptVideoRef.current.srcObject = stream;
-        await receiptVideoRef.current.play();
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      if (!receiptVideoRef.current) {
+        throw new Error('Camera view unavailable.');
       }
+      receiptVideoRef.current.srcObject = stream;
+      receiptVideoRef.current.muted = true;
+      await receiptVideoRef.current.play();
     } catch {
       setReceiptUploadStatus('Unable to access camera.');
     }
@@ -547,14 +614,17 @@ export const Rewards: React.FC<RewardsProps> = ({
   };
 
   const scannerSupported = useMemo(() => {
-    return typeof window !== 'undefined' && 'BarcodeDetector' in window;
+    return typeof window !== 'undefined' && !!window.navigator?.mediaDevices?.getUserMedia;
   }, []);
 
   const nextMilestone = useMemo(() => {
-    return MILESTONES.find(m => currentStars < m.stars) || MILESTONES[MILESTONES.length - 1];
-  }, [currentStars]);
+    if (milestones.length === 0) return null;
+    return milestones.find(m => currentStars < m.stars) || milestones[milestones.length - 1];
+  }, [currentStars, milestones]);
 
-  const progressPct = Math.min(100, Math.round((currentStars / nextMilestone.stars) * 100));
+  const progressPct = nextMilestone
+    ? Math.min(100, Math.round((currentStars / nextMilestone.stars) * 100))
+    : 0;
 
 
   const handleReferral = async () => {
@@ -568,9 +638,8 @@ export const Rewards: React.FC<RewardsProps> = ({
       ]);
       const coins = Number(balanceResp?.coins ?? balanceResp?.wallet ?? balanceResp?.balance ?? 0);
       setBuyerCoins(Number.isFinite(coins) ? coins : buyerCoins);
-      onBuyerBalanceChange(Number.isFinite(coins) ? coins : buyerCoins);
       setReferralsCount((referralsResp || []).length);
-      onBuyerPayoutsChange((ledgerResp || []).map((entry: any) => ({
+      setBuyerPayouts((ledgerResp || []).map((entry: any) => ({
         id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
         amount: Number(entry.amount || 0),
         reason: entry.reason || entry.type || 'Reward',
@@ -652,7 +721,6 @@ export const Rewards: React.FC<RewardsProps> = ({
     try {
       const payload = {
         qr_payload: qrPayload.trim(),
-        scan_type: qrMode,
         seller_id: sellerId.trim() || undefined,
         product_name: survey.product.trim() || undefined,
         price: survey.price ? Number(survey.price) : undefined,
@@ -660,7 +728,6 @@ export const Rewards: React.FC<RewardsProps> = ({
         stock_status: survey.stock,
         repeat_purchase: survey.repeat,
         cleanliness: survey.cleanliness,
-        verification_method: verificationMethod,
         gps_distance_m: distanceMeters ?? undefined,
         gps_verified: gpsStatus === 'verified'
       };
@@ -668,7 +735,6 @@ export const Rewards: React.FC<RewardsProps> = ({
       setScanResult(resp);
       if (typeof resp?.balance === 'number') {
         setBuyerCoins(resp.balance);
-        onBuyerBalanceChange(resp.balance);
       } else {
         await refreshBalanceAndLedger();
       }
@@ -693,7 +759,7 @@ export const Rewards: React.FC<RewardsProps> = ({
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-blue-600 text-white px-3 py-1.5 rounded-full text-xs font-black">
-              <Star className="w-3 h-3" /> {currentStars}/{nextMilestone.stars}
+              <Star className="w-3 h-3" /> {nextMilestone ? `${currentStars}/${nextMilestone.stars}` : currentStars}
             </div>
             <div className="flex items-center gap-1 bg-yellow-200 text-yellow-900 px-3 py-1.5 rounded-full text-[10px] font-black">
               <Crown className="w-3 h-3" /> #{currentRank || '—'}
@@ -900,7 +966,19 @@ export const Rewards: React.FC<RewardsProps> = ({
                 </button>
               </div>
               <div className="mt-3 text-[10px] font-bold text-slate-600">
-                Referrals: {referralsCount} • Next bonus at 5 invites (KES 100) • Refer a duka: both earn KES 200
+                {referralConfig ? (
+                  <>
+                    Referrals: {referralsCount}
+                    {referralConfig.next_bonus_invites && referralConfig.next_bonus_amount !== undefined && (
+                      <> • Next bonus at {referralConfig.next_bonus_invites} invites ({referralConfig.currency ? `${referralConfig.currency} ` : ''}{referralConfig.next_bonus_amount})</>
+                    )}
+                    {referralConfig.pair_bonus_amount !== undefined && (
+                      <> • Refer a shop: both earn {referralConfig.currency ? `${referralConfig.currency} ` : ''}{referralConfig.pair_bonus_amount}</>
+                    )}
+                  </>
+                ) : (
+                  <>Referrals: {referralsCount} • Referral rewards not configured.</>
+                )}
               </div>
             </section>
 
@@ -922,7 +1000,9 @@ export const Rewards: React.FC<RewardsProps> = ({
                   <QrCode className="w-4 h-4" /> Scan QR
                 </button>
               </div>
-              <p className="mt-3 text-[10px] text-slate-500 font-bold">Unlimited scans. 30-second survey. Instant SC rewards.</p>
+              <p className="mt-3 text-[10px] text-slate-500 font-bold">
+                {walletHint || 'Scan QR codes to earn SC rewards.'}
+              </p>
             </section>
 
             <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
@@ -931,12 +1011,12 @@ export const Rewards: React.FC<RewardsProps> = ({
                 <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Redeem SC</h3>
               </div>
               <div className="grid grid-cols-2 gap-3 text-[10px] font-bold">
-                {[
-                  { label: 'KSh20 Airtime', cost: 20 },
-                  { label: 'KSh50 M-Pesa', cost: 50 },
-                  { label: '10% Jane’s Duka', cost: 15 },
-                  { label: 'KSh100 Unilever', cost: 100 }
-                ].map(reward => (
+                {walletOffers.length === 0 && (
+                  <div className="col-span-2 p-3 bg-slate-50 rounded-2xl text-slate-500">
+                    No redemption offers configured yet.
+                  </div>
+                )}
+                {walletOffers.map(reward => (
                   <button
                     key={reward.label}
                     onClick={() => handleRedeemWallet(reward)}
@@ -952,10 +1032,10 @@ export const Rewards: React.FC<RewardsProps> = ({
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">SC Wallet History</h3>
                 <button
-                  onClick={() => onBuyerPayoutsChange([])}
+                  onClick={refreshBalanceAndLedger}
                   className="text-[10px] font-bold text-zinc-400"
                 >
-                  Clear
+                  Refresh
                 </button>
               </div>
               <div className="space-y-2 text-[10px] font-bold text-slate-600">
@@ -993,15 +1073,6 @@ export const Rewards: React.FC<RewardsProps> = ({
                 </div>
               </section>
 
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <MapPin className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Buyer Scan Heatmap</h3>
-              </div>
-              <div className="h-36 bg-blue-50 rounded-2xl flex items-center justify-center text-[10px] font-bold text-blue-600">
-                Kibera 42 scans • CBD 85 scans
-              </div>
-            </section>
           </>
         )}
 
@@ -1053,7 +1124,9 @@ export const Rewards: React.FC<RewardsProps> = ({
               </div>
               <div>
                 <p className="text-xs font-black uppercase tracking-widest text-blue-500">Progress</p>
-                <p className="text-[10px] text-zinc-500">{currentStars}/{nextMilestone.stars} ⭐ → {nextMilestone.label}</p>
+                <p className="text-[10px] text-zinc-500">
+                  {nextMilestone ? `${currentStars}/${nextMilestone.stars} ⭐ → ${nextMilestone.label}` : `${currentStars} ⭐`}
+                </p>
               </div>
             </div>
             <div className="w-full bg-blue-50 rounded-full h-3">
@@ -1073,7 +1146,12 @@ export const Rewards: React.FC<RewardsProps> = ({
             <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Reward Unlocks</h3>
           </div>
           <div className="space-y-3">
-            {MILESTONES.map((milestone) => (
+            {milestones.length === 0 && (
+              <div className="p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                Milestones not configured yet.
+              </div>
+            )}
+            {milestones.map((milestone) => (
               <div key={milestone.stars} className="p-3 bg-blue-50 rounded-2xl flex items-center justify-between">
                 <div>
                   <p className="text-sm font-bold text-zinc-900">{milestone.label}</p>
@@ -1095,7 +1173,9 @@ export const Rewards: React.FC<RewardsProps> = ({
         <section className="bg-blue-600 text-white rounded-3xl p-5 flex items-center justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-widest text-blue-100">Rewards</p>
-            <p className="text-sm font-bold">Free Pro in {Math.max(0, nextMilestone.stars - currentStars)}⭐</p>
+            <p className="text-sm font-bold">
+              {nextMilestone ? `Free Pro in ${Math.max(0, nextMilestone.stars - currentStars)}⭐` : 'Earn stars to unlock rewards'}
+            </p>
           </div>
           <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
             <Sparkles className="w-4 h-4" />
@@ -1120,14 +1200,14 @@ export const Rewards: React.FC<RewardsProps> = ({
                     {scannerSupported ? (
                       <div className="h-44 bg-slate-100 rounded-2xl overflow-hidden flex items-center justify-center">
                         {cameraActive ? (
-                          <video ref={videoRef} className="w-full h-full object-cover" />
+                          <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
                         ) : (
                           <div className="text-[10px] font-bold text-slate-400">Camera idle</div>
                         )}
                       </div>
                     ) : (
                       <div className="h-20 bg-slate-100 rounded-2xl flex items-center justify-center text-[10px] font-bold text-slate-400">
-                        QR scanning not supported
+                        Camera not available
                       </div>
                     )}
                     <div className="flex items-center gap-2 text-[10px] font-bold">
@@ -1177,19 +1257,8 @@ export const Rewards: React.FC<RewardsProps> = ({
                       className="w-full p-3 bg-white rounded-xl border border-slate-200 text-[10px] font-bold text-slate-700"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
-                    <button
-                      onClick={() => setQrMode('receipt')}
-                      className={`p-3 rounded-2xl ${qrMode === 'receipt' ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700'}`}
-                    >
-                      Receipt QR
-                    </button>
-                    <button
-                      onClick={() => setQrMode('manual')}
-                      className={`p-3 rounded-2xl ${qrMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700'}`}
-                    >
-                      Manual Duka
-                    </button>
+                  <div className="p-3 rounded-2xl bg-blue-50 text-blue-700 text-[10px] font-bold">
+                    Shop-wide QR scan (only workflow)
                   </div>
                   <p className="text-[10px] text-slate-500 font-bold">Quick 30s survey to earn SC.</p>
                   <button
@@ -1271,9 +1340,6 @@ export const Rewards: React.FC<RewardsProps> = ({
                       value={survey.product}
                       onChange={(e) => setSurvey(prev => ({ ...prev, product: e.target.value }))}
                     />
-                    <button className="w-full py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black flex items-center justify-center gap-2">
-                      <CameraIcon className="w-3 h-3" /> Add photo proof
-                    </button>
                   </div>
                   <button
                     onClick={() => setQrStep('price')}
@@ -1286,11 +1352,6 @@ export const Rewards: React.FC<RewardsProps> = ({
               )}
               {qrStep === 'price' && (
                 <>
-                  {qrMode === 'manual' && (
-                    <div className="space-y-2 text-[10px] font-bold text-slate-600">
-                      <div className="p-3 bg-slate-50 rounded-2xl">Manual duka verification enabled</div>
-                    </div>
-                  )}
                   <div className="space-y-2 text-[10px] font-bold text-slate-600">
                     <label className="flex flex-col gap-1">
                       {survey.product || 'Item'} price today? KSh
@@ -1355,31 +1416,6 @@ export const Rewards: React.FC<RewardsProps> = ({
                       />
                     </label>
                   </div>
-                  {qrMode === 'manual' && (
-                    <div className="space-y-2 text-[10px] font-bold text-slate-600">
-                      <p className="text-[10px] text-slate-500 font-black">Manual verification method</p>
-                      <div className="grid grid-cols-1 gap-2">
-                        <button
-                          onClick={() => setVerificationMethod('counter_photo')}
-                          className={`p-2 rounded-xl ${verificationMethod === 'counter_photo' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
-                        >
-                          Counter QR + shelf photo (+5 SC, +2⭐ duka)
-                        </button>
-                        <button
-                          onClick={() => setVerificationMethod('product_select')}
-                          className={`p-2 rounded-xl ${verificationMethod === 'product_select' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
-                        >
-                          Product selection survey (+3 SC, +1⭐ duka)
-                        </button>
-                        <button
-                          onClick={() => setVerificationMethod('neighbor')}
-                          className={`p-2 rounded-xl ${verificationMethod === 'neighbor' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
-                        >
-                          Neighbor verification (within 100m) (+5 SC)
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <button
                     onClick={handleQrSurveySubmit}
                     className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
@@ -1394,8 +1430,16 @@ export const Rewards: React.FC<RewardsProps> = ({
                     ✅ Scan complete! +{scanResult?.rewards_issued ?? 0} SC • Balance: {buyerCoins} SC
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
-                    <button className="p-3 bg-blue-50 rounded-2xl text-blue-700">KSh20 Airtime</button>
-                    <button className="p-3 bg-blue-50 rounded-2xl text-blue-700">10% OFF</button>
+                    {walletOffers.slice(0, 2).map((offer) => (
+                      <button key={offer.label} className="p-3 bg-blue-50 rounded-2xl text-blue-700">
+                        {offer.label}
+                      </button>
+                    ))}
+                    {walletOffers.length === 0 && (
+                      <div className="col-span-2 p-3 bg-blue-50 rounded-2xl text-blue-700 text-center">
+                        Rewards are applied to your SC wallet.
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] text-zinc-600 font-bold">
                     Stars earned: {scanResult?.stars_awarded ?? 0} • Product: {survey.product || 'Item'} • Qty: {quantity} • Repeat: {survey.repeat}.
@@ -1428,7 +1472,7 @@ export const Rewards: React.FC<RewardsProps> = ({
         <div className="fixed inset-0 z-[90] bg-black/70 flex items-center justify-center p-4">
           <div className="bg-black w-full max-w-md rounded-3xl overflow-hidden">
             <div className="relative">
-              <video ref={receiptVideoRef} className="w-full h-96 object-cover" autoPlay playsInline />
+              <video ref={receiptVideoRef} className="w-full h-96 object-cover" autoPlay playsInline muted />
               <button
                 onClick={closeReceiptScanner}
                 className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white"

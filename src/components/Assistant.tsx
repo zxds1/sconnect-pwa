@@ -1,16 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, MessageCircle, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users } from 'lucide-react';
 import { Product } from '../types';
 import {
   createMessage,
   createThread,
   deleteThread,
+  getAssistantPreferences,
   listMessages,
   listSuggestions,
   listThreads,
   runOCR,
   runVisionSearch,
   streamThreadMessage,
+  transcribeAudio,
+  updateAssistantPreferences,
   updateThread
 } from '../lib/assistantApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
@@ -35,6 +38,7 @@ import { getCashflow, getLoanEligibility, type Cashflow, type LoanEligibility } 
 import { getDisputeSummary } from '../lib/supportApi';
 import { listProfileFavorites, listProfileReviews } from '../lib/profileApi';
 import { listRFQs, listRFQResponses, type RFQResponse, type RFQThread } from '../lib/suppliersApi';
+import { getOpsConfig } from '../lib/opsConfigApi';
 import {
   listRecentSearches,
   listSavedSearches,
@@ -53,6 +57,11 @@ import { listNotifications, type NotificationListResponse } from '../lib/notific
 type AssistantAction = {
   label: string;
   onClick: () => void;
+};
+
+type QuickAction = AssistantAction & {
+  icon: any;
+  tone: string;
 };
 
 type AssistantMessage = {
@@ -82,7 +91,6 @@ type SummaryStat = Record<string, any>;
 interface AssistantProps {
   products: Product[];
   onOpenSearch: (query: string) => void;
-  onOpenSearchAction: (query: string, action: 'voice' | 'photo' | 'video' | 'hybrid') => void;
   onOpenProduct: (product: Product) => void;
   onAddToBag: (product: Product) => void;
   onAddToComparison: (product: Product) => void;
@@ -98,7 +106,6 @@ interface AssistantProps {
   onOpenQrScan: () => void;
   onOpenSubscriptions: () => void;
   onOpenPartnerships: () => void;
-  onOpenWhatsApp: () => void;
   onOpenFeed: () => void;
   onOpenGroupBuys: () => void;
 }
@@ -106,7 +113,6 @@ interface AssistantProps {
 export const Assistant: React.FC<AssistantProps> = ({
   products,
   onOpenSearch,
-  onOpenSearchAction,
   onOpenProduct,
   onAddToBag,
   onAddToComparison,
@@ -121,7 +127,6 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenQrScan,
   onOpenSubscriptions,
   onOpenPartnerships,
-  onOpenWhatsApp,
   onOpenFeed,
   onOpenGroupBuys,
   onToast
@@ -132,32 +137,39 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const stopTimeoutRef = useRef<number | null>(null);
   const [isSellerAccount, setIsSellerAccount] = useState<boolean | null>(null);
-  const [usageTick, setUsageTick] = useState(0);
+  const [assistantActionUsage, setAssistantActionUsage] = useState<Record<string, number>>({});
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [llmModel, setLlmModel] = useState(() => {
-    try {
-      return localStorage.getItem('soko:llm_model') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [llmProvider, setLlmProvider] = useState(() => {
-    try {
-      return localStorage.getItem('soko:llm_provider') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    try {
-      const raw = localStorage.getItem('soko:assistant_sidebar');
-      if (raw) return raw === 'open';
-    } catch {}
-    return true;
-  });
+  const [llmModel, setLlmModel] = useState('');
+  const [llmProvider, setLlmProvider] = useState('');
+  const [modelProviders, setModelProviders] = useState<Array<{ id: string; label?: string; models?: Array<{ id: string; label?: string }> }>>([]);
+  const [defaultProvider, setDefaultProvider] = useState('');
+  const [defaultModel, setDefaultModel] = useState('');
+  const [effectiveProvider, setEffectiveProvider] = useState('');
+  const [effectiveModel, setEffectiveModel] = useState('');
+  const [allowModelOverride, setAllowModelOverride] = useState(false);
+  const [modelConfigError, setModelConfigError] = useState<string | null>(null);
+  const [modelConfigLoading, setModelConfigLoading] = useState(false);
+  const [providerSearch, setProviderSearch] = useState('');
+  const [modelSearch, setModelSearch] = useState('');
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sellerKpis, setSellerKpis] = useState<KPISummary | null>(null);
   const [sellerFunnel, setSellerFunnel] = useState<FunnelMetrics | null>(null);
   const [inventoryInsight, setInventoryInsight] = useState<InventoryInsight | null>(null);
@@ -195,15 +207,56 @@ export const Assistant: React.FC<AssistantProps> = ({
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
   const showIntroCards = !activeMessages.some(m => m.role === 'user');
-  const [showNewMemberIntro, setShowNewMemberIntro] = useState(() => {
-    try {
-      const completed = localStorage.getItem('soko:onboarding_completed') === 'true';
-      const seen = localStorage.getItem('soko:assistant_new_member_intro_seen') === 'true';
-      return completed && !seen;
-    } catch {
-      return false;
-    }
+  const resolvedProviderId = llmProvider || defaultProvider;
+  const providerModels = modelProviders.find((provider) => provider.id === resolvedProviderId)?.models || [];
+  const filteredProviders = modelProviders.filter((provider) => {
+    const label = (provider.label || provider.id || '').toLowerCase();
+    return label.includes(providerSearch.trim().toLowerCase());
   });
+  const filteredModels = providerModels.filter((model) => {
+    const label = (model.label || model.id || '').toLowerCase();
+    return label.includes(modelSearch.trim().toLowerCase());
+  });
+  const [showNewMemberIntro, setShowNewMemberIntro] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setModelConfigLoading(true);
+    setModelConfigError(null);
+    getAssistantPreferences()
+      .then((resp) => {
+        if (!active) return;
+        const providers = Array.isArray(resp?.providers) ? resp.providers : [];
+        setModelProviders(providers as any);
+        setDefaultProvider(resp?.default_provider || '');
+        setDefaultModel(resp?.default_model || '');
+        setAllowModelOverride(Boolean(resp?.allow_user_override));
+        setEffectiveProvider(resp?.effective_provider || resp?.default_provider || '');
+        setEffectiveModel(resp?.effective_model || resp?.default_model || '');
+        setLlmProvider(resp?.preferred_provider || '');
+        setLlmModel(resp?.preferred_model || '');
+        setAssistantActionUsage(resp?.action_usage || {});
+        if (typeof resp?.sidebar_open === 'boolean') {
+          setIsSidebarOpen(resp.sidebar_open);
+        }
+        if (typeof resp?.intro_seen === 'boolean') {
+          const completed = localStorage.getItem('soko:onboarding_completed') === 'true';
+          if (completed && !resp.intro_seen) {
+            setShowNewMemberIntro(true);
+          }
+        }
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setModelConfigError(err?.message || 'Unable to load model preferences.');
+      })
+      .finally(() => {
+        if (active) setModelConfigLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -219,6 +272,33 @@ export const Assistant: React.FC<AssistantProps> = ({
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!showCamera || !cameraStream || !cameraVideoRef.current) return;
+    const video = cameraVideoRef.current;
+    video.srcObject = cameraStream;
+    video.muted = true;
+    (video as any).playsInline = true;
+    video.play().catch(() => {
+      setCameraError('Unable to start camera preview.');
+    });
+  }, [showCamera, cameraStream]);
+
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    };
+  }, [cameraStream]);
   const toNumber = (value: any) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -559,24 +639,6 @@ export const Assistant: React.FC<AssistantProps> = ({
     }
   ].filter(card => card.show) : [];
   const canAccessSeller = isSellerAccount === true;
-  const quickActions = [
-    { label: 'Feed', icon: Sparkles, onClick: onOpenFeed },
-    { label: 'Search', icon: Search, onClick: () => setInput('/search ') },
-    { label: 'Compare', icon: ArrowRightLeft, onClick: () => setInput('/compare ') },
-    { label: 'Group Buys', icon: Users, onClick: () => onOpenGroupBuys() },
-    { label: 'Photo', icon: Camera, onClick: () => onOpenSearchAction('photo search', 'photo') },
-    { label: 'Voice', icon: Mic, onClick: () => onOpenSearchAction('voice search', 'voice') },
-    { label: 'Bag', icon: ShoppingBag, onClick: () => onOpenBag() },
-    ...(canAccessSeller ? [{ label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ() }] : []),
-    { label: 'Rewards', icon: Trophy, onClick: () => onOpenRewards() }
-  ];
-  const moreActions = [
-    { label: 'Subscriptions', icon: BadgeCheck, onClick: () => onOpenSubscriptions() },
-    { label: 'Partnerships', icon: Plug, onClick: () => onOpenPartnerships() },
-    { label: 'WhatsApp', icon: MessageCircle, onClick: () => onOpenWhatsApp() },
-    ...(canAccessSeller ? [{ label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio() }] : []),
-    { label: 'Scan QR', icon: Camera, onClick: () => onOpenQrScan() }
-  ];
   const [suggestionChips, setSuggestionChips] = useState<Array<{ label: string; value: string }>>([]);
 
   const mapThreadToChat = (thread: any): AssistantChat => ({
@@ -600,34 +662,79 @@ export const Assistant: React.FC<AssistantProps> = ({
     products.find((product) => product.id === productId || product.productId === productId);
 
   const getActionUsage = (label: string) => {
-    if (typeof window === 'undefined') return 0;
-    try {
-      const raw = localStorage.getItem('soko:assistant_action_usage');
-      if (!raw) return 0;
-      const parsed = JSON.parse(raw) as Record<string, number>;
-      return parsed[label] ?? 0;
-    } catch {
-      return 0;
+    return assistantActionUsage[label] ?? 0;
+  };
+
+  const getActionTone = (label: string) => {
+    switch (label) {
+      case 'Search':
+        return 'cyan';
+      case 'Compare':
+        return 'violet';
+      case 'Group Buys':
+        return 'amber';
+      case 'Bag':
+        return 'emerald';
+      case 'Rewards':
+        return 'rose';
+      case 'Subscriptions':
+        return 'slate';
+      case 'Partnerships':
+        return 'indigo';
+      case 'Scan QR':
+        return 'fuchsia';
+      case 'Feed':
+        return 'emerald';
+      case 'RFQ':
+        return 'amber';
+      case 'Seller Studio':
+        return 'violet';
+      default:
+        return 'slate';
     }
   };
 
-  const bumpActionUsage = (label: string) => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = localStorage.getItem('soko:assistant_action_usage');
-      const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {};
-      parsed[label] = (parsed[label] ?? 0) + 1;
-      localStorage.setItem('soko:assistant_action_usage', JSON.stringify(parsed));
-      setUsageTick((prev) => prev + 1);
-    } catch {}
+  const actionToneClasses: Record<string, string> = {
+    cyan: 'border-cyan-400/20 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20',
+    violet: 'border-violet-400/20 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20',
+    amber: 'border-amber-400/20 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20',
+    emerald: 'border-emerald-400/20 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20',
+    rose: 'border-rose-400/20 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20',
+    slate: 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20',
+    indigo: 'border-indigo-400/20 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20',
+    fuchsia: 'border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20',
   };
 
-  const sortActionsByUsage = (items: AssistantAction[]) =>
+  const bumpActionUsage = (label: string) => {
+    setAssistantActionUsage((prev) => {
+      const parsed = { ...prev, [label]: (prev[label] ?? 0) + 1 };
+      void updateAssistantPreferences({ action_usage: parsed }).catch(() => {});
+      return parsed;
+    });
+  };
+
+  const sortActionsByUsage = <T extends AssistantAction>(items: T[]) =>
     [...items].sort((a, b) => {
       const usageDiff = getActionUsage(b.label) - getActionUsage(a.label);
       if (usageDiff !== 0) return usageDiff;
       return a.label.localeCompare(b.label);
     });
+
+  const quickActions = sortActionsByUsage<QuickAction>([
+    { label: 'Feed', icon: Sparkles, onClick: onOpenFeed, tone: getActionTone('Feed') },
+    { label: 'Search', icon: Search, onClick: () => onOpenSearch(''), tone: getActionTone('Search') },
+    { label: 'Compare', icon: ArrowRightLeft, onClick: () => setInput('/compare '), tone: getActionTone('Compare') },
+    { label: 'Group Buys', icon: Users, onClick: () => onOpenGroupBuys(), tone: getActionTone('Group Buys') },
+    { label: 'Bag', icon: ShoppingBag, onClick: () => onOpenBag(), tone: getActionTone('Bag') },
+    { label: 'Rewards', icon: Trophy, onClick: () => onOpenRewards(), tone: getActionTone('Rewards') },
+    { label: 'Subscriptions', icon: BadgeCheck, onClick: () => onOpenSubscriptions(), tone: getActionTone('Subscriptions') },
+    { label: 'Partnerships', icon: Plug, onClick: () => onOpenPartnerships(), tone: getActionTone('Partnerships') },
+    { label: 'Scan QR', icon: Camera, onClick: () => onOpenQrScan(), tone: getActionTone('Scan QR') },
+    ...(canAccessSeller ? [
+      { label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ(), tone: getActionTone('RFQ') },
+      { label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio(), tone: getActionTone('Seller Studio') },
+    ] : []),
+  ]);
 
   const sortedSuggestionChips = useMemo(() => {
     return [...suggestionChips].sort((a, b) => {
@@ -635,7 +742,7 @@ export const Assistant: React.FC<AssistantProps> = ({
       if (usageDiff !== 0) return usageDiff;
       return a.label.localeCompare(b.label);
     });
-  }, [suggestionChips, usageTick]);
+  }, [assistantActionUsage, suggestionChips]);
 
   const buildActionsFromMetadata = (metadata?: Record<string, any>): AssistantAction[] => {
     const rawActions = Array.isArray(metadata?.actions) ? metadata.actions : [];
@@ -762,11 +869,6 @@ export const Assistant: React.FC<AssistantProps> = ({
             return {
               label: label || 'Open Partnerships',
               onClick: () => onOpenPartnerships()
-            };
-          case 'open_whatsapp':
-            return {
-              label: label || 'Open WhatsApp',
-              onClick: () => onOpenWhatsApp()
             };
           case 'open_feed':
             return {
@@ -937,22 +1039,199 @@ export const Assistant: React.FC<AssistantProps> = ({
     };
   };
 
-  const saveModelPreferences = () => {
+  const openCamera = async () => {
+    if (cameraBusy || showCamera) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Camera not supported on this device.');
+      return;
+    }
+    setCameraBusy(true);
+    setCameraError(null);
     try {
-      if (llmModel) {
-        localStorage.setItem('soko:llm_model', llmModel.trim());
-      } else {
-        localStorage.removeItem('soko:llm_model');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+      setCameraStream(stream);
+      setShowCamera(true);
+    } catch (err: any) {
+      setCameraError(err?.message || 'Unable to access camera.');
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
+    setCameraStream(null);
+    setShowCamera(false);
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  };
+
+  const handleCapturePhoto = async () => {
+    if (!cameraVideoRef.current) return;
+    if (cameraBusy) return;
+    setCameraBusy(true);
+    try {
+      const video = cameraVideoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Camera unavailable.');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      if (!blob) throw new Error('Unable to capture photo.');
+      const file = new File([blob], `assistant_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      await handleAssistantMedia(file);
+      closeCamera();
+    } catch (err: any) {
+      setCameraError(err?.message || 'Unable to capture photo.');
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
+  const stopRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') {
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
       }
-      if (llmProvider) {
-        localStorage.setItem('soko:llm_provider', llmProvider.trim());
-      } else {
-        localStorage.removeItem('soko:llm_provider');
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
       }
+      setRecordingSeconds(0);
+      setIsRecording(false);
+      return;
+    }
+    try {
+      recorder.stop();
+      if (stopTimeoutRef.current) window.clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = window.setTimeout(() => {
+        if (mediaRecorderRef.current?.state !== 'inactive') {
+          try {
+            mediaRecorderRef.current?.stop();
+          } catch {}
+        }
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+          recordingStreamRef.current = null;
+        }
+        if (recordingTimerRef.current) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setRecordingSeconds(0);
+        setIsRecording(false);
+      }, 1500);
+    } catch {
+      setIsRecording(false);
+    }
+  };
+
+  const startRecording = async () => {
+    if (isRecording || transcribing) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      onToast('Voice recording is not supported on this browser.');
+      return;
+    }
+    setTranscribing(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+      setRecordingSeconds(0);
+      if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+      recorder.ondataavailable = (evt) => {
+        if (evt.data && evt.data.size > 0) recordingChunksRef.current.push(evt.data);
+      };
+      recorder.onstop = async () => {
+        if (stopTimeoutRef.current) {
+          window.clearTimeout(stopTimeoutRef.current);
+          stopTimeoutRef.current = null;
+        }
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        if (recordingTimerRef.current) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setRecordingSeconds(0);
+        const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (!blob.size) {
+          setIsRecording(false);
+          onToast('No audio captured.');
+          return;
+        }
+        setIsRecording(false);
+        setTranscribing(true);
+        try {
+          const fileName = `assistant_audio_${Date.now()}.webm`;
+          const file = new File([blob], fileName, { type: blob.type || 'audio/webm' });
+          const presign = await requestUploadPresign({
+            file_name: file.name,
+            mime_type: file.type || 'audio/webm',
+            content_length: file.size,
+            context: 'assistant_audio'
+          });
+          const uploadUrl = presign?.upload_url || presign?.url;
+          const s3Key = await uploadToPresignedUrl(file, presign);
+          const publicUrl = presign?.file_url || (uploadUrl ? uploadUrl.split('?')[0] : '');
+          const audioUrl = publicUrl || s3Key;
+          if (!audioUrl) throw new Error('Audio URL unavailable.');
+          const job = await transcribeAudio({ audio_url: audioUrl });
+          const transcript = job?.result?.text || job?.result?.transcript;
+          if (transcript && typeof transcript === 'string') {
+            setInput(transcript);
+            onToast('Voice captured. Review and send.');
+          } else {
+            onToast(job?.id ? `Transcription queued: ${job.id}` : 'Transcription queued.');
+          }
+        } catch (err: any) {
+          onToast(err?.message || 'Transcription failed.');
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err: any) {
+      onToast(err?.message || 'Microphone access failed.');
+      setIsRecording(false);
+    }
+  };
+
+  const saveModelPreferences = async () => {
+    if (!allowModelOverride) {
+      onToast('Model preferences are managed by your administrator.');
+      return;
+    }
+    try {
+      const payload = {
+        preferred_provider: llmProvider.trim(),
+        preferred_model: llmModel.trim()
+      };
+      const updated = await updateAssistantPreferences(payload);
+      setEffectiveProvider(updated?.effective_provider || updated?.default_provider || '');
+      setEffectiveModel(updated?.effective_model || updated?.default_model || '');
+      setLlmProvider(updated?.preferred_provider || '');
+      setLlmModel(updated?.preferred_model || '');
       onToast('AI model preferences updated.');
       setShowModelPicker(false);
-    } catch {
-      onToast('Unable to save AI model preferences.');
+    } catch (err: any) {
+      onToast(err?.message || 'Unable to save AI model preferences.');
     }
   };
 
@@ -1093,6 +1372,8 @@ export const Assistant: React.FC<AssistantProps> = ({
     let alive = true;
     const loadSellerSignals = async () => {
       try {
+        const marketingDefaults = await getOpsConfig('marketing.kpi_defaults').catch(() => null);
+        const configuredRange = String((marketingDefaults as any)?.value?.range || '').trim();
         const [
           kpis,
           funnel,
@@ -1117,7 +1398,7 @@ export const Assistant: React.FC<AssistantProps> = ({
           getSellerMarketBenchmarks().catch(() => null),
           listSellerAnomalies().catch(() => []),
           listSellerLowStock().catch(() => []),
-          getMarketingKPIs('30d').catch(() => null),
+          getMarketingKPIs(configuredRange || '30d').catch(() => null),
           listHotspots().catch(() => []),
           listSellerCampaigns().catch(() => []),
           getCashflow().catch(() => null),
@@ -1240,7 +1521,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   useEffect(() => {
     if (!showNewMemberIntro) return;
     try {
-      localStorage.setItem('soko:assistant_new_member_intro_seen', 'true');
+      updateAssistantPreferences({ intro_seen: true }).catch(() => {});
     } catch {}
   }, [showNewMemberIntro]);
 
@@ -1248,8 +1529,13 @@ export const Assistant: React.FC<AssistantProps> = ({
     const handleOnboardingComplete = () => {
       try {
         const completed = localStorage.getItem('soko:onboarding_completed') === 'true';
-        const seen = localStorage.getItem('soko:assistant_new_member_intro_seen') === 'true';
-        if (completed && !seen) setShowNewMemberIntro(true);
+        if (completed) {
+          getAssistantPreferences()
+            .then((resp) => {
+              if (!resp?.intro_seen) setShowNewMemberIntro(true);
+            })
+            .catch(() => {});
+        }
       } catch {}
     };
     window.addEventListener('soko:onboarding-complete', handleOnboardingComplete);
@@ -1305,9 +1591,7 @@ useEffect(() => {
   }, [handleAssistantMedia]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('soko:assistant_sidebar', isSidebarOpen ? 'open' : 'closed');
-    } catch {}
+    updateAssistantPreferences({ sidebar_open: isSidebarOpen }).catch(() => {});
   }, [isSidebarOpen]);
 
   const matchedProduct = (text: string) => {
@@ -1335,22 +1619,6 @@ useEffect(() => {
     if (cmd === '/search') {
       onOpenSearch(arg);
       return `Searching for: ${arg || 'all results'}`;
-    }
-    if (cmd === '/voice') {
-      onOpenSearchAction(arg || 'voice search', 'voice');
-      return `Starting voice search: ${arg || 'open mic'}`;
-    }
-    if (cmd === '/photo') {
-      onOpenSearchAction(arg || 'photo search', 'photo');
-      return `Starting photo search: ${arg || 'open camera'}`;
-    }
-    if (cmd === '/video') {
-      onOpenSearchAction(arg || 'video search', 'video');
-      return `Starting video search: ${arg || 'open video'}`;
-    }
-    if (cmd === '/hybrid') {
-      onOpenSearchAction(arg || 'hybrid search', 'hybrid');
-      return `Starting hybrid search: ${arg || 'photo + text'}`;
     }
     if (cmd === '/compare') {
       const product = matchedProduct(arg);
@@ -1411,10 +1679,6 @@ useEffect(() => {
     if (cmd === '/partners') {
       onOpenPartnerships();
       return 'Opening partnerships.';
-    }
-    if (cmd === '/whatsapp') {
-      onOpenWhatsApp();
-      return 'Opening WhatsApp experience flows.';
     }
     if (cmd === '/onboarding') {
       onOpenOnboarding();
@@ -1593,35 +1857,6 @@ useEffect(() => {
               </button>
             </div>
 
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">Quick Actions</p>
-              <div className="space-y-2 text-[10px] font-bold">
-                {quickActions.map(action => (
-                  <button
-                    key={action.label}
-                    onClick={action.onClick}
-                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
-                  >
-                    <action.icon className="w-3 h-3" /> {action.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">More</p>
-              <div className="space-y-2 text-[10px] font-bold">
-                {moreActions.map(action => (
-                  <button
-                    key={action.label}
-                    onClick={action.onClick}
-                    className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
-                  >
-                    <action.icon className="w-3 h-3" /> {action.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -1723,41 +1958,6 @@ useEffect(() => {
                 </button>
               </div>
 
-              <div className="mt-6">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">Quick Actions</p>
-                <div className="space-y-2 text-[10px] font-bold">
-                  {quickActions.map(action => (
-                    <button
-                      key={action.label}
-                      onClick={() => {
-                        action.onClick();
-                        setIsSidebarOpen(false);
-                      }}
-                      className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
-                    >
-                      <action.icon className="w-3 h-3" /> {action.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3">More</p>
-                <div className="space-y-2 text-[10px] font-bold">
-                  {moreActions.map(action => (
-                    <button
-                      key={action.label}
-                      onClick={() => {
-                        action.onClick();
-                        setIsSidebarOpen(false);
-                      }}
-                      className="w-full bg-white/5 rounded-xl py-2 flex items-center justify-center gap-2"
-                    >
-                      <action.icon className="w-3 h-3" /> {action.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1773,7 +1973,7 @@ useEffect(() => {
               className="lg:hidden h-11 w-11 rounded-2xl bg-white/10 flex items-center justify-center"
               aria-label="Open navigation"
             >
-              <MessageCircle className="w-5 h-5" />
+              <Sparkles className="w-5 h-5" />
             </button>
             <img
               src="/logo-header.jpg"
@@ -2007,7 +2207,18 @@ useEffect(() => {
 
         {/* Sticky Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 w-full bg-slate-950/95 backdrop-blur border-t border-white/10 px-4 pt-3 pb-4 sm:pb-5 z-40">
-          <div className="w-full max-w-5xl mx-auto">
+        <div className="w-full max-w-5xl mx-auto">
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3">
+              {quickActions.map((action) => (
+                <button
+                  key={action.label}
+                  onClick={action.onClick}
+                  className={`shrink-0 px-3 py-2 rounded-full text-[10px] font-bold whitespace-nowrap flex items-center gap-2 border transition-colors ${actionToneClasses[action.tone] || actionToneClasses.slate}`}
+                >
+                  <action.icon className="w-3 h-3" /> {action.label}
+                </button>
+              ))}
+            </div>
             {sortedSuggestionChips.length > 0 && (
               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
                 {sortedSuggestionChips.map(chip => (
@@ -2030,12 +2241,28 @@ useEffect(() => {
                 {mediaUploading ? 'Uploading media...' : mediaError}
               </div>
             )}
+            {transcribing && (
+              <div className="mb-3 text-[10px] font-bold text-emerald-200">
+                Transcribing voice…
+              </div>
+            )}
+            {isRecording && (
+              <div className="mb-3 flex items-center justify-between bg-emerald-500/10 text-emerald-100 px-3 py-2 rounded-xl text-[10px] font-black">
+                <span>Recording… {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>
+                <button
+                  onClick={stopRecording}
+                  className="px-3 py-1 rounded-full bg-emerald-500 text-white"
+                >
+                  Stop
+                </button>
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <button
-                onClick={() => onOpenSearchAction('voice search', 'voice')}
-                className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
-                aria-label="Voice search"
+                onClick={isRecording ? stopRecording : startRecording}
+                className={`h-11 w-11 rounded-full flex items-center justify-center ${isRecording ? 'bg-emerald-500 text-white' : 'bg-white/10'}`}
+                aria-label="Voice message"
               >
                 <Mic className="w-5 h-5" />
               </button>
@@ -2065,6 +2292,13 @@ useEffect(() => {
                 <Plus className="w-5 h-5" />
               </button>
               <button
+                onClick={openCamera}
+                className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10"
+                aria-label="Open camera"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
+              <button
                 onClick={handleSend}
                 className="h-11 w-11 rounded-full bg-emerald-500 flex items-center justify-center text-white"
                 aria-label="Send"
@@ -2076,13 +2310,44 @@ useEffect(() => {
         </div>
       </div>
 
+      {showCamera && (
+        <div className="fixed inset-0 z-[90] bg-black/80 flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3 text-white">
+            <span className="text-sm font-bold">Camera</span>
+            <button onClick={closeCamera} className="text-white/80 hover:text-white">Close</button>
+          </div>
+          <div className="flex-1 flex items-center justify-center px-4">
+            <div className="w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden border border-white/10">
+              <video ref={cameraVideoRef} className="w-full h-full object-cover" playsInline muted />
+            </div>
+          </div>
+          {cameraError && (
+            <div className="px-4 pb-2 text-red-200 text-[10px] font-bold text-center">{cameraError}</div>
+          )}
+          <div className="flex items-center justify-center gap-4 px-4 pb-6">
+            <button
+              onClick={closeCamera}
+              className="px-4 py-2 rounded-full bg-white/10 text-white text-[10px] font-black"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCapturePhoto}
+              disabled={cameraBusy}
+              className="px-6 py-2 rounded-full bg-emerald-500 text-white text-[10px] font-black disabled:opacity-50"
+            >
+              Capture
+            </button>
+          </div>
+        </div>
+      )}
       {showModelPicker && (
         <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-slate-950 text-white border border-white/10 rounded-3xl overflow-hidden">
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <div>
                 <p className="text-sm font-black">AI Model Preferences</p>
-                <p className="text-[10px] text-white/60">Choose provider + model (optional)</p>
+                <p className="text-[10px] text-white/60">Choose from admin-approved providers and models.</p>
               </div>
               <button
                 onClick={() => setShowModelPicker(false)}
@@ -2093,25 +2358,133 @@ useEffect(() => {
               </button>
             </div>
             <div className="p-4 space-y-3">
-              <input
-                className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px]"
-                placeholder="Provider (e.g., openrouter, azure, anthropic)"
-                value={llmProvider}
-                onChange={(e) => setLlmProvider(e.target.value)}
-              />
-              <input
-                className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px]"
-                placeholder="Model (e.g., gpt-4o-mini, claude-3.5-sonnet)"
-                value={llmModel}
-                onChange={(e) => setLlmModel(e.target.value)}
-              />
+              {modelConfigLoading ? (
+                <div className="text-[11px] text-white/60">Loading model options...</div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setProviderMenuOpen((prev) => !prev)}
+                      disabled={!allowModelOverride}
+                      className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px] text-left disabled:opacity-50"
+                    >
+                      {llmProvider
+                        ? (modelProviders.find((p) => p.id === llmProvider)?.label || llmProvider)
+                        : 'Default provider (admin)'}
+                    </button>
+                    {providerMenuOpen && (
+                      <div className="absolute z-10 mt-2 w-full rounded-2xl border border-white/10 bg-slate-950 p-2 space-y-2">
+                        <input
+                          className="w-full h-9 rounded-xl bg-white/10 px-3 text-[11px]"
+                          placeholder="Search providers..."
+                          value={providerSearch}
+                          onChange={(e) => setProviderSearch(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="w-full text-left text-[11px] px-3 py-2 rounded-xl hover:bg-white/5"
+                          onClick={() => {
+                            setLlmProvider('');
+                            setLlmModel('');
+                            setProviderMenuOpen(false);
+                            setModelMenuOpen(false);
+                            setProviderSearch('');
+                          }}
+                        >
+                          Default provider (admin)
+                        </button>
+                        {filteredProviders.map((provider) => (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            className="w-full text-left text-[11px] px-3 py-2 rounded-xl hover:bg-white/5"
+                            onClick={() => {
+                              setLlmProvider(provider.id);
+                              const models = provider.models || [];
+                              if (!models.some((m) => m.id === llmModel)) {
+                                setLlmModel(models[0]?.id || '');
+                              }
+                              setProviderMenuOpen(false);
+                              setModelMenuOpen(false);
+                              setProviderSearch('');
+                            }}
+                          >
+                            {provider.label || provider.id}
+                          </button>
+                        ))}
+                        {filteredProviders.length === 0 && (
+                          <div className="text-[10px] text-white/60 px-3 py-2">No providers found.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setModelMenuOpen((prev) => !prev)}
+                      disabled={!allowModelOverride || !llmProvider}
+                      className="w-full h-11 rounded-2xl bg-white/10 px-3 text-[12px] text-left disabled:opacity-50"
+                    >
+                      {llmModel
+                        ? (providerModels.find((m) => m.id === llmModel)?.label || llmModel)
+                        : 'Default model (admin)'}
+                    </button>
+                    {modelMenuOpen && (
+                      <div className="absolute z-10 mt-2 w-full rounded-2xl border border-white/10 bg-slate-950 p-2 space-y-2">
+                        <input
+                          className="w-full h-9 rounded-xl bg-white/10 px-3 text-[11px]"
+                          placeholder="Search models..."
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="w-full text-left text-[11px] px-3 py-2 rounded-xl hover:bg-white/5"
+                          onClick={() => {
+                            setLlmModel('');
+                            setModelMenuOpen(false);
+                            setModelSearch('');
+                          }}
+                        >
+                          Default model (admin)
+                        </button>
+                        {filteredModels.map((model) => (
+                          <button
+                            key={model.id}
+                            type="button"
+                            className="w-full text-left text-[11px] px-3 py-2 rounded-xl hover:bg-white/5"
+                            onClick={() => {
+                              setLlmModel(model.id);
+                              setModelMenuOpen(false);
+                              setModelSearch('');
+                            }}
+                          >
+                            {model.label || model.id}
+                          </button>
+                        ))}
+                        {filteredModels.length === 0 && (
+                          <div className="text-[10px] text-white/60 px-3 py-2">No models found.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+              {modelConfigError && (
+                <div className="text-[10px] text-red-200">{modelConfigError}</div>
+              )}
               <div className="text-[10px] text-white/60">
-                Leave blank to use the default configured on the server.
+                Effective: {effectiveProvider || defaultProvider || '—'} / {effectiveModel || defaultModel || '—'}
               </div>
+              {!allowModelOverride && (
+                <div className="text-[10px] text-white/60">Managed by your administrator.</div>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   onClick={saveModelPreferences}
-                  className="px-4 py-2 bg-emerald-500 rounded-xl text-[10px] font-black text-white"
+                  className="px-4 py-2 bg-emerald-500 rounded-xl text-[10px] font-black text-white disabled:opacity-50"
+                  disabled={!allowModelOverride}
                 >
                   Save
                 </button>

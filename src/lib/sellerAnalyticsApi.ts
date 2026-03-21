@@ -13,6 +13,9 @@ export type KPISummary = {
   sessions?: number;
   pdp_views_per_session?: number;
   cart_abandonment?: number;
+  items_per_order?: number;
+  rating_avg?: number;
+  rating_count?: number;
 };
 
 export type FunnelMetrics = {
@@ -31,6 +34,10 @@ export type InventoryInsight = {
   reorder_point?: number;
   days_cover?: number;
   inventory_value?: number;
+  total_stock?: number;
+  total_items?: number;
+  low_stock?: number;
+  top_categories?: Array<{ category?: string; count?: number }>;
 };
 
 export type BuyerInsight = {
@@ -47,6 +54,7 @@ export type MarketBenchmarks = {
   competitor_stock?: number;
   market_share?: number;
   competitor_median_price?: number;
+  competitor_pricing?: Array<{ category?: string; your_price?: number; market_price?: number }>;
 };
 
 export type Anomaly = {
@@ -55,6 +63,122 @@ export type Anomaly = {
   severity?: number;
   details?: string;
   created_at?: string;
+};
+
+export type ChannelMixItem = {
+  channel?: string;
+  label?: string;
+  value?: number;
+  pct?: number;
+  count?: number;
+};
+
+export type MarketDemandItem = {
+  category?: string;
+  demand?: number;
+  seller_share?: number;
+  sellerShare?: number;
+};
+
+export type MarketTrendingItem = {
+  name?: string;
+  searches?: number;
+  trend?: string;
+  category?: string;
+  category_path?: string;
+};
+
+export type TrendingSupplierItem = {
+  name?: string;
+  searches?: number;
+  trend?: string;
+  category?: string;
+  category_path?: string;
+  supplier_id?: string;
+  supplier_name?: string;
+  supplier_rating?: number;
+  supplier_verified?: boolean;
+};
+
+export type CustomerDemographicItem = {
+  segment?: string;
+  name?: string;
+  percent?: number;
+  value?: number;
+  color?: string;
+};
+
+export type SellerAlert = {
+  type?: string;
+  label?: string;
+  unit?: string;
+  threshold?: number;
+  active?: boolean;
+};
+
+export type LiveBuyerPoint = {
+  lat?: number;
+  lng?: number;
+  scan_count?: number;
+  scanCount?: number;
+};
+
+export type PeakHourItem = {
+  hour?: number;
+  searches?: number;
+};
+
+export type SalesSeriesItem = {
+  date?: string;
+  label?: string;
+  sales?: number;
+  orders?: number;
+  sessions?: number;
+  views?: number;
+  reach?: number;
+};
+
+export type SalesVelocityItem = {
+  date?: string;
+  label?: string;
+  orders?: number;
+  sessions?: number;
+  velocity?: number;
+};
+
+export type InventorySeriesItem = {
+  date?: string;
+  label?: string;
+  stock_level?: number;
+  stockLevel?: number;
+};
+
+export type ConversionSeriesItem = {
+  date?: string;
+  label?: string;
+  orders?: number;
+  sessions?: number;
+  conversion_rate?: number;
+  conversionRate?: number;
+};
+
+export type TopProductItem = {
+  seller_product_id?: string;
+  product_id?: string;
+  name?: string;
+  orders?: number;
+  units?: number;
+  revenue?: number;
+  current_price?: number;
+};
+
+export type DataQuality = {
+  coverage?: number;
+  media_coverage?: number;
+  category_coverage?: number;
+  freshness_days?: number;
+  verification_rate?: number;
+  anomaly_rate?: number;
 };
 
 const unwrapList = <T>(data: any): T[] => {
@@ -83,3 +207,58 @@ export const listSellerAnomalies = async (): Promise<Anomaly[]> =>
 
 export const requestSellerWhatsAppDailySummary = async () =>
   apiFetch('/v1/seller/comms/whatsapp/daily-summary', { method: 'POST' });
+
+export const getSellerChannelMix = async (): Promise<ChannelMixItem[]> =>
+  unwrapList(await apiFetch('/v1/seller/channel-mix'));
+
+export const getSellerMarketDemand = async (): Promise<MarketDemandItem[]> =>
+  unwrapList(await apiFetch('/v1/seller/market/demand'));
+
+export const getSellerMarketTrending = async (): Promise<MarketTrendingItem[]> =>
+  unwrapList(await apiFetch('/v1/seller/market/trending'));
+
+export const getSellerTrendingSuppliers = async (): Promise<TrendingSupplierItem[]> =>
+  unwrapList(await apiFetch('/v1/seller/market/trending-suppliers'));
+
+export const getSellerCustomerDemographics = async (): Promise<CustomerDemographicItem[]> =>
+  unwrapList(await apiFetch('/v1/seller/customers/demographics'));
+
+export const getSellerAlerts = async (): Promise<SellerAlert[]> =>
+  unwrapList(await apiFetch('/v1/seller/alerts'));
+
+export const updateSellerAlerts = async (items: SellerAlert[]): Promise<SellerAlert[]> =>
+  unwrapList(
+    await apiFetch('/v1/seller/alerts', {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
+    }),
+  );
+
+export const getSellerLiveBuyers = async (windowHours?: number): Promise<LiveBuyerPoint[]> =>
+  unwrapList(await apiFetch(`/v1/seller/live-buyers${windowHours ? `?window=${windowHours}` : ''}`));
+
+export const getSellerPeakHours = async (days?: number): Promise<PeakHourItem[]> =>
+  unwrapList(await apiFetch(`/v1/seller/peak-hours${days ? `?days=${days}` : ''}`));
+
+export const getSellerSalesSeries = async (days?: number): Promise<SalesSeriesItem[]> =>
+  unwrapList(await apiFetch(`/v1/seller/timeseries/sales${days ? `?days=${days}` : ''}`));
+
+export const getSellerSalesVelocity = async (days?: number): Promise<SalesVelocityItem[]> =>
+  unwrapList(await apiFetch(`/v1/seller/sales/velocity${days ? `?days=${days}` : ''}`));
+
+export const getSellerInventorySeries = async (days?: number): Promise<InventorySeriesItem[]> =>
+  unwrapList(await apiFetch(`/v1/seller/timeseries/inventory${days ? `?days=${days}` : ''}`));
+
+export const getSellerConversionSeries = async (days?: number): Promise<ConversionSeriesItem[]> =>
+  unwrapList(await apiFetch(`/v1/seller/timeseries/conversion${days ? `?days=${days}` : ''}`));
+
+export const getSellerTopProducts = async (days?: number, limit?: number): Promise<TopProductItem[]> => {
+  const params = new URLSearchParams();
+  if (days && days > 0) params.set('days', String(days));
+  if (limit && limit > 0) params.set('limit', String(limit));
+  const query = params.toString();
+  return unwrapList(await apiFetch(`/v1/seller/top-products${query ? `?${query}` : ''}`));
+};
+
+export const getSellerDataQuality = async (): Promise<DataQuality> =>
+  apiFetch('/v1/seller/data-quality');

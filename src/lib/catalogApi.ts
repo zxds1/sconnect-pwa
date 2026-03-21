@@ -18,7 +18,20 @@ export type ProductReview = {
   replies?: Array<{ id?: string; seller_name?: string; comment?: string; created_at?: string }>;
 };
 
+export type ProductCreate = {
+  name: string;
+  description?: string;
+  category_id: string;
+  tags?: string[];
+};
+
 export const getProduct = async (id: string): Promise<any> => apiFetch(`/v1/products/${id}`);
+
+export const createProduct = async (payload: ProductCreate): Promise<any> =>
+  apiFetch('/v1/products', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
 const unwrapList = <T>(data: any): T[] => {
   if (Array.isArray(data)) return data;

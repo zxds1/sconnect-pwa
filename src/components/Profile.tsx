@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion } from 'motion/react';
-import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, AlertTriangle, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp } from 'lucide-react';
+import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp, Linkedin, Globe } from 'lucide-react';
 import { Product } from '../types';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, Tooltip
@@ -29,6 +29,7 @@ import {
 } from '../lib/profileApi';
 import { getShopProfile, getShopStats } from '../lib/shopDirectoryApi';
 import { updateSellerProfile } from '../lib/sellerProfileApi';
+import { getOpsConfig } from '../lib/opsConfigApi';
 import {
   createSupplierApplication,
   listSupplierApplications,
@@ -41,6 +42,8 @@ interface ProfileProps {
   onSettingsOpen?: () => void;
   onOpenSellerStudio?: () => void;
   onSellerAccountCreated?: () => void;
+  sellerFastTrack?: boolean;
+  onSellerFastTrackConsumed?: () => void;
   isSellerAccount?: boolean | null;
   onProductOpen: (product: Product) => void;
   sellerId?: string;
@@ -60,7 +63,7 @@ type ProfileData = {
   is_public?: boolean;
 };
 
-export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpenSellerStudio, onSellerAccountCreated, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
+export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpenSellerStudio, onSellerAccountCreated, sellerFastTrack, onSellerFastTrackConsumed, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
   const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [shopProfile, setShopProfile] = useState<Record<string, any> | null>(null);
@@ -74,12 +77,15 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const [insightsTrending, setInsightsTrending] = useState<{ trending?: string; status?: string } | null>(null);
   const [insightsReach, setInsightsReach] = useState<Record<string, any> | null>(null);
   const [insightsEngagement, setInsightsEngagement] = useState<Record<string, any> | null>(null);
+  const [insightsTargets, setInsightsTargets] = useState<{ reach_target?: number; engagement_target?: number; rating_target?: number; active_items_target?: number } | null>(null);
   const [socialConnections, setSocialConnections] = useState<any[]>([]);
   const [shareLink, setShareLink] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
-  const [editForm, setEditForm] = useState({ display_name: '', bio: '', avatar_url: '', is_public: true });
+  const [editForm, setEditForm] = useState({ display_name: '', bio: '', description: '', avatar_url: '', is_public: true });
+  const [socialForm, setSocialForm] = useState({ facebook: '', twitter: '', instagram: '', tiktok: '', linkedin: '', website: '' });
+  const [showFullDescription, setShowFullDescription] = useState(false);
   const [newPost, setNewPost] = useState({ content: '', media_url: '' });
   const [creatingSellerAccount, setCreatingSellerAccount] = useState(false);
   const [sellerAccountStatus, setSellerAccountStatus] = useState<string | null>(null);
@@ -104,17 +110,55 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
       return {
         name: shopProfile.name,
         avatar: shopProfile.avatar || shopProfile.logo,
-        description: shopProfile.description,
+        bio: shopProfile.bio || '',
+        description: shopProfile.description || '',
         is_verified: shopProfile.verified,
       } as any;
     }
     return {
       name: profile?.display_name || profile?.name || 'Profile',
-      avatar: profile?.avatar_url || profile?.avatar || 'https://picsum.photos/seed/user/200/200',
-      description: profile?.bio || profile?.description || 'Your profile overview.',
+      avatar: profile?.avatar_url || profile?.avatar || '/logo.jpg',
+      bio: profile?.bio || '',
+      description: profile?.description || '',
       is_verified: false,
     } as any;
   }, [isOwnProfile, profile, shopProfile]);
+
+  const sellerProducts = sellerId ? products.filter(p => p.sellerId === sellerId) : [];
+
+  const parseNumber = (value: any) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'string') {
+      const cleaned = value.replace('%', '').trim();
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const reachValue = parseNumber(insightsReach?.total_reach ?? insights?.total_reach);
+  const engagementValue = parseNumber(insightsEngagement?.engagement_rate ?? insights?.engagement_rate);
+  const ratingValue = parseNumber(shopStats?.rating ?? shopProfile?.rating);
+  const activeItemsValue = sellerProducts.length;
+
+  const reachTarget = Number(insightsTargets?.reach_target ?? 0);
+  const engagementTarget = Number(insightsTargets?.engagement_target ?? 0);
+  const ratingTarget = Number(insightsTargets?.rating_target ?? 0);
+  const activeItemsTarget = Number(insightsTargets?.active_items_target ?? 0);
+
+  const reachPct = reachValue !== null && reachTarget > 0 ? Math.min(100, (reachValue / reachTarget) * 100) : null;
+  const engagementPct = engagementValue !== null && engagementTarget > 0 ? Math.min(100, (engagementValue / engagementTarget) * 100) : null;
+  const ratingPct = ratingValue !== null && ratingTarget > 0 ? Math.min(100, (ratingValue / ratingTarget) * 100) : null;
+  const activeItemsPct = activeItemsTarget > 0 ? Math.min(100, (activeItemsValue / activeItemsTarget) * 100) : null;
+
+  const formatEngagement = () => {
+    const raw = insightsEngagement?.engagement_rate ?? insights?.engagement_rate;
+    if (raw === null || raw === undefined || raw === '') return '—';
+    if (typeof raw === 'string') return raw;
+    const numeric = Number(raw);
+    return Number.isFinite(numeric) ? `${numeric}%` : '—';
+  };
 
   const stats = useMemo(() => {
     if (!isOwnProfile && shopStats) {
@@ -131,7 +175,6 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     };
   }, [isOwnProfile, shopStats, favorites.length, insights, likes.length]);
 
-  const sellerProducts = sellerId ? products.filter(p => p.sellerId === sellerId) : [];
   const likedProducts = useMemo(() => {
     const likedIds = likes.map((item) => item.product_id || item.productId || item.id);
     return products.filter(p => likedIds.includes(p.id));
@@ -188,8 +231,25 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           setEditForm({
             display_name: profileResp?.display_name || '',
             bio: profileResp?.bio || '',
+            description: profileResp?.description || '',
             avatar_url: profileResp?.avatar_url || '',
             is_public: profileResp?.is_public ?? true,
+          });
+          const normalizeSocial = (item: any) =>
+            item?.url || item?.account_url || item?.profile_url || item?.account_id || item?.handle || '';
+          const socialMap = (socialResp || []).reduce((acc: Record<string, string>, item: any) => {
+            const platform = String(item?.platform || '').toLowerCase();
+            if (!platform) return acc;
+            acc[platform] = normalizeSocial(item);
+            return acc;
+          }, {});
+          setSocialForm({
+            facebook: socialMap.facebook || '',
+            twitter: socialMap.twitter || '',
+            instagram: socialMap.instagram || '',
+            tiktok: socialMap.tiktok || '',
+            linkedin: socialMap.linkedin || '',
+            website: socialMap.website || ''
           });
         }
       } catch (err: any) {
@@ -204,6 +264,22 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
       alive = false;
     };
   }, [sellerId]);
+
+  useEffect(() => {
+    let active = true;
+    getOpsConfig('profile.insights_targets')
+      .then((resp) => {
+        if (!active) return;
+        setInsightsTargets((resp as any)?.value ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setInsightsTargets(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const refreshSupplierApps = useCallback(async (aliveRef?: { current: boolean }) => {
     if (!isOwnProfile || !isSellerAccount) return;
@@ -281,35 +357,44 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     }
   };
 
+  const normalizeSocialValue = (item: any) =>
+    item?.url || item?.account_url || item?.profile_url || item?.account_id || item?.handle || '';
+
+  const getSocialLink = (platform: string) => {
+    const key = platform.toLowerCase();
+    const match = socialConnections.find((s) => String(s.platform || '').toLowerCase() === key);
+    return normalizeSocialValue(match);
+  };
+
+  const buildSocialUrl = (platform: string, raw: string) => {
+    const key = platform.toLowerCase();
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (key === 'website') return `https://${trimmed.replace(/^\/+/, '')}`;
+    const handle = trimmed.replace(/^@/, '');
+    if (key === 'facebook') return `https://www.facebook.com/${handle}`;
+    if (key === 'twitter') return `https://twitter.com/${handle}`;
+    if (key === 'instagram') return `https://www.instagram.com/${handle}`;
+    if (key === 'tiktok') return `https://www.tiktok.com/@${handle}`;
+    if (key === 'linkedin') return `https://www.linkedin.com/in/${handle}`;
+    return trimmed;
+  };
+
+  const hasSocialLinks = useMemo(() => {
+    if (!socialConnections.length) return false;
+    return socialConnections.some((s) => Boolean(normalizeSocialValue(s)));
+  }, [socialConnections]);
+
   const handleSocialAction = async (platform: string) => {
-    if (!isOwnProfile) {
-      const url = window.location.href;
-      const text = `Check out ${profileData.name} on Sconnect!`;
-      let shareUrl = '';
-      if (platform === 'facebook') {
-        shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
-      } else if (platform === 'twitter') {
-        shareUrl = `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
-      } else if (platform === 'instagram') {
-        alert('Copy link to share on Instagram!');
-        return;
-      }
-      if (shareUrl) window.open(shareUrl, '_blank');
+    const raw = getSocialLink(platform);
+    const url = buildSocialUrl(platform, raw);
+    if (url) {
+      window.open(url, '_blank');
       return;
     }
-
-    const connected = socialConnections.some((s) => s.platform === platform);
-    try {
-      if (connected) {
-        await disconnectProfileSocial({ platform });
-      } else {
-        const accountId = window.prompt(`Enter your ${platform} handle:`) || '';
-        await connectProfileSocial({ platform, account_id: accountId });
-      }
-      const updated = await listProfileSocial();
-      setSocialConnections(updated || []);
-    } catch (err: any) {
-      setError(err?.message || 'Unable to update social connection.');
+    if (isOwnProfile) {
+      setShowEdit(true);
     }
   };
 
@@ -333,6 +418,20 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     try {
       const updated = await updateProfile(editForm);
       setProfile((prev) => ({ ...prev, ...(updated || editForm) }));
+      const platforms: Array<keyof typeof socialForm> = ['facebook', 'twitter', 'instagram', 'tiktok', 'linkedin', 'website'];
+      await Promise.all(platforms.map(async (platform) => {
+        const desired = (socialForm[platform] || '').trim();
+        const existing = getSocialLink(platform).trim();
+        if (desired) {
+          if (desired !== existing) {
+            await connectProfileSocial({ platform, account_id: desired });
+          }
+        } else if (existing) {
+          await disconnectProfileSocial({ platform });
+        }
+      }));
+      const updatedSocial = await listProfileSocial();
+      setSocialConnections(updatedSocial || []);
       setShowEdit(false);
     } catch (err: any) {
       setError(err?.message || 'Unable to update profile.');
@@ -379,17 +478,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   useEffect(() => {
     if (!isOwnProfile) return;
     if (isSellerAccount !== false) return;
-    if (autoSellerRequested) return;
-    try {
-      const flag = localStorage.getItem('soko:fast_track_seller');
-      if (flag !== 'true') return;
-      localStorage.removeItem('soko:fast_track_seller');
-    } catch {
-      return;
-    }
+    if (autoSellerRequested || !sellerFastTrack) return;
     setAutoSellerRequested(true);
     handleCreateSellerAccount();
-  }, [isOwnProfile, isSellerAccount, autoSellerRequested]);
+    onSellerFastTrackConsumed?.();
+  }, [isOwnProfile, isSellerAccount, autoSellerRequested, sellerFastTrack, onSellerFastTrackConsumed]);
 
   const requestSupplierLocation = async (): Promise<{ lat: number; lng: number } | null> => {
     if (!navigator.geolocation) {
@@ -682,21 +775,64 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           </a>
         )}
 
-        <p className="text-sm text-zinc-500 mb-6 text-center max-w-xs leading-relaxed">
-          {profileData.description}
-        </p>
+        {profileData.bio ? (
+          <p className="text-sm text-zinc-700 mb-2 text-center max-w-xs leading-relaxed font-semibold">
+            {profileData.bio}
+          </p>
+        ) : (
+          isOwnProfile && (
+            <p className="text-xs text-zinc-400 mb-2 text-center max-w-xs leading-relaxed">
+              Add a short bio so people know you.
+            </p>
+          )
+        )}
+        {(() => {
+          const description = profileData.description || '';
+          const limit = 160;
+          const isLong = description.length > limit;
+          const displayText = showFullDescription || !isLong
+            ? description
+            : `${description.slice(0, limit).trim()}…`;
+          if (!description) {
+            return isOwnProfile ? (
+              <p className="text-sm text-zinc-500 mb-6 text-center max-w-xs leading-relaxed">
+                Add a description about your shop or yourself.
+              </p>
+            ) : null;
+          }
+          return (
+            <div className="mb-6 text-center max-w-xs">
+              <p className="text-sm text-zinc-500 leading-relaxed">{displayText}</p>
+              {isLong && (
+                <button
+                  onClick={() => setShowFullDescription((prev) => !prev)}
+                  className="mt-1 text-[10px] font-bold text-indigo-600"
+                >
+                  {showFullDescription ? 'Show less' : 'Show more'}
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
-        <div className="flex gap-4 mb-8">
-          <button onClick={() => handleSocialAction('facebook')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
-            <Facebook className="w-5 h-5" />
-          </button>
-          <button onClick={() => handleSocialAction('twitter')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
-            <Twitter className="w-5 h-5" />
-          </button>
-          <button onClick={() => handleSocialAction('instagram')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
-            <Instagram className="w-5 h-5" />
-          </button>
-        </div>
+        {(isOwnProfile || hasSocialLinks) && (
+          <div className="flex gap-4 mb-8">
+            <button onClick={() => handleSocialAction('facebook')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
+              <Facebook className="w-5 h-5" />
+            </button>
+            <button onClick={() => handleSocialAction('twitter')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
+              <Twitter className="w-5 h-5" />
+            </button>
+            <button onClick={() => handleSocialAction('instagram')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
+              <Instagram className="w-5 h-5" />
+            </button>
+            {isOwnProfile && (
+              <button onClick={() => setShowEdit(true)} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors text-white">
+                <ExternalLink className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex w-full justify-around mb-8 max-w-sm">
           <div className="flex flex-col items-center">
@@ -732,16 +868,6 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                 }`}
               >
                 {isFollowingSeller ? 'Following' : 'Follow'}
-              </button>
-              <button className="flex-1 py-2.5 bg-zinc-100 text-zinc-900 rounded-xl font-bold text-sm active:scale-95 transition-transform">
-                Message
-              </button>
-              <button
-                onClick={() => alert('Seller escalation initiated. Our trust & safety team will review this shop.')}
-                className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors"
-                title="Escalate Seller"
-              >
-                <AlertTriangle className="w-5 h-5" />
               </button>
             </>
           )}
@@ -793,12 +919,17 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                 </p>
                 <div className="flex items-center gap-2">
                   <p className="text-xl font-black text-zinc-900">
-                    {activeTab === 'intelligence' ? (insightsReach?.total_reach || insights?.total_reach || 0) : (shopStats?.rating || shopProfile?.rating || '4.8')}
+                    {activeTab === 'intelligence'
+                      ? (reachValue !== null ? reachValue.toLocaleString() : '—')
+                      : (ratingValue !== null ? ratingValue.toFixed(1) : '—')}
                   </p>
                   {activeTab === 'stats' && <Star className="w-4 h-4 text-amber-500 fill-amber-500" />}
                 </div>
                 <div className="mt-2 h-1 w-full bg-zinc-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-500 w-[85%]" />
+                  <div
+                    className="h-full bg-indigo-500"
+                    style={{ width: `${activeTab === 'intelligence' ? (reachPct ?? 0) : (ratingPct ?? 0)}%` }}
+                  />
                 </div>
               </div>
               <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
@@ -806,10 +937,13 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                   {activeTab === 'intelligence' ? 'Engagement' : 'Active Items'}
                 </p>
                 <p className="text-xl font-black text-zinc-900">
-                  {activeTab === 'intelligence' ? (insightsEngagement?.engagement_rate || insights?.engagement_rate || '0%') : sellerProducts.length}
+                  {activeTab === 'intelligence' ? formatEngagement() : activeItemsValue}
                 </p>
                 <div className="mt-2 h-1 w-full bg-zinc-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 w-[62%]" />
+                  <div
+                    className="h-full bg-emerald-500"
+                    style={{ width: `${activeTab === 'intelligence' ? (engagementPct ?? 0) : (activeItemsPct ?? 0)}%` }}
+                  />
                 </div>
               </div>
             </div>
@@ -1082,12 +1216,69 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                 value={editForm.bio}
                 onChange={(e) => setEditForm(prev => ({ ...prev, bio: e.target.value }))}
               />
+              <textarea
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+                rows={4}
+                placeholder="Description"
+                value={editForm.description}
+                onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
+              />
               <input
                 className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
                 placeholder="Avatar URL"
                 value={editForm.avatar_url}
                 onChange={(e) => setEditForm(prev => ({ ...prev, avatar_url: e.target.value }))}
               />
+              <div className="pt-2">
+                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Social Links</p>
+                <div className="mt-2 grid grid-cols-1 gap-2">
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <Facebook className="w-4 h-4" />
+                    <input
+                      className="flex-1 p-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                      placeholder="facebook.com/yourname"
+                      value={socialForm.facebook}
+                      onChange={(e) => setSocialForm(prev => ({ ...prev, facebook: e.target.value }))}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <Twitter className="w-4 h-4" />
+                    <input
+                      className="flex-1 p-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                      placeholder="twitter.com/yourname"
+                      value={socialForm.twitter}
+                      onChange={(e) => setSocialForm(prev => ({ ...prev, twitter: e.target.value }))}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <Instagram className="w-4 h-4" />
+                    <input
+                      className="flex-1 p-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                      placeholder="instagram.com/yourname"
+                      value={socialForm.instagram}
+                      onChange={(e) => setSocialForm(prev => ({ ...prev, instagram: e.target.value }))}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <Linkedin className="w-4 h-4" />
+                    <input
+                      className="flex-1 p-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                      placeholder="linkedin.com/in/yourname"
+                      value={socialForm.linkedin}
+                      onChange={(e) => setSocialForm(prev => ({ ...prev, linkedin: e.target.value }))}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                    <Globe className="w-4 h-4" />
+                    <input
+                      className="flex-1 p-2 bg-zinc-50 rounded-xl text-xs font-bold"
+                      placeholder="yourwebsite.com"
+                      value={socialForm.website}
+                      onChange={(e) => setSocialForm(prev => ({ ...prev, website: e.target.value }))}
+                    />
+                  </label>
+                </div>
+              </div>
               <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
                 <input
                   type="checkbox"

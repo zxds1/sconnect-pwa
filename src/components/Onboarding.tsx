@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Camera, ChevronRight, CheckCircle2, Info, Trophy, TrendingUp, Sparkles, X } from 'lucide-react';
+import { ChevronRight, CheckCircle2, Info, TrendingUp, Sparkles, X } from 'lucide-react';
 import { completeOnboarding, recordOnboardingEvent } from '../lib/onboardingApi';
+import { getOpsConfig } from '../lib/opsConfigApi';
 
 interface OnboardingProps {
   onFinish: () => void;
@@ -14,44 +15,66 @@ type Slide = {
   tooltip: string;
   preview: string;
   tips?: string[];
+  steps?: Array<{ label: string; value?: string }>;
+  badges?: string[];
+  leaderboard?: Array<{ rank: number; name: string; stars?: number }>;
+  progress?: { current?: number; target?: number; label?: string };
+  summary?: string;
   type: 'welcome' | 'stars' | 'photo' | 'leaderboard' | 'dashboard' | 'search' | 'location' | 'compare' | 'ai';
 };
 
-const slides: Slide[] = [
+const DEFAULT_SLIDES: Slide[] = [
   {
     title: 'Welcome to Sconnect',
-    subtitle: "Kenya's duka demand engine • Works on WhatsApp + PWA",
-    highlight: 'See Omo +47% before stockout',
-    tooltip: 'Your dukas get real-time demand from 16k shops across Kenya.',
+    subtitle: 'Find and sell with confidence.',
+    highlight: 'Live demand insights',
+    tooltip: 'Demand signals appear once your shop is active.',
     preview: 'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
     type: 'welcome'
   },
   {
-    title: 'Earn Stars = Get Rich',
-    subtitle: 'Photo, refer, upload. Win upgrades fast.',
-    tooltip: 'Stars unlock free upgrades and top rankings. Photo daily.',
+    title: 'Earn Stars',
+    subtitle: 'Complete actions to unlock rewards.',
+    tooltip: 'Stars and rewards are configured by your operator.',
     preview: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
+    steps: [
+      { label: 'Upload receipts' },
+      { label: 'Invite other shops' },
+      { label: 'Sync inventory' }
+    ],
+    progress: {
+      label: 'Progress updates after your first activity.'
+    },
     type: 'stars'
   },
   {
-    title: 'Photo to Stars to Rank',
-    subtitle: 'Point. Shoot. We count your stock.',
-    tooltip: 'No typing. Point and shoot. We count your stock automatically.',
+    title: 'Photo to Inventory',
+    subtitle: 'Capture stock without typing.',
+    tooltip: 'Use camera capture to speed up stock updates.',
     preview: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
+    steps: [
+      { label: 'Open camera' },
+      { label: 'Capture shelf' },
+      { label: 'Review detected items' }
+    ],
+    badges: ['Camera', 'AI Count', 'Fast sync'],
+    summary: 'Capture is available from the main app once onboarding is complete.',
     type: 'photo'
   },
   {
-    title: 'Mombasa Hot List',
-    subtitle: 'Top 3 win Unilever vouchers.',
-    tooltip: 'Beat your neighbors. Top dukas get brand deals and priority alerts.',
+    title: 'Local Rankings',
+    subtitle: 'See how you rank once data is available.',
+    tooltip: 'Rankings appear when enough activity is recorded.',
     preview: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80',
+    summary: 'Leaderboards will appear after your first week.',
     type: 'leaderboard'
   },
   {
-    title: 'Your Stars Dashboard',
-    subtitle: 'Daily check: photo stock, check rank, beat Ali.',
-    tooltip: 'Daily check: photo stock, check rank, beat Ali. Free report starts now.',
+    title: 'Your Insights Dashboard',
+    subtitle: 'Track progress, inventory, and demand.',
+    tooltip: 'All metrics are sourced from live activity.',
     preview: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80',
+    summary: 'Your dashboard fills in as soon as you connect data sources.',
     type: 'dashboard'
   },
   {
@@ -91,8 +114,8 @@ const slides: Slide[] = [
 export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
   const [index, setIndex] = useState(0);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
-  const [demoStep, setDemoStep] = useState<'ready' | 'counted' | 'earned'>('ready');
+  const [slides, setSlides] = useState<Slide[]>(DEFAULT_SLIDES);
+  const [secondaryCta, setSecondaryCta] = useState<string>('');
 
   const slide = slides[index];
   const progressDots = useMemo(() => slides.map((_, i) => i <= index), [index]);
@@ -100,6 +123,67 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
   useEffect(() => {
     recordOnboardingEvent({ step: index, action: 'view' }).catch(() => {});
   }, [index]);
+
+  useEffect(() => {
+    let active = true;
+    const loadConfig = async () => {
+      try {
+        const resp = await getOpsConfig('content.onboarding');
+        const value = (resp as any)?.value || {};
+        const configSlides = Array.isArray(value.slides) ? value.slides : [];
+        const normalized = configSlides
+          .map((raw: any) => ({
+            title: String(raw?.title || ''),
+            subtitle: String(raw?.subtitle || ''),
+            highlight: raw?.highlight ? String(raw.highlight) : undefined,
+            tooltip: String(raw?.tooltip || ''),
+            preview: String(raw?.preview || ''),
+            tips: Array.isArray(raw?.tips) ? raw.tips.map((tip: any) => String(tip)) : undefined,
+            steps: Array.isArray(raw?.steps)
+              ? raw.steps.map((step: any) => ({
+                  label: String(step?.label || ''),
+                  value: step?.value ? String(step.value) : undefined,
+                })).filter((step: any) => step.label)
+              : undefined,
+            badges: Array.isArray(raw?.badges) ? raw.badges.map((badge: any) => String(badge)) : undefined,
+            leaderboard: Array.isArray(raw?.leaderboard)
+              ? raw.leaderboard.map((row: any) => ({
+                  rank: Number(row?.rank ?? 0),
+                  name: String(row?.name || ''),
+                  stars: row?.stars !== undefined ? Number(row.stars) : undefined,
+                })).filter((row: any) => row.rank > 0 && row.name)
+              : undefined,
+            progress: raw?.progress
+              ? {
+                  current: raw.progress.current !== undefined ? Number(raw.progress.current) : undefined,
+                  target: raw.progress.target !== undefined ? Number(raw.progress.target) : undefined,
+                  label: raw.progress.label ? String(raw.progress.label) : undefined,
+                }
+              : undefined,
+            summary: raw?.summary ? String(raw.summary) : undefined,
+            type: raw?.type as Slide['type'],
+          }))
+          .filter((item: any) => item.title && item.subtitle && item.tooltip && item.preview && item.type);
+        const ctaLabel = String(value?.cta_secondary?.label || '');
+        if (!active) return;
+        if (normalized.length > 0) {
+          setSlides(normalized);
+        } else {
+          setSlides(DEFAULT_SLIDES);
+        }
+        setSecondaryCta(ctaLabel);
+        setIndex((prev) => Math.min(prev, Math.max(0, (normalized.length || DEFAULT_SLIDES.length) - 1)));
+      } catch {
+        if (!active) return;
+        setSlides(DEFAULT_SLIDES);
+        setSecondaryCta('');
+      }
+    };
+    loadConfig();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleNext = async () => {
     if (index === slides.length - 1) {
@@ -111,26 +195,6 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
     }
     setShowTooltip(false);
     setIndex(prev => prev + 1);
-  };
-
-  const startDemo = () => {
-    setShowDemo(true);
-    setDemoStep('ready');
-    recordOnboardingEvent({ step: index, action: 'demo_start' }).catch(() => {});
-  };
-
-  const advanceDemo = () => {
-    if (demoStep === 'ready') {
-      setDemoStep('counted');
-      recordOnboardingEvent({ step: index, action: 'demo_counted' }).catch(() => {});
-      return;
-    }
-    if (demoStep === 'counted') {
-      setDemoStep('earned');
-      recordOnboardingEvent({ step: index, action: 'demo_earned' }).catch(() => {});
-      return;
-    }
-    setShowDemo(false);
   };
 
   return (
@@ -211,86 +275,94 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
                   <div className="relative h-40 rounded-2xl overflow-hidden border border-blue-100">
                     <img src={slide.preview} alt="Preview" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 via-transparent to-transparent" />
-                    <div className="absolute bottom-2 left-2 text-[10px] font-black uppercase tracking-widest text-white/90">Screenshot Demo</div>
+                    <div className="absolute bottom-2 left-2 text-[10px] font-black uppercase tracking-widest text-white/90">Preview</div>
                   </div>
                 </div>
 
                 {slide.type === 'stars' && (
                   <div className="mt-5 space-y-3">
-                    <div className="flex items-center justify-between text-[10px] font-bold">
-                      <div className="flex items-center gap-2 text-slate-600"><Camera className="w-3 h-3" /> Photo stock</div>
-                      <span className="text-blue-600">+2 stars</span>
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] font-bold">
-                      <div className="flex items-center gap-2 text-slate-600"><Trophy className="w-3 h-3" /> Refer duka</div>
-                      <span className="text-blue-600">+5 stars</span>
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] font-bold">
-                      <div className="flex items-center gap-2 text-slate-600"><Sparkles className="w-3 h-3" /> CSV upload</div>
-                      <span className="text-blue-600">+10 stars</span>
-                    </div>
-                    <div className="mt-3">
-                      <div className="w-full bg-blue-100 rounded-full h-3">
-                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full" style={{ width: '94%' }} />
+                    {(slide.steps || []).map((step) => (
+                      <div key={step.label} className="flex items-center justify-between text-[10px] font-bold">
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Sparkles className="w-3 h-3" /> {step.label}
+                        </div>
+                        {step.value && <span className="text-blue-600">{step.value}</span>}
                       </div>
-                      <p className="text-[10px] text-slate-500 mt-2 font-bold">47/50 stars to Free Pro Month</p>
-                    </div>
+                    ))}
+                    {(slide.progress?.current !== undefined && slide.progress?.target !== undefined) ? (
+                      <div className="mt-3">
+                        <div className="w-full bg-blue-100 rounded-full h-3">
+                          <div
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full"
+                            style={{ width: `${Math.min(100, Math.max(0, Math.round((slide.progress.current / Math.max(1, slide.progress.target)) * 100)))}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-2 font-bold">
+                          {slide.progress.current}/{slide.progress.target} stars
+                        </p>
+                      </div>
+                    ) : (
+                      slide.progress?.label && (
+                        <div className="mt-3 text-[10px] text-slate-500 font-bold">{slide.progress.label}</div>
+                      )
+                    )}
                   </div>
                 )}
 
                 {slide.type === 'photo' && (
                   <div className="mt-5 space-y-3">
-                    <ol className="text-[10px] text-slate-600 font-bold space-y-2">
-                      <li>1. Tap camera</li>
-                      <li>2. Show your Omo shelf</li>
-                      <li>3. AI counts 142 units and adds 2 stars</li>
-                    </ol>
-                    <div className="grid grid-cols-3 gap-2">
-                      {['Camera', 'AI Count', '+2 stars'].map((label) => (
-                        <div key={label} className="bg-blue-50 rounded-xl text-[9px] font-black text-blue-600 p-2 text-center">
-                          {label}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={startDemo}
-                        className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-[10px] font-black"
-                      >
-                        Try Demo
-                      </button>
-                      <button
-                        onClick={handleNext}
-                        className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black"
-                      >
-                        Skip
-                      </button>
-                    </div>
+                    {slide.steps && slide.steps.length > 0 && (
+                      <ol className="text-[10px] text-slate-600 font-bold space-y-2">
+                        {slide.steps.map((step, idx) => (
+                          <li key={step.label}>{idx + 1}. {step.label}</li>
+                        ))}
+                      </ol>
+                    )}
+                    {slide.badges && slide.badges.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {slide.badges.map((label) => (
+                          <div key={label} className="bg-blue-50 rounded-xl text-[9px] font-black text-blue-600 p-2 text-center">
+                            {label}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {slide.summary && (
+                      <div className="text-[10px] text-slate-500 font-bold">
+                        {slide.summary}
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {slide.type === 'leaderboard' && (
                   <div className="mt-5 space-y-2">
-                    {[
-                      { rank: 1, name: 'Ali', stars: 12 },
-                      { rank: 2, name: 'Fatma', stars: 9 },
-                      { rank: 3, name: 'YOU', stars: 2 }
-                    ].map((row) => (
-                      <div key={row.rank} className="flex items-center p-2 bg-slate-50 rounded-xl border border-slate-100 text-[10px] font-bold">
-                        <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center mr-3">
-                          {row.rank}
+                    {slide.leaderboard && slide.leaderboard.length > 0 ? (
+                      slide.leaderboard.map((row) => (
+                        <div key={row.rank} className="flex items-center p-2 bg-slate-50 rounded-xl border border-slate-100 text-[10px] font-bold">
+                          <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center mr-3">
+                            {row.rank}
+                          </div>
+                          <span className="text-slate-700">{row.name}</span>
+                          {row.stars !== undefined && <span className="ml-auto text-blue-600">{row.stars} stars</span>}
                         </div>
-                        <span className="text-slate-700">{row.name}</span>
-                        <span className="ml-auto text-blue-600">{row.stars} stars</span>
-                      </div>
-                    ))}
+                      ))
+                    ) : (
+                      slide.summary && (
+                        <div className="text-[10px] text-slate-500 font-bold">
+                          {slide.summary}
+                        </div>
+                      )
+                    )}
                   </div>
                 )}
 
                 {slide.type === 'dashboard' && (
-                  <div className="mt-5 bg-blue-50 rounded-2xl p-3 text-[10px] font-bold text-blue-700">
-                    Stars 2/50 progress. Rank #3 Mombasa. Quick actions ready.
-                  </div>
+                  slide.summary ? (
+                    <div className="mt-5 bg-blue-50 rounded-2xl p-3 text-[10px] font-bold text-blue-700">
+                      {slide.summary}
+                    </div>
+                  ) : null
                 )}
 
                 {slide.tips && (
@@ -338,61 +410,17 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
               </>
             )}
           </button>
-          {index === slides.length - 1 && (
+          {index === slides.length - 1 && secondaryCta && (
             <button
               onClick={handleNext}
               className="px-4 py-3 bg-white border border-blue-100 text-blue-600 rounded-xl text-[10px] font-black"
             >
-              Basic KSh2k/mo
+              {secondaryCta}
             </button>
           )}
         </div>
       </div>
 
-      <AnimatePresence>
-        {showDemo && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
-          >
-            <motion.div
-              initial={{ scale: 0.98, y: 10 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.98, y: 10 }}
-              className="w-full max-w-sm bg-white rounded-3xl overflow-hidden"
-            >
-              <div className="p-4 border-b flex items-center justify-between">
-                <div className="text-xs font-black text-slate-800">Photo Demo</div>
-                <button onClick={() => setShowDemo(false)} className="text-slate-400">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="p-4 space-y-4">
-                <div className="h-40 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-xs font-bold">
-                  Fake Camera Preview
-                </div>
-                {demoStep === 'ready' && (
-                  <div className="text-[10px] text-slate-500 font-bold">Tap capture to count stock.</div>
-                )}
-                {demoStep === 'counted' && (
-                  <div className="text-[10px] text-blue-600 font-bold">AI counted 142 units.</div>
-                )}
-                {demoStep === 'earned' && (
-                  <div className="text-[10px] text-emerald-600 font-bold">+2 stars. Leaderboard updated.</div>
-                )}
-                <button
-                  onClick={advanceDemo}
-                  className="w-full py-3 bg-blue-600 text-white rounded-xl text-[10px] font-black"
-                >
-                  {demoStep === 'earned' ? 'Close' : 'Capture'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

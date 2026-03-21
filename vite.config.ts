@@ -10,12 +10,20 @@ import {webcrypto} from 'node:crypto';
 import {defineConfig, loadEnv} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
-if (!globalThis.crypto) {
-  globalThis.crypto = webcrypto as Crypto;
+const globalAny = globalThis as any;
+if (!globalAny.crypto) {
+  globalAny.crypto = webcrypto;
+}
+if (!globalAny.global) {
+  globalAny.global = globalAny;
+}
+if (!globalAny.global.crypto) {
+  globalAny.global.crypto = globalAny.crypto;
 }
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const isDev = mode === 'development';
   return {
     plugins: [
       react(),
@@ -30,6 +38,8 @@ export default defineConfig(({mode}) => {
           short_name: 'Sconnect',
           description: 'Sconnect commerce intelligence platform with AI and data insights.',
           start_url: '/',
+          scope: '/',
+          id: '/',
           display: 'standalone',
           background_color: '#0b0b0d',
           theme_color: '#0b0b0d',
@@ -43,15 +53,19 @@ export default defineConfig(({mode}) => {
               src: '/logo.jpg',
               sizes: '512x512',
               type: 'image/jpeg'
+            },
+            {
+              src: '/logo.svg',
+              sizes: 'any',
+              type: 'image/svg+xml'
             }
           ]
         },
         workbox: {
-          mode: 'development',
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff2}']
         },
         devOptions: {
-          enabled: true
+          enabled: isDev
         }
       })
     ],

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Send, X, Loader2, Paperclip, Mic, Star, Sparkles, ShieldCheck, Minus } from 'lucide-react';
+import { Send, X, Loader2, Paperclip, Mic, Star, Sparkles, ShieldCheck, Minus, Camera } from 'lucide-react';
 import {
   createChatMessage,
   createChatThread,
@@ -10,6 +10,7 @@ import {
 } from '../lib/supportApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
 import { createThread, listMessages, streamThreadMessage, transcribeAudio } from '../lib/assistantApi';
+import { getOpsConfig } from '../lib/opsConfigApi';
 
 type SupportMode = 'duka' | 'seller-ai' | 'brand';
 
@@ -20,7 +21,7 @@ type SupportMessage = {
   metadata?: Record<string, any>;
 };
 
-const MODE_COPY: Record<SupportMode, { title: string; subtitle: string; starter: string; badge: string }> = {
+const DEFAULT_MODE_COPY: Record<SupportMode, { title: string; subtitle: string; starter: string; badge: string }> = {
   duka: {
     title: 'Duka Support',
     subtitle: 'AI + Human • QR, stock, rewards',
@@ -41,7 +42,7 @@ const MODE_COPY: Record<SupportMode, { title: string; subtitle: string; starter:
   }
 };
 
-const QUICK_REPLIES: Record<SupportMode, Array<{ label: string; value: string }>> = {
+const DEFAULT_QUICK_REPLIES: Record<SupportMode, Array<{ label: string; value: string }>> = {
   duka: [
     { label: 'QR Setup', value: 'QR not scanning. Help me fix it.' },
     { label: 'Photo Stock', value: 'I sent a shelf photo. How many units did you count?' },
@@ -66,6 +67,8 @@ export const SupportChat: React.FC<{
   mode: SupportMode;
   onClose: () => void;
 }> = ({ mode, onClose }) => {
+  const [modeCopy, setModeCopy] = useState(DEFAULT_MODE_COPY);
+  const [quickReplies, setQuickReplies] = useState(DEFAULT_QUICK_REPLIES);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -84,11 +87,57 @@ export const SupportChat: React.FC<{
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [assistantMetaByContent, setAssistantMetaByContent] = useState<Record<string, any>>({});
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraBusy, setCameraBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<BlobPart[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+  const stopTimeoutRef = useRef<number | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getOpsConfig('support.chat_copy')
+      .then((resp) => {
+        if (!alive) return;
+        const value = (resp as any)?.value || {};
+        const nextCopy = { ...DEFAULT_MODE_COPY };
+        const nextReplies = { ...DEFAULT_QUICK_REPLIES };
+        (['duka', 'seller-ai', 'brand'] as SupportMode[]).forEach((key) => {
+          const entry = value?.[key] || {};
+          if (entry && typeof entry === 'object') {
+            nextCopy[key] = {
+              title: String(entry.title || nextCopy[key].title),
+              subtitle: String(entry.subtitle || nextCopy[key].subtitle),
+              starter: String(entry.starter || nextCopy[key].starter),
+              badge: String(entry.badge || nextCopy[key].badge)
+            };
+            if (Array.isArray(entry.quick_replies)) {
+              const mapped = entry.quick_replies
+                .map((item: any) => ({
+                  label: String(item?.label || ''),
+                  value: String(item?.value || '')
+                }))
+                .filter((item: any) => item.label && item.value);
+              if (mapped.length > 0) {
+                nextReplies[key] = mapped;
+              }
+            }
+          }
+        });
+        setModeCopy(nextCopy);
+        setQuickReplies(nextReplies);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -101,11 +150,11 @@ export const SupportChat: React.FC<{
       setTicketId(null);
       setMessages([]);
       try {
-        const thread = await createChatThread({ topic: MODE_COPY[mode].title });
+        const thread = await createChatThread({ topic: DEFAULT_MODE_COPY[mode].title });
         if (ignore) return;
         setThreadId(thread?.id ?? null);
         try {
-          const aiThread = await createThread({ title: `${MODE_COPY[mode].title} Support` });
+          const aiThread = await createThread({ title: `${DEFAULT_MODE_COPY[mode].title} Support` });
           if (!ignore) setAssistantThreadId(aiThread?.id ?? null);
         } catch (err: any) {
           if (!ignore) {
@@ -139,6 +188,23 @@ export const SupportChat: React.FC<{
     boot();
     return () => {
       ignore = true;
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      if (stopTimeoutRef.current) {
+        window.clearTimeout(stopTimeoutRef.current);
+        stopTimeoutRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {}
+      }
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
     };
   }, [mode]);
 
@@ -170,8 +236,22 @@ export const SupportChat: React.FC<{
         window.clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
       }
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
     };
-  }, []);
+  }, [cameraStream]);
+
+  useEffect(() => {
+    if (!showCamera || !cameraStream || !cameraVideoRef.current) return;
+    const video = cameraVideoRef.current;
+    video.srcObject = cameraStream;
+    video.muted = true;
+    (video as any).playsInline = true;
+    video.play().catch(() => {
+      setCameraError('Unable to start camera preview.');
+    });
+  }, [showCamera, cameraStream]);
 
   const agentStatusLabels: Record<string, string> = {
     orchestrator: 'Orchestrator: Coordinating…',
@@ -360,6 +440,39 @@ export const SupportChat: React.FC<{
     fileInputRef.current?.click();
   };
 
+  const openCamera = async () => {
+    if (cameraBusy || showCamera) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Camera not supported on this device.');
+      return;
+    }
+    setCameraBusy(true);
+    setCameraError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+      setCameraStream(stream);
+      setShowCamera(true);
+    } catch (err: any) {
+      setCameraError(err?.message || 'Unable to access camera.');
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
+    setCameraStream(null);
+    setShowCamera(false);
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  };
+
   const uploadToPresignedUrl = async (file: File, presign: any) => {
     const uploadUrl = presign?.upload_url || presign?.url;
     if (!uploadUrl) throw new Error('Missing upload URL');
@@ -375,9 +488,7 @@ export const SupportChat: React.FC<{
     return presign?.s3_key || presign?.key;
   };
 
-  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
+  const uploadAttachmentFile = async (file: File) => {
     if (!file || !threadId) return;
     setUploading(true);
     setErrorMessage(null);
@@ -421,6 +532,37 @@ export const SupportChat: React.FC<{
     }
   };
 
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await uploadAttachmentFile(file);
+  };
+
+  const handleCapturePhoto = async () => {
+    if (!cameraVideoRef.current) return;
+    if (cameraBusy) return;
+    setCameraBusy(true);
+    try {
+      const video = cameraVideoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Camera unavailable.');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      if (!blob) throw new Error('Unable to capture photo.');
+      const file = new File([blob], `support_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      await uploadAttachmentFile(file);
+      closeCamera();
+    } catch (err: any) {
+      setCameraError(err?.message || 'Unable to capture photo.');
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
   const handleTranscribe = async () => {
     if (isRecording || transcribing) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
@@ -447,6 +589,7 @@ export const SupportChat: React.FC<{
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
+      recordingStreamRef.current = stream;
       recordingChunksRef.current = [];
       setRecordingSeconds(0);
       if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
@@ -457,7 +600,12 @@ export const SupportChat: React.FC<{
         if (evt.data && evt.data.size > 0) recordingChunksRef.current.push(evt.data);
       };
       recorder.onstop = async () => {
+        if (stopTimeoutRef.current) {
+          window.clearTimeout(stopTimeoutRef.current);
+          stopTimeoutRef.current = null;
+        }
         stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
         if (recordingTimerRef.current) {
           window.clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
@@ -510,8 +658,40 @@ export const SupportChat: React.FC<{
 
   const handleStopRecording = () => {
     const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
+    if (!recorder || recorder.state === 'inactive') {
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      setIsRecording(false);
+      return;
+    }
+    try {
       recorder.stop();
+      setStatusMessage('Stopping recording…');
+      if (stopTimeoutRef.current) window.clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = window.setTimeout(() => {
+        if (mediaRecorderRef.current?.state !== 'inactive') {
+          try {
+            mediaRecorderRef.current?.stop();
+          } catch {}
+        }
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+          recordingStreamRef.current = null;
+        }
+        if (recordingTimerRef.current) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+      }, 1500);
+    } catch {
+      setIsRecording(false);
     }
   };
 
@@ -521,7 +701,7 @@ export const SupportChat: React.FC<{
         onClick={() => setIsMinimized(false)}
         className="fixed bottom-6 right-6 z-[95] bg-[#0b1d3a] text-white px-4 py-3 rounded-full shadow-2xl text-[10px] font-black"
       >
-        {MODE_COPY[mode].title} • Tap to open
+        {modeCopy[mode].title} • Tap to open
       </button>
     );
   }
@@ -545,13 +725,13 @@ export const SupportChat: React.FC<{
             {mode === 'brand' ? <ShieldCheck className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
           </div>
           <div>
-            <h3 className="font-bold text-sm">{MODE_COPY[mode].title}</h3>
-            <p className="text-[10px] opacity-60">{MODE_COPY[mode].subtitle}</p>
+            <h3 className="font-bold text-sm">{modeCopy[mode].title}</h3>
+            <p className="text-[10px] opacity-60">{modeCopy[mode].subtitle}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-[10px] font-bold">
           <div className="px-2 py-1 rounded-full bg-white/10 flex items-center gap-1">
-            <Star className="w-3 h-3 text-amber-300" /> {MODE_COPY[mode].badge}
+            <Star className="w-3 h-3 text-amber-300" /> {modeCopy[mode].badge}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -569,7 +749,7 @@ export const SupportChat: React.FC<{
       </div>
 
       <div className="px-4 py-3 bg-[#f4f7fb] border-b border-[#e4edf7] flex gap-2 overflow-x-auto no-scrollbar">
-        {QUICK_REPLIES[mode].map((q) => (
+        {quickReplies[mode].map((q) => (
           <button
             key={q.label}
             onClick={() => setInput(q.value)}
@@ -592,7 +772,7 @@ export const SupportChat: React.FC<{
               </div>
               <div className="max-w-[82%] space-y-2">
                 <div className={`text-[10px] font-bold ${isUser ? 'text-[#1976D2]' : 'text-zinc-500'}`}>
-                  {isUser ? 'You' : MODE_COPY[mode].title}
+                  {isUser ? 'You' : modeCopy[mode].title}
                 </div>
                 <div className={`p-3 rounded-2xl ${
                   isUser
@@ -694,6 +874,17 @@ export const SupportChat: React.FC<{
             {statusMessage}
           </div>
         )}
+        {isRecording && (
+          <div className="mb-2 flex items-center justify-between bg-red-50 text-red-700 px-3 py-2 rounded-xl text-[10px] font-black">
+            <span>Recording… {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>
+            <button
+              onClick={handleStopRecording}
+              className="px-3 py-1 rounded-full bg-red-500 text-white"
+            >
+              Stop
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
           <input
             ref={fileInputRef}
@@ -707,6 +898,14 @@ export const SupportChat: React.FC<{
             className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50"
           >
             <Paperclip className="w-4 h-4" />
+          </button>
+          <button
+            onClick={openCamera}
+            disabled={uploading || !threadId}
+            className="p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50"
+            title="Open camera"
+          >
+            <Camera className="w-4 h-4" />
           </button>
           <button
             onClick={isRecording ? handleStopRecording : handleTranscribe}
@@ -761,6 +960,37 @@ export const SupportChat: React.FC<{
         </div>
       </div>
     </motion.div>
+    {showCamera && (
+      <div className="fixed inset-0 z-[60] bg-black/80 flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 text-white">
+          <span className="text-sm font-bold">Camera</span>
+          <button onClick={closeCamera} className="text-white/80 hover:text-white">Close</button>
+        </div>
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden border border-white/10">
+            <video ref={cameraVideoRef} className="w-full h-full object-cover" playsInline muted />
+          </div>
+        </div>
+        {cameraError && (
+          <div className="px-4 pb-2 text-red-200 text-[10px] font-bold text-center">{cameraError}</div>
+        )}
+        <div className="flex items-center justify-center gap-4 px-4 pb-6">
+          <button
+            onClick={closeCamera}
+            className="px-4 py-2 rounded-full bg-white/10 text-white text-[10px] font-black"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCapturePhoto}
+            disabled={cameraBusy}
+            className="px-6 py-2 rounded-full bg-emerald-500 text-white text-[10px] font-black disabled:opacity-50"
+          >
+            Capture
+          </button>
+        </div>
+      </div>
+    )}
     </>
   );
 };

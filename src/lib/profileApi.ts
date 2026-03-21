@@ -11,6 +11,7 @@ export const getProfile = async () => apiFetch('/v1/profile');
 export const updateProfile = async (payload: {
   display_name?: string;
   bio?: string;
+  description?: string;
   avatar_url?: string;
   is_public?: boolean;
 }) =>

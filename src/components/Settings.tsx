@@ -25,7 +25,9 @@ import {
   requestSettingsExport,
   updateConsentByType,
   getComparisonPreferences,
-  updateComparisonPreferences
+  updateComparisonPreferences,
+  getUiPreferences,
+  updateUiPreferences
 } from '../lib/settingsApi';
 
 interface SettingsProps {
@@ -66,6 +68,14 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       return false;
     }
   });
+  const [voiceDirections, setVoiceDirections] = React.useState(() => {
+    try {
+      return localStorage.getItem('soko:voice_directions') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [uiPrefsLoaded, setUiPrefsLoaded] = React.useState(false);
   const [dataSummary, setDataSummary] = React.useState({
     searches: 0,
     receipts: 0,
@@ -151,6 +161,12 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           trending: Boolean(prefs.trending),
           watched_items: Boolean(prefs.watched_items)
         });
+        const uiPrefs = await getUiPreferences();
+        if (uiPrefs?.theme === 'light' || uiPrefs?.theme === 'dark' || uiPrefs?.theme === 'system') {
+          setTheme(uiPrefs.theme);
+        }
+        setVoiceFeedback(Boolean(uiPrefs?.voice_feedback_enabled));
+        setVoiceDirections(Boolean(uiPrefs?.voice_directions_enabled));
         const comparison = await getComparisonPreferences();
         if (comparison?.comparison_weights) {
           setComparisonWeights({
@@ -178,6 +194,7 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           setConsents({ location: false, receipts: false, personalization: false, marketing: false });
           setNotificationPrefs({ price_drops: false, back_in_stock: false, trending: false, watched_items: false });
           setConsentHistory([]);
+          setUiPrefsLoaded(true);
         }
       }
     };
@@ -210,6 +227,25 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     try {
       await updateNotificationPreferences({ [field]: nextValue } as any);
       setNotificationPrefs((prev) => ({ ...prev, [field]: nextValue }));
+    } catch {}
+  };
+
+  const persistUiPrefs = async (next: Partial<{ theme: 'light' | 'dark' | 'system'; voiceFeedback: boolean; voiceDirections: boolean }>) => {
+    try {
+      const saved = await updateUiPreferences({
+        theme: next.theme ?? theme,
+        voice_feedback_enabled: next.voiceFeedback ?? voiceFeedback,
+        voice_directions_enabled: next.voiceDirections ?? voiceDirections
+      });
+      if (saved?.theme === 'light' || saved?.theme === 'dark' || saved?.theme === 'system') {
+        setTheme(saved.theme);
+      }
+      if (typeof saved?.voice_feedback_enabled === 'boolean') {
+        setVoiceFeedback(saved.voice_feedback_enabled);
+      }
+      if (typeof saved?.voice_directions_enabled === 'boolean') {
+        setVoiceDirections(saved.voice_directions_enabled);
+      }
     } catch {}
   };
 
@@ -301,19 +337,31 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
   };
 
   React.useEffect(() => {
+    if (!uiPrefsLoaded) return;
     try {
       localStorage.setItem('soko:voice_feedback', voiceFeedback ? 'true' : 'false');
     } catch {}
-  }, [voiceFeedback]);
+    void persistUiPrefs({ voiceFeedback });
+  }, [voiceFeedback, uiPrefsLoaded]);
 
   React.useEffect(() => {
+    if (!uiPrefsLoaded) return;
+    try {
+      localStorage.setItem('soko:voice_directions', voiceDirections ? 'true' : 'false');
+    } catch {}
+    void persistUiPrefs({ voiceDirections });
+  }, [voiceDirections, uiPrefsLoaded]);
+
+  React.useEffect(() => {
+    if (!uiPrefsLoaded) return;
     const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const resolved = theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
     document.documentElement.dataset.theme = resolved;
     try {
       localStorage.setItem('soko:theme', theme);
     } catch {}
-  }, [theme]);
+    void persistUiPrefs({ theme });
+  }, [theme, uiPrefsLoaded]);
 
   const sections = [
     {
@@ -717,6 +765,22 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
             </div>
             <button onClick={() => setVoiceFeedback(prev => !prev)} className="p-1 rounded-full">
               {voiceFeedback ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Voice Directions */}
+        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Volume2 className="w-5 h-5 text-indigo-500" />
+              <div>
+                <p className="text-sm font-bold text-zinc-900">Voice Directions</p>
+                <p className="text-[10px] text-zinc-500">Read route steps aloud in search and compare views.</p>
+              </div>
+            </div>
+            <button onClick={() => setVoiceDirections(prev => !prev)} className="p-1 rounded-full">
+              {voiceDirections ? <ToggleRight className="w-6 h-6 text-emerald-600" /> : <ToggleLeft className="w-6 h-6 text-zinc-300" />}
             </button>
           </div>
         </div>

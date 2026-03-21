@@ -1,4 +1,5 @@
 import { apiFetch } from './apiClient';
+import { getOpsConfig } from './opsConfigApi';
 
 export type AuthTokens = {
   access_token: string;
@@ -37,6 +38,15 @@ const matchesOfflineLogin = (payload: { phone: string; pin: string; tenant_id: s
   return phone === OFFLINE_LOGIN.phone && pin === OFFLINE_LOGIN.pin && tenant === OFFLINE_LOGIN.tenant_id;
 };
 
+const isOfflineLoginEnabled = async (): Promise<boolean> => {
+  try {
+    const cfg = await getOpsConfig('features.offline_login');
+    return Boolean((cfg as any)?.value?.enabled);
+  } catch {
+    return false;
+  }
+};
+
 const getDeviceFingerprint = () => {
   try {
     const stored = localStorage.getItem('soko:device_fingerprint');
@@ -73,7 +83,8 @@ export const login = async (payload: {
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    if (import.meta.env.DEV && matchesOfflineLogin(payload)) {
+    const offlineEnabled = import.meta.env.DEV && await isOfflineLoginEnabled();
+    if (offlineEnabled && matchesOfflineLogin(payload)) {
       try {
         localStorage.setItem('soko:role', OFFLINE_LOGIN.role);
         localStorage.setItem('soko:user_id', OFFLINE_LOGIN.user_id);

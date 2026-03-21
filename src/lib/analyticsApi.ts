@@ -61,6 +61,11 @@ export type ExportListResponse = {
   exports?: ExportResponse[];
 };
 
+const analyticsSession = {
+  correlation_id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `corr_${Math.random().toString(16).slice(2)}`,
+  session_id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `sess_${Math.random().toString(16).slice(2)}`,
+};
+
 const normalizeEvent = (event: AnalyticsEvent) => ({
   name: event.name,
   action: event.action ?? '',
@@ -72,22 +77,10 @@ const normalizeEvent = (event: AnalyticsEvent) => ({
 
 export const postAnalyticsEvent = async (event: AnalyticsEvent) => {
   const normalized = normalizeEvent(event);
-  try {
-    const correlationId = localStorage.getItem('soko:correlation_id');
-    if (correlationId) {
-      normalized.properties = {
-        ...normalized.properties,
-        correlation_id: correlationId,
-      };
-    }
-    const sessionId = localStorage.getItem('soko:session_id');
-    if (sessionId) {
-      normalized.properties = {
-        ...normalized.properties,
-        session_id: sessionId,
-      };
-    }
-  } catch {}
+  normalized.properties = {
+    ...normalized.properties,
+    ...analyticsSession,
+  };
   return apiFetch('/v1/audit/events', {
     method: 'POST',
     body: JSON.stringify({

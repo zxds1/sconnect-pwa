@@ -164,7 +164,7 @@ export const getMarketingKPIs = async (range?: string): Promise<KPIStat> => {
 export const listHotspots = async (): Promise<Hotspot[]> =>
   unwrapList(await apiFetch('/v1/seller/marketing/demand-hotspots'));
 
-export const createStockAlert = async (payload: { product_id: string; threshold: number; message: string }) =>
+export const createStockAlert = async (payload: { product_id: string; threshold?: number; message?: string }) =>
   apiFetch('/v1/seller/marketing/stock-alerts', {
     method: 'POST',
     body: JSON.stringify(payload),

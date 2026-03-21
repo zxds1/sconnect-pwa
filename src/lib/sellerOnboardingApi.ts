@@ -49,6 +49,14 @@ export type VerificationStatus = {
   submitted_at?: string;
 };
 
+export type SellerDiscovery = {
+  is_public?: boolean;
+  visibility_scope?: string;
+  paused_at?: string | null;
+  share_slug?: string;
+  share_url?: string;
+};
+
 export type OnlineConnectRequest = {
   shop_type?: string;
   platform: string;
@@ -187,6 +195,9 @@ export const completeSellerTutorial = async (payload: { tutorial_id: string }) =
 
 export const refreshSellerShareLink = async () =>
   apiFetch('/v1/seller/share-link/refresh', { method: 'POST' });
+
+export const getSellerShareLink = async (): Promise<SellerDiscovery> =>
+  apiFetch('/v1/seller/share-link');
 
 export const requestSellerVerification = async () =>
   apiFetch('/v1/seller/verification/request', { method: 'POST' });

@@ -1,15 +1,18 @@
 import { apiFetch } from './apiClient';
 
 export type SellerNotificationPreferences = {
-  email?: boolean;
-  in_app?: boolean;
-  whatsapp?: boolean;
-  sms?: boolean;
-  followers?: boolean;
+  price_drops?: boolean;
+  back_in_stock?: boolean;
+  trending?: boolean;
   marketing?: boolean;
   rewards?: boolean;
   support?: boolean;
+  system?: boolean;
+  watched_items?: boolean;
+  location_based?: boolean;
   frequency?: string;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
   updated_at?: string;
 };
 

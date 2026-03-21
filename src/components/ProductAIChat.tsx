@@ -60,6 +60,7 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
       try {
         const thread = await createChatThread({
           topic: `product:${product.id}`,
+          seller_id: product.sellerId,
         });
         if (!alive) return;
         const id = thread?.id || thread?.thread_id || thread?.threadId;

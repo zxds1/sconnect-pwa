@@ -69,6 +69,31 @@ export type AssistantMemory = {
   updated_at?: string;
 };
 
+export type AssistantModelOption = {
+  id: string;
+  label?: string;
+};
+
+export type AssistantModelProvider = {
+  id: string;
+  label?: string;
+  models?: AssistantModelOption[];
+};
+
+export type AssistantPreferences = {
+  preferred_provider?: string;
+  preferred_model?: string;
+  action_usage?: Record<string, number>;
+  sidebar_open?: boolean;
+  intro_seen?: boolean;
+  effective_provider?: string;
+  effective_model?: string;
+  default_provider?: string;
+  default_model?: string;
+  allow_user_override?: boolean;
+  providers?: AssistantModelProvider[];
+};
+
 const unwrapList = <T>(data: any): T[] => {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
@@ -234,3 +259,18 @@ export const postAssistantEvent = async (body: Record<string, any>): Promise<any
 
 export const getAssistantMetrics = async (): Promise<any> =>
   apiFetch('/v1/assistant/metrics');
+
+export const getAssistantPreferences = async (): Promise<AssistantPreferences> =>
+  apiFetch('/v1/assistant/preferences');
+
+export const updateAssistantPreferences = async (body: {
+  preferred_provider?: string;
+  preferred_model?: string;
+  action_usage?: Record<string, number>;
+  sidebar_open?: boolean;
+  intro_seen?: boolean;
+}): Promise<AssistantPreferences> =>
+  apiFetch('/v1/assistant/preferences', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });

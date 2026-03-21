@@ -56,6 +56,8 @@ import {
 import { createAuditEvent } from '../lib/securityApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
+import { getOpsConfig } from '../lib/opsConfigApi';
+import { getUiPreferences, updateUiPreferences } from '../lib/settingsApi';
 import {
   detectCityKey,
   getCityMultiplier,
@@ -180,6 +182,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [recordingPoints, setRecordingPoints] = React.useState<PathPoint[]>([]);
   const [recordingDistance, setRecordingDistance] = React.useState(0);
   const [recordingStart, setRecordingStart] = React.useState<number | null>(null);
+  const [pricingWarningConfig, setPricingWarningConfig] = React.useState<{ threshold_pct?: number; message?: string } | null>(null);
   const [showRecordingPanel, setShowRecordingPanel] = React.useState(false);
   const [recordingName, setRecordingName] = React.useState('');
   const [recordingShared, setRecordingShared] = React.useState(true);
@@ -287,6 +290,22 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   }, []);
 
   React.useEffect(() => {
+    let active = true;
+    getOpsConfig('pricing.anomaly_warning')
+      .then((resp) => {
+        if (!active) return;
+        setPricingWarningConfig((resp as any)?.value ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPricingWarningConfig(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (initialShowMap) {
       setShowMapModal(true);
     }
@@ -327,6 +346,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       || sellerProfile?.url
   );
   const baseRating = numberOrZero(sellerReputation?.rating ?? sellerProfile?.rating);
+  const buyerAvatars = Array.isArray((sellerReputation as any)?.buyer_avatars)
+    ? ((sellerReputation as any).buyer_avatars as string[]).filter(Boolean)
+    : [];
   const averageRating = reviews.length
     ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
     : baseRating.toFixed(1);
@@ -360,9 +382,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   );
 
   const goodDealFlag = Boolean(goodDeal?.is_good_deal || goodDeal?.good_deal || activeProduct.isGoodDeal);
+  const anomalyThresholdPct = pricingWarningConfig?.threshold_pct;
+  const anomalyThresholdRatio = anomalyThresholdPct !== undefined
+    ? Math.max(0, 1 - Number(anomalyThresholdPct) / 100)
+    : 0.6;
+  const anomalyWarningMessage = pricingWarningConfig?.message
+    || 'This price is significantly below market average. Verify seller and product authenticity.';
 
   const handleWhatsApp = () => {
-    const phone = sellerProfile?.whatsappNumber || sellerProfile?.whatsapp_number || sellerProfile?.whatsapp;
+    const rawPhone = sellerProfile?.whatsappNumber || sellerProfile?.whatsapp_number || sellerProfile?.whatsapp;
+    const phone = typeof rawPhone === 'string' ? rawPhone.replace(/[^\d]/g, '') : '';
     if (phone) {
       const message = encodeURIComponent(`Hi, I'm interested in ${activeProduct.name} I saw on Sconnect. Is it still available?`);
       window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
@@ -816,11 +845,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   }, [productId, sellerId]);
 
   React.useEffect(() => {
-    try {
-      setVoiceDirectionsEnabled(localStorage.getItem('soko:voice_directions') === 'true');
-    } catch {
-      setVoiceDirectionsEnabled(false);
-    }
+    let alive = true;
+    getUiPreferences()
+      .then((prefs) => {
+        if (!alive) return;
+        setVoiceDirectionsEnabled(Boolean(prefs?.voice_directions_enabled));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setVoiceDirectionsEnabled(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   React.useEffect(() => {
@@ -1417,14 +1454,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </div>
           )}
 
-          {benchmarkPrice > 0 && activeProduct.price < benchmarkPrice * 0.6 && (
+          {benchmarkPrice > 0 && activeProduct.price < benchmarkPrice * anomalyThresholdRatio && (
             <div className="mb-6 p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
               <div className="p-2 bg-amber-500 rounded-xl">
                 <AlertTriangle className="w-5 h-5 text-white" />
               </div>
               <div>
                 <p className="text-xs font-black text-amber-900 uppercase tracking-tight">Price Anomaly Warning</p>
-                <p className="text-[10px] text-amber-700 font-bold">This price is 40%+ below market average. Verify seller and product authenticity.</p>
+                <p className="text-[10px] text-amber-700 font-bold">{anomalyWarningMessage}</p>
               </div>
             </div>
           )}
@@ -1525,7 +1562,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  <img src={sellerProfile?.avatar || sellerProfile?.logo || `https://picsum.photos/seed/${sellerId}/80/80`} className="w-14 h-14 rounded-full border-2 border-white shadow-sm" alt="seller" />
+                  <img src={sellerProfile?.avatar || sellerProfile?.logo || '/logo.jpg'} className="w-14 h-14 rounded-full border-2 border-white shadow-sm" alt="seller" />
                   {(sellerProfile?.verified || sellerProfile?.isVerified) && (
                     <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-1 rounded-full border-2 border-white">
                       <ShieldCheck className="w-3 h-3" />
@@ -1910,11 +1947,17 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
               {sellerReputation?.monthly_buyers || 0} customers bought this here this month.
             </div>
-            <div className="mt-3 grid grid-cols-5 gap-2">
-              {[1,2,3,4,5].map(i => (
-                <img key={i} src={`https://picsum.photos/seed/community-${productId}-${i}/80/80`} className="w-full aspect-square rounded-xl object-cover" alt="community" />
-              ))}
-            </div>
+            {buyerAvatars.length > 0 ? (
+              <div className="mt-3 grid grid-cols-5 gap-2">
+                {buyerAvatars.slice(0, 10).map((url, i) => (
+                  <img key={`${url}-${i}`} src={url} className="w-full aspect-square rounded-xl object-cover" alt="buyer" />
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-400">
+                No buyer avatars available yet.
+              </div>
+            )}
           </div>
 
           <div className="mb-10 p-5 bg-indigo-600 rounded-3xl text-white flex items-center justify-between">
@@ -2389,12 +2432,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   )}
                   <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex items-center gap-1 text-[9px] font-bold text-zinc-700">
                     <button
-                      onClick={() => {
-                        const next = !voiceDirectionsEnabled;
-                        setVoiceDirectionsEnabled(next);
-                        try {
-                          localStorage.setItem('soko:voice_directions', String(next));
-                        } catch {}
+                    onClick={() => {
+                      const next = !voiceDirectionsEnabled;
+                      setVoiceDirectionsEnabled(next);
+                        void updateUiPreferences({ voice_directions_enabled: next }).catch(() => {});
                       }}
                       className={`px-3 py-1 rounded-full ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
                     >

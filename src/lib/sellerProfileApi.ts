@@ -48,6 +48,21 @@ export type SellerLocation = {
   lng?: number;
 };
 
+export type SellerRank = {
+  seller_id?: string;
+  rank?: number;
+  breakdown?: Record<string, any>;
+};
+
+export type SellerMetrics = {
+  seller_id?: string;
+  followers?: number;
+  reviews?: number;
+  avg_rating?: number;
+  stars_24h?: number;
+  engagement_views?: number;
+};
+
 const unwrapList = <T>(data: any): T[] => {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
@@ -94,3 +109,9 @@ export const updateSellerLocation = async (id: string, payload: { address: strin
       body: JSON.stringify(payload),
     }
   );
+
+export const getSellerRank = async (): Promise<SellerRank> =>
+  apiFetch('/v1/seller/rank');
+
+export const getSellerMetrics = async (): Promise<SellerMetrics> =>
+  apiFetch('/v1/seller/metrics');

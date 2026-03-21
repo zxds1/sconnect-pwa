@@ -66,7 +66,7 @@ import {
   type ShopDirectoryEntry
 } from '../lib/shopDirectoryApi';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
-import { getComparisonPreferences } from '../lib/settingsApi';
+import { getComparisonPreferences, getUiPreferences, updateUiPreferences } from '../lib/settingsApi';
 import {
   detectCityKey,
   getCityMultiplier,
@@ -156,10 +156,12 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [myPaths, setMyPaths] = useState<RecordedPath[]>([]);
   const [pathVerifying, setPathVerifying] = useState<Record<string, boolean>>({});
   const [isListening, setIsListening] = useState(false);
+  const [voiceSeconds, setVoiceSeconds] = useState(0);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const recognitionRef = React.useRef<any>(null);
+  const recognitionTimeoutRef = React.useRef<number | null>(null);
   const cameraStreamRef = React.useRef<MediaStream | null>(null);
   const videoPreviewRef = React.useRef<string | null>(null);
   const capturedPreviewRef = React.useRef<string | null>(null);
@@ -171,6 +173,8 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [isDragActive, setIsDragActive] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const mediaStatusTimerRef = React.useRef<number | null>(null);
+  const mediaAbortRef = React.useRef<AbortController | null>(null);
+  const mediaCancelRef = React.useRef(false);
   const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<any>(null);
   const userMarkerRef = React.useRef<any>(null);
@@ -213,6 +217,18 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     sellerMetaRef.current = sellerMeta;
   }, [sellerMeta]);
 
+  useEffect(() => {
+    if (!isListening) {
+      setVoiceSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const timer = window.setInterval(() => {
+      setVoiceSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [isListening]);
+
 
   useEffect(() => {
     cameraStreamRef.current = cameraStream;
@@ -252,19 +268,21 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   }, [initialAction]);
 
   useEffect(() => {
-    try {
-      setVoiceFeedbackEnabled(localStorage.getItem('soko:voice_feedback') === 'true');
-    } catch {
-      setVoiceFeedbackEnabled(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      setVoiceDirectionsEnabled(localStorage.getItem('soko:voice_directions') === 'true');
-    } catch {
-      setVoiceDirectionsEnabled(false);
-    }
+    let alive = true;
+    getUiPreferences()
+      .then((prefs) => {
+        if (!alive) return;
+        setVoiceFeedbackEnabled(Boolean(prefs?.voice_feedback_enabled));
+        setVoiceDirectionsEnabled(Boolean(prefs?.voice_directions_enabled));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setVoiceFeedbackEnabled(false);
+        setVoiceDirectionsEnabled(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -648,7 +666,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     return '';
   };
 
-  const uploadToPresignedUrl = async (file: File, presign: any) => {
+  const uploadToPresignedUrl = async (file: File, presign: any, signal?: AbortSignal) => {
     const uploadUrl = presign?.upload_url || presign?.url;
     if (!uploadUrl) throw new Error('Missing upload URL');
     const method = (presign?.method || (presign?.fields ? 'POST' : 'PUT')).toUpperCase();
@@ -656,25 +674,25 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       const form = new FormData();
       Object.entries(presign.fields).forEach(([key, value]) => form.append(key, value as string));
       form.append('file', file);
-      const res = await fetch(uploadUrl, { method: 'POST', body: form });
+      const res = await fetch(uploadUrl, { method: 'POST', body: form, signal });
       if (!res.ok) throw new Error(`Upload failed (${res.status})`);
       return presign.fields.key || presign.s3_key || presign.key || '';
     }
     const headers: Record<string, string> = { ...(presign?.headers || {}) };
     if (!headers['Content-Type'] && file.type) headers['Content-Type'] = file.type;
-    const res = await fetch(uploadUrl, { method, headers, body: file });
+    const res = await fetch(uploadUrl, { method, headers, body: file, signal });
     if (!res.ok) throw new Error(`Upload failed (${res.status})`);
     return presign?.s3_key || presign?.key || '';
   };
 
-  const uploadMediaFile = async (file: File, context: string) => {
+  const uploadMediaFile = async (file: File, context: string, signal?: AbortSignal) => {
     const presign = await requestUploadPresign({
       file_name: file.name,
       mime_type: file.type || 'application/octet-stream',
       content_length: file.size,
       context
     });
-    const mediaKey = await uploadToPresignedUrl(file, presign);
+    const mediaKey = await uploadToPresignedUrl(file, presign, signal);
     return {
       mediaKey,
       mediaUrl: presign?.url
@@ -832,10 +850,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       setCameraStream(stream);
       setIsCameraOpen(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      if (!videoRef.current) {
+        throw new Error('Camera view unavailable.');
       }
+      videoRef.current.srcObject = stream;
+      videoRef.current.muted = true;
+      await videoRef.current.play();
     } catch {
       alert('Could not access camera.');
     }
@@ -913,6 +934,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
 
   const handleMediaFile = React.useCallback(async (file: File) => {
     if (mediaUploading) return;
+    mediaCancelRef.current = false;
     setMediaUploading(true);
     setMediaError(null);
     if (mediaStatusTimerRef.current) {
@@ -937,8 +959,11 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       setCapturedPreview(previewUrl);
     }
     try {
+      const controller = new AbortController();
+      mediaAbortRef.current = controller;
       const context = isVideo ? 'search_video' : 'search_photo';
-      const uploaded = await uploadMediaFile(file, context);
+      const uploaded = await uploadMediaFile(file, context, controller.signal);
+      if (mediaCancelRef.current) return;
       const query = searchQuery.trim();
       const payload: MediaSearchRequest = {
         query: query || undefined,
@@ -947,7 +972,9 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         mime_type: file.type
       };
       if (isVideo) {
+        if (mediaCancelRef.current) return;
         await queueVideoSearch(payload);
+        if (mediaCancelRef.current) return;
         if (query) {
           runSearch(query);
         } else {
@@ -955,25 +982,56 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         }
         return;
       }
+      if (mediaCancelRef.current) return;
       await Promise.allSettled([
         queueOCRSearch(payload),
         query ? queueHybridSearch(payload) : queuePhotoSearch(payload)
       ]);
+      if (mediaCancelRef.current) return;
       if (query) {
         runSearch(query);
       } else {
         setMediaError('Image processed. Add a text query to refine results.');
       }
     } catch (err: any) {
-      setMediaError(err?.message || 'Media search failed.');
+      if (mediaCancelRef.current || err?.name === 'AbortError') {
+        setMediaStatus('Media search canceled.');
+      } else {
+        setMediaError(err?.message || 'Media search failed.');
+      }
     } finally {
+      mediaAbortRef.current = null;
       setMediaUploading(false);
+      if (mediaStatusTimerRef.current) {
+        window.clearTimeout(mediaStatusTimerRef.current);
+        mediaStatusTimerRef.current = null;
+      }
       mediaStatusTimerRef.current = window.setTimeout(() => {
         setMediaStatus(null);
         mediaStatusTimerRef.current = null;
-      }, 8000);
+      }, mediaCancelRef.current ? 2500 : 8000);
     }
   }, [mediaUploading, runSearch, searchQuery]);
+
+  const cancelMediaSearch = () => {
+    if (!mediaUploading) return;
+    mediaCancelRef.current = true;
+    if (mediaAbortRef.current) {
+      mediaAbortRef.current.abort();
+      mediaAbortRef.current = null;
+    }
+    if (videoPreviewRef.current) {
+      URL.revokeObjectURL(videoPreviewRef.current);
+    }
+    if (capturedPreviewRef.current) {
+      URL.revokeObjectURL(capturedPreviewRef.current);
+    }
+    setVideoPreview(null);
+    setCapturedPreview(null);
+    setMediaUploading(false);
+    setMediaError(null);
+    setMediaStatus('Media search canceled.');
+  };
 
   const handleReadResults = () => {
     if (!voiceFeedbackEnabled) {
@@ -1014,6 +1072,20 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     return 'English';
   };
 
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    if (recognitionTimeoutRef.current) {
+      window.clearTimeout(recognitionTimeoutRef.current);
+      recognitionTimeoutRef.current = null;
+    }
+    setIsListening(false);
+  };
+
   const handleStartListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -1021,24 +1093,37 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       return;
     }
     if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
+      stopListening();
       return;
     }
     setMediaError(null);
     const recognition = new SpeechRecognition();
     recognition.lang = detectedLanguage === 'Swahili' ? 'sw-KE' : 'en-US';
     recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => {
       setIsListening(false);
       recognitionRef.current = null;
+      if (recognitionTimeoutRef.current) {
+        window.clearTimeout(recognitionTimeoutRef.current);
+        recognitionTimeoutRef.current = null;
+      }
     };
     recognition.onerror = () => {
       setIsListening(false);
       recognitionRef.current = null;
+      if (recognitionTimeoutRef.current) {
+        window.clearTimeout(recognitionTimeoutRef.current);
+        recognitionTimeoutRef.current = null;
+      }
     };
     recognition.onresult = async (event: any) => {
       const transcript = event.results?.[0]?.[0]?.transcript || '';
+      try {
+        recognition.stop();
+      } catch {}
       if (!transcript) {
         setIsListening(false);
         recognitionRef.current = null;
@@ -1056,10 +1141,17 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           language: nextLang === 'Swahili' ? 'sw-KE' : 'en-US'
         });
       } catch {}
-      runSearch(transcript);
+      await runSearch(transcript);
     };
     recognitionRef.current = recognition;
     recognition.start();
+    recognitionTimeoutRef.current = window.setTimeout(() => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+    }, 12000);
   };
 
   const trackSearchEvent = React.useCallback((eventType: string, productId?: string) => {
@@ -1202,6 +1294,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         } catch {}
         recognitionRef.current = null;
       }
+      if (recognitionTimeoutRef.current) {
+        window.clearTimeout(recognitionTimeoutRef.current);
+        recognitionTimeoutRef.current = null;
+      }
       if (videoPreviewRef.current) {
         URL.revokeObjectURL(videoPreviewRef.current);
       }
@@ -1211,6 +1307,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       if (mediaStatusTimerRef.current) {
         window.clearTimeout(mediaStatusTimerRef.current);
         mediaStatusTimerRef.current = null;
+      }
+      if (mediaAbortRef.current) {
+        mediaAbortRef.current.abort();
+        mediaAbortRef.current = null;
       }
       if (recordingWatchIdRef.current) {
         navigator.geolocation.clearWatch(recordingWatchIdRef.current);
@@ -1844,6 +1944,17 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             </div>
           </div>
         </div>
+        {isListening && (
+          <div className="flex items-center justify-between bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl text-[10px] font-black mb-2">
+            <span>Recording… {String(Math.floor(voiceSeconds / 60)).padStart(2, '0')}:{String(voiceSeconds % 60).padStart(2, '0')}</span>
+            <button
+              onClick={stopListening}
+              className="px-3 py-1 rounded-full bg-emerald-600 text-white"
+            >
+              Stop
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <button
@@ -1895,6 +2006,14 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             <div className="px-3 py-1.5 bg-indigo-50 rounded-full text-[10px] font-black text-indigo-700">
               {mediaStatus}
             </div>
+          )}
+          {mediaUploading && (
+            <button
+              onClick={cancelMediaSearch}
+              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-red-50 text-red-600"
+            >
+              Cancel media
+            </button>
           )}
           {initialAction && (
             <div className="px-3 py-1.5 bg-indigo-50 rounded-full text-[10px] font-black text-indigo-700">
@@ -2017,9 +2136,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                     onClick={() => {
                       const next = !voiceDirectionsEnabled;
                       setVoiceDirectionsEnabled(next);
-                      try {
-                        localStorage.setItem('soko:voice_directions', String(next));
-                      } catch {}
+                      void updateUiPreferences({
+                        voice_feedback_enabled: voiceFeedbackEnabled,
+                        voice_directions_enabled: next
+                      }).catch(() => {});
                     }}
                     className={`px-3 py-1.5 rounded-full text-[10px] font-black ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
                   >
@@ -2934,7 +3054,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-black rounded-2xl overflow-hidden">
               <div className="relative">
-                <video ref={videoRef} className="w-full h-80 object-cover" autoPlay playsInline />
+                <video ref={videoRef} className="w-full h-80 object-cover" autoPlay playsInline muted />
                 <button 
                   onClick={handleCloseCamera}
                   className="absolute top-3 right-3 p-2 bg-black/50 rounded-full text-white"

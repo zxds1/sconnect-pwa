@@ -38,6 +38,12 @@ export type ComparisonPreferences = {
   comparison_profile?: string;
 };
 
+export type UiPreferences = {
+  theme?: 'light' | 'dark' | 'system';
+  voice_feedback_enabled?: boolean;
+  voice_directions_enabled?: boolean;
+};
+
 export const getConsents = async (): Promise<ConsentsResponse> =>
   apiFetch('/v1/settings/consents');
 
@@ -73,6 +79,15 @@ export const getComparisonPreferences = async (): Promise<ComparisonPreferences>
 
 export const updateComparisonPreferences = async (payload: ComparisonPreferences): Promise<ComparisonPreferences> =>
   apiFetch('/v1/settings/comparison-preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const getUiPreferences = async (): Promise<UiPreferences> =>
+  apiFetch('/v1/settings/ui-preferences');
+
+export const updateUiPreferences = async (payload: UiPreferences): Promise<UiPreferences> =>
+  apiFetch('/v1/settings/ui-preferences', {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });

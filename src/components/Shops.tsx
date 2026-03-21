@@ -1,13 +1,61 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { Search, Star, MapPin, ArrowRight, ShoppingBag, BadgeCheck } from 'lucide-react';
-import { SELLERS } from '../mockData';
+import { Search, Star, MapPin, ArrowRight, BadgeCheck } from 'lucide-react';
+import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
 
 interface ShopsProps {
   onShopClick: (sellerId: string) => void;
 }
 
 export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
+  const [query, setQuery] = useState('');
+  const [shops, setShops] = useState<ShopDirectoryEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setStatus(null);
+      try {
+        const items = await searchShops({ query: query.trim() || undefined });
+        if (alive) setShops(items);
+      } catch (err: any) {
+        if (alive) {
+          setShops([]);
+          setStatus(err?.message || 'Unable to load shops.');
+        }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }, 350);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  const shopCards = useMemo(() => {
+    return shops.map((shop) => {
+      const id = shop.seller_id || shop.id || '';
+      const name = shop.name || 'Shop';
+      const rating = Number(shop.rating ?? 0);
+      const verified = Boolean(shop.verified);
+      const locationLabel = typeof shop.location === 'string'
+        ? shop.location
+        : shop.location?.address || '';
+      const category = shop.category || 'General';
+      const avatar = (shop as any)?.logo_url || '/logo.jpg';
+      const description = (shop as any)?.description || shop.category || '';
+      return { id, name, rating, verified, locationLabel, category, avatar, description, raw: shop };
+    });
+  }, [shops]);
+
+  const availableCategories = useMemo(() => {
+    return Array.from(new Set(shopCards.map((shop) => shop.category).filter(Boolean)));
+  }, [shopCards]);
+
   return (
     <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">
       {/* Header */}
@@ -18,6 +66,8 @@ export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
           <input 
             type="text" 
             placeholder="Search for sellers or categories..." 
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-3 bg-zinc-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
           />
         </div>
@@ -30,8 +80,23 @@ export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
           <button className="text-indigo-600 text-xs font-bold uppercase tracking-wider">View All</button>
         </div>
 
+        {status && (
+          <div className="p-3 rounded-2xl bg-red-50 text-red-600 text-xs font-bold">
+            {status}
+          </div>
+        )}
+        {loading && (
+          <div className="p-3 rounded-2xl bg-white border border-zinc-100 text-xs font-bold text-zinc-500">
+            Loading shops...
+          </div>
+        )}
+        {!loading && shopCards.length === 0 && (
+          <div className="p-3 rounded-2xl bg-white border border-zinc-100 text-xs font-bold text-zinc-500">
+            No shops found yet.
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4">
-          {SELLERS.map((seller, i) => (
+          {shopCards.map((seller, i) => (
             <motion.div 
               key={seller.id}
               initial={{ opacity: 0, y: 20 }}
@@ -45,23 +110,23 @@ export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
                 <div className="flex-1">
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <h3 className="font-bold text-zinc-900">{seller.name}</h3>
-                    {seller.isVerified && <BadgeCheck className="w-4 h-4 text-indigo-600 fill-indigo-50" />}
+                    {seller.verified && <BadgeCheck className="w-4 h-4 text-indigo-600 fill-indigo-50" />}
                   </div>
                   <div className="flex items-center gap-1 text-amber-500 mb-1">
                     <Star className="w-3 h-3 fill-amber-500" />
-                    <span className="text-xs font-bold">{seller.rating}</span>
-                    <span className="text-zinc-400 text-[10px] ml-1">(1.2k reviews)</span>
+                    <span className="text-xs font-bold">{seller.rating ? seller.rating.toFixed(1) : '—'}</span>
+                    <span className="text-zinc-400 text-[10px] ml-1">{seller.category}</span>
                   </div>
-                  {seller.location && (
+                  {seller.locationLabel && (
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(seller.location!.address)}`, '_blank');
+                        window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(seller.locationLabel)}`, '_blank');
                       }}
                       className="flex items-center gap-1 text-indigo-600 hover:text-indigo-700 transition-colors text-[10px] font-medium"
                     >
                       <MapPin className="w-3 h-3" />
-                      <span className="underline">{seller.location.address}</span>
+                      <span className="underline">{seller.locationLabel}</span>
                     </button>
                   )}
                 </div>
@@ -71,21 +136,13 @@ export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
               </div>
 
               <p className="text-xs text-zinc-500 mb-4 line-clamp-2 italic">
-                "{seller.description}"
+                "{seller.description || 'Discover more on this shop.'}"
               </p>
 
-              {/* Mini Product Preview */}
-              <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                {[1, 2, 3].map(j => (
-                  <div key={j} className="w-20 h-20 bg-zinc-100 rounded-lg shrink-0 overflow-hidden relative">
-                    <img src={`https://picsum.photos/seed/shop-${i}-${j}/100/100`} className="w-full h-full object-cover" alt="preview" />
-                    <div className="absolute inset-0 bg-black/10" />
-                  </div>
-                ))}
-                <div className="w-20 h-20 bg-indigo-50 rounded-lg shrink-0 flex flex-col items-center justify-center gap-1 border border-indigo-100">
-                  <ShoppingBag className="w-5 h-5 text-indigo-600" />
-                  <span className="text-[8px] font-bold text-indigo-600 uppercase">Shop All</span>
-                </div>
+              <div className="flex flex-wrap gap-2 text-[10px] font-bold text-zinc-600">
+                <span>Products {seller.raw?.products ?? seller.raw?.total_products ?? '—'}</span>
+                <span>Stars {seller.raw?.stars_earned ?? '—'}</span>
+                <span>Last sync {seller.raw?.last_sync_at ? new Date(seller.raw.last_sync_at).toLocaleDateString() : '—'}</span>
               </div>
             </motion.div>
           ))}
@@ -94,14 +151,14 @@ export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
         {/* Categories */}
         <div className="pt-4">
           <h2 className="font-bold text-zinc-800 mb-4">Browse Categories</h2>
+          {availableCategories.length === 0 && (
+            <div className="p-3 bg-white border border-zinc-100 rounded-2xl text-xs font-bold text-zinc-500">
+              No categories available yet.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
-            {['Electronics', 'Sustainable Fashion', 'Home Decor', 'Gourmet Food'].map((cat, i) => (
-              <div key={i} className="h-24 bg-zinc-900 rounded-2xl relative overflow-hidden group cursor-pointer">
-                <img 
-                  src={`https://picsum.photos/seed/cat-${i}/300/200`} 
-                  className="w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-500"
-                  alt="cat"
-                />
+            {availableCategories.map((cat) => (
+              <div key={cat} className="h-24 bg-gradient-to-br from-zinc-900 to-zinc-700 rounded-2xl relative overflow-hidden group cursor-pointer">
                 <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
                   <span className="text-white font-bold text-sm drop-shadow-md">{cat}</span>
                 </div>

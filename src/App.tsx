@@ -14,7 +14,6 @@ import { PasswordReset } from './components/PasswordReset';
 import { AuthOnboarding } from './components/AuthOnboarding';
 import { Notifications } from './components/Notifications';
 import { DataDashboard } from './components/DataDashboard';
-import { WhatsAppExperience } from './components/WhatsAppExperience';
 import { ProductDetail } from './components/ProductDetail';
 import { Bag } from './components/Bag';
 import { Subscriptions } from './components/Subscriptions';
@@ -26,19 +25,61 @@ import { Onboarding } from './components/Onboarding';
 import { Assistant } from './components/Assistant';
 import { GroupBuys } from './components/GroupBuys';
 import { PullToRefresh } from './components/PullToRefresh';
-import { PRODUCTS } from './mockData';
 import { Product } from './types';
 import { completeOnboarding, getOnboardingState } from './lib/onboardingApi';
 import { addCompareItem, getCompareList, removeCompareItem } from './lib/compareApi';
 import { getProduct } from './lib/catalogApi';
-import { getShopProducts } from './lib/shopDirectoryApi';
+import { searchRecommendations, type SearchResult } from './lib/searchApi';
+import { getShopProducts, searchShops } from './lib/shopDirectoryApi';
 import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
 
+const numberOrZero = (value: any) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const resolveMediaUrl = (detail: any) => {
+  if (!detail) return '';
+  const direct = detail.media_url || detail.image_url || detail.cover_url || detail.thumbnail_url || detail.mediaUrl;
+  if (direct) return direct;
+  const media = detail.media || detail.media_items || detail.mediaItems || detail.images || detail.media_urls || detail.mediaUrls;
+  if (Array.isArray(media) && media.length > 0) {
+    const item = media[0];
+    if (typeof item === 'string') return item;
+    return item?.url || item?.media_url || item?.src || item?.path || '';
+  }
+  return '';
+};
+
+const buildProductFromSearch = (result: SearchResult, detail?: any): Product => {
+  const sellerId = result.seller_id || detail?.seller_id || detail?.sellerId || '';
+  const mediaUrl = resolveMediaUrl(detail);
+  return {
+    id: result.canonical_id || detail?.id || '',
+    sellerId,
+    name: detail?.name || result.name || 'Product',
+    description: detail?.description || detail?.summary || '',
+    price: numberOrZero(detail?.current_price ?? detail?.price ?? result.price),
+    category: detail?.category || detail?.category_id || 'general',
+    mediaUrl,
+    mediaType: (detail?.media_type as 'video' | 'image') || (detail?.media?.[0]?.media_type as 'video' | 'image') || 'image',
+    tags: Array.isArray(detail?.tags) ? detail.tags : [],
+    stockLevel: numberOrZero(detail?.stock_level ?? detail?.stockLevel),
+    stockStatus: detail?.stock_status || detail?.stockStatus,
+    location: (result.lat !== undefined || result.lng !== undefined)
+      ? { lat: numberOrZero(result.lat), lng: numberOrZero(result.lng), address: '' }
+      : undefined,
+    discountPrice: detail?.discount_price ?? detail?.discountPrice,
+    competitorPrice: detail?.competitor_price ?? detail?.competitorPrice,
+    isGoodDeal: detail?.is_good_deal ?? detail?.good_deal
+  };
+};
+
 export default function App() {
-  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'whatsapp' | 'notifications' | 'group-buys' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
+  const [view, setView] = useState<'feed' | 'assistant' | 'seller' | 'intelligence' | 'profile' | 'shops' | 'search' | 'settings' | 'comparison' | 'rewards' | 'bag' | 'subscriptions' | 'partnerships' | 'data' | 'notifications' | 'group-buys' | 'login' | 'register' | 'password-reset' | 'auth-onboarding'>(() => {
     if (typeof window === 'undefined') return 'assistant';
     try {
       const token = localStorage.getItem('soko:auth_token');
@@ -58,52 +99,67 @@ export default function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [comparisonList, setComparisonList] = useState<Product[]>([]);
-  const [products, setProducts] = useState<Product[]>(PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
   const [followedSellerIds, setFollowedSellerIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAction, setSearchAction] = useState<null | 'voice' | 'photo' | 'video' | 'hybrid'>(null);
   const [supportChatMode, setSupportChatMode] = useState<'duka' | 'seller-ai' | 'brand' | null>(null);
   const [isSellerAccount, setIsSellerAccount] = useState<boolean | null>(null);
-  const [sellerBalance, setSellerBalance] = useState(() => {
-    if (typeof window === 'undefined') return 0;
-    const raw = localStorage.getItem('soko:seller_sc_balance');
-    return raw ? Number(raw) : 0;
-  });
-  const [sellerPayouts, setSellerPayouts] = useState<Array<{ id: string; amount: number; reason: string; timestamp: number }>>(() => {
-    if (typeof window === 'undefined') return [];
-    const raw = localStorage.getItem('soko:seller_sc_payouts');
-    return raw ? JSON.parse(raw) : [];
-  });
-  const [verifiedSellerIds, setVerifiedSellerIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    const raw = localStorage.getItem('soko:verified_sellers');
-    return raw ? JSON.parse(raw) : [];
-  });
-  const [buyerBalance, setBuyerBalance] = useState(() => {
-    if (typeof window === 'undefined') return 0;
-    const raw = localStorage.getItem('soko:buyer_sc_balance');
-    return raw ? Number(raw) : 0;
-  });
-  const [buyerPayouts, setBuyerPayouts] = useState<Array<{ id: string; amount: number; reason: string; timestamp: number }>>(() => {
-    if (typeof window === 'undefined') return [];
-    const raw = localStorage.getItem('soko:buyer_sc_payouts');
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [verifiedSellerIds, setVerifiedSellerIds] = useState<string[]>([]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 1500);
     return () => clearTimeout(timer);
   }, [toast]);
+
   useEffect(() => {
-    try {
-      localStorage.setItem('soko:seller_sc_balance', String(sellerBalance));
-      localStorage.setItem('soko:seller_sc_payouts', JSON.stringify(sellerPayouts));
-      localStorage.setItem('soko:verified_sellers', JSON.stringify(verifiedSellerIds));
-      localStorage.setItem('soko:buyer_sc_balance', String(buyerBalance));
-      localStorage.setItem('soko:buyer_sc_payouts', JSON.stringify(buyerPayouts));
-    } catch {}
-  }, [sellerBalance, sellerPayouts, verifiedSellerIds, buyerBalance, buyerPayouts]);
+    let alive = true;
+    const loadProducts = async () => {
+      try {
+        const recs = await searchRecommendations();
+        const mapped = await Promise.all(
+          recs.map(async (item) => {
+            try {
+              const detail = await getProduct(item.canonical_id);
+              return buildProductFromSearch(item, detail);
+            } catch {
+              return buildProductFromSearch(item);
+            }
+          })
+        );
+        if (alive) {
+          setProducts(mapped.filter((p) => p.id));
+        }
+      } catch {
+        // Ignore errors; other screens will load their own data.
+      }
+    };
+    loadProducts();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    const loadVerifiedSellers = async () => {
+      try {
+        const shops = await searchShops({ verified: true });
+        if (!alive) return;
+        const ids = shops
+          .map((shop) => String(shop?.seller_id || shop?.id || '').trim())
+          .filter(Boolean);
+        setVerifiedSellerIds(Array.from(new Set(ids)));
+      } catch {
+        if (!alive) return;
+        setVerifiedSellerIds([]);
+      }
+    };
+    loadVerifiedSellers();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('soko:onboarding_completed') !== 'true';
@@ -112,6 +168,8 @@ export default function App() {
   const [updateReady, setUpdateReady] = useState(false);
   const [offlineReady, setOfflineReady] = useState(false);
   const [pendingUpdateReload, setPendingUpdateReload] = useState(false);
+  const [pendingSellerFastTrack, setPendingSellerFastTrack] = useState(false);
+  const [openRewardsQrOnMount, setOpenRewardsQrOnMount] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -503,11 +561,6 @@ export default function App() {
                   setSearchQuery(query);
                   setSearchAction(null);
                 }}
-                onOpenSearchAction={(query, action) => {
-                  setView('search');
-                  setSearchQuery(query);
-                  setSearchAction(action);
-                }}
                 onOpenProduct={handleProductOpen}
                 onAddToBag={handleAddToBag}
                 onAddToComparison={handleAddToComparison}
@@ -523,12 +576,11 @@ export default function App() {
                 onOpenOnboarding={() => setShowOnboarding(true)}
                 onOpenBag={() => setView('bag')}
                 onOpenQrScan={() => {
-                  localStorage.setItem('soko:open_qr', 'true');
+                  setOpenRewardsQrOnMount(true);
                   setView('rewards');
                 }}
                 onOpenSubscriptions={() => setView('subscriptions')}
                 onOpenPartnerships={() => setView('partnerships')}
-                onOpenWhatsApp={() => setView('whatsapp')}
                 onOpenFeed={() => setView('feed')}
                 onOpenGroupBuys={() => setView('group-buys')}
                 onToast={setToast}
@@ -596,9 +648,7 @@ export default function App() {
                 onBack={() => setView('register')}
                 onFinish={(intent) => {
                   if (intent === 'seller') {
-                    try {
-                      localStorage.setItem('soko:fast_track_seller', 'true');
-                    } catch {}
+                    setPendingSellerFastTrack(true);
                     setView('profile');
                   } else {
                     setView('assistant');
@@ -634,10 +684,8 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <Rewards
-                buyerBalance={buyerBalance}
-                onBuyerBalanceChange={setBuyerBalance}
-                buyerPayouts={buyerPayouts}
-                onBuyerPayoutsChange={setBuyerPayouts}
+                openQrOnMount={openRewardsQrOnMount}
+                onOpenQrHandled={() => setOpenRewardsQrOnMount(false)}
               />
             </motion.div>
           )}
@@ -664,12 +712,9 @@ export default function App() {
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="h-full w-full bg-white z-40"
             >
-              <Partnerships
-                onBack={() => setView('assistant')}
-                onOpenBrandChat={() => setSupportChatMode('brand')}
-              />
-            </motion.div>
-          )}
+                <Partnerships onBack={() => setView('assistant')} />
+              </motion.div>
+            )}
 
           {view === 'bag' && (
             <motion.div 
@@ -711,14 +756,11 @@ export default function App() {
                 products={products}
                 onProductsChange={setProducts}
                 onToast={setToast}
-                sellerBalance={sellerBalance}
-                onSellerBalanceChange={setSellerBalance}
-                sellerPayouts={sellerPayouts}
-                onSellerPayoutsChange={setSellerPayouts}
                 verifiedSellerIds={verifiedSellerIds}
                 onVerifiedSellerIdsChange={setVerifiedSellerIds}
                 onOpenSellerChat={() => setSupportChatMode('seller-ai')}
                 onOpenSupportChat={() => setSupportChatMode('duka')}
+                onOpenSupplierChat={() => setSupportChatMode('brand')}
               />
             </motion.div>
           )}
@@ -747,6 +789,8 @@ export default function App() {
                   setIsSellerAccount(true);
                   setView('seller');
                 }}
+                sellerFastTrack={pendingSellerFastTrack}
+                onSellerFastTrackConsumed={() => setPendingSellerFastTrack(false)}
                 isSellerAccount={isSellerAccount}
                 onProductOpen={handleProductOpen}
                 sellerId={selectedSellerId || undefined}
@@ -828,18 +872,6 @@ export default function App() {
             </motion.div>
           )}
 
-          {view === 'whatsapp' && (
-            <motion.div
-              key="whatsapp"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <WhatsAppExperience />
-            </motion.div>
-          )}
           </AnimatePresence>
         </PullToRefresh>
 

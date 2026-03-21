@@ -3,6 +3,8 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Sparkles, Store, ShoppingBag } from 'lucide-react';
 import { postAssistantEvent } from '../lib/assistantApi';
 import { postAnalyticsEvent } from '../lib/analyticsApi';
+import { setSellerShopType as setSellerShopTypeApi } from '../lib/sellerOnboardingApi';
+import { updateSellerProfile } from '../lib/sellerProfileApi';
 
 interface AuthOnboardingProps {
   onBack?: () => void;
@@ -17,6 +19,7 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
   const [sellerDeliveryRadius, setSellerDeliveryRadius] = React.useState('');
   const [sellerMarketName, setSellerMarketName] = React.useState('');
   const [sellerVisualMarker, setSellerVisualMarker] = React.useState('');
+  const [formError, setFormError] = React.useState<string | null>(null);
   const [checklist, setChecklist] = React.useState({
     profile: false,
     favorites: false,
@@ -48,18 +51,23 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
     trackAnalytics({ action: 'view' });
   }, []);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!intent) return;
+    if (intent === 'seller' && !sellerWhatsApp.trim()) {
+      setFormError('WhatsApp number is required to receive customer inquiries.');
+      return;
+    }
     try {
-      localStorage.setItem('soko:account_intent', intent);
-      localStorage.setItem('soko:onboarding_checklist', JSON.stringify(checklist));
       if (intent === 'seller') {
-        localStorage.setItem('soko:shop_type', sellerShopType);
-        localStorage.setItem('soko:seller_mode', sellerMode);
-        localStorage.setItem('soko:seller_whatsapp', sellerWhatsApp);
-        localStorage.setItem('soko:seller_delivery_radius', sellerDeliveryRadius);
-        localStorage.setItem('soko:seller_market_name', sellerMarketName);
-        localStorage.setItem('soko:seller_visual_marker', sellerVisualMarker);
+        const radiusValue = Number(sellerDeliveryRadius);
+        await setSellerShopTypeApi({ shop_type: sellerShopType });
+        await updateSellerProfile({
+          seller_mode: sellerMode,
+          market_name: sellerMarketName.trim() || undefined,
+          visual_marker: sellerVisualMarker.trim() || undefined,
+          delivery_radius_km: Number.isFinite(radiusValue) && radiusValue > 0 ? radiusValue : undefined,
+          whatsapp_number: sellerWhatsApp.trim(),
+        });
       }
     } catch {}
     trackEvent({
@@ -114,6 +122,7 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
         <button
           onClick={() => {
             setIntent('buyer');
+            setFormError(null);
             trackEvent({ action: 'select_intent', intent: 'buyer' });
             trackAnalytics({ action: 'select_intent', intent: 'buyer' });
           }}
@@ -133,6 +142,7 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
         <button
           onClick={() => {
             setIntent('seller');
+            setFormError(null);
             trackEvent({ action: 'select_intent', intent: 'seller' });
             trackAnalytics({ action: 'select_intent', intent: 'seller' });
           }}
@@ -211,10 +221,17 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
                   <input
                     className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
                     value={sellerWhatsApp}
-                    onChange={(e) => setSellerWhatsApp(e.target.value)}
+                    onChange={(e) => {
+                      setSellerWhatsApp(e.target.value);
+                      setFormError(null);
+                    }}
                     placeholder="+2547..."
+                    required
                   />
                 </label>
+                {formError && (
+                  <div className="text-[10px] font-bold text-red-600">{formError}</div>
+                )}
                 <label className="text-[10px] font-bold text-zinc-500">
                   Delivery Radius (km)
                   <input

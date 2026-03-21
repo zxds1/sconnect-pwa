@@ -6,9 +6,8 @@ import {
   Wand2, TrendingUp, Users, AlertCircle,
   ArrowUpRight, Wallet, Megaphone, QrCode, Download, 
   ShieldCheck, Clock, MessageSquare, Heart, Phone, ImageIcon,
-  LineChart as LineChartIcon, Zap, Send, Search as SearchIcon
+  LineChart as LineChartIcon, Zap, Send
 } from 'lucide-react';
-import { MARKETING_SPEND, ORDERS, PRODUCTS, SELLERS } from '../mockData';
 import { Product, Seller } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, 
@@ -19,18 +18,46 @@ import { ListingOptimizer } from './ListingOptimizer';
 import { createThread, listMessages, streamThreadMessage } from '../lib/assistantApi';
 import {
   getSellerBuyerInsight,
+  getSellerAlerts,
+  getSellerChannelMix,
+  getSellerCustomerDemographics,
   getSellerFunnel,
   getSellerInventoryInsight,
+  getSellerInventorySeries,
   getSellerKpiSummary,
+  getSellerLiveBuyers,
+  getSellerMarketDemand,
   getSellerMarketBenchmarks,
+  getSellerMarketTrending,
+  getSellerTrendingSuppliers,
+  getSellerPeakHours,
+  getSellerDataQuality,
+  getSellerConversionSeries,
+  getSellerTopProducts,
+  getSellerSalesVelocity,
+  getSellerSalesSeries,
   listSellerAnomalies,
-  requestSellerWhatsAppDailySummary,
+  updateSellerAlerts,
   type Anomaly,
   type BuyerInsight,
+  type ChannelMixItem,
+  type CustomerDemographicItem,
   type FunnelMetrics,
   type InventoryInsight,
+  type InventorySeriesItem,
   type KPISummary,
-  type MarketBenchmarks
+  type LiveBuyerPoint,
+  type MarketBenchmarks,
+  type MarketDemandItem,
+  type MarketTrendingItem,
+  type TrendingSupplierItem,
+  type PeakHourItem,
+  type ConversionSeriesItem,
+  type DataQuality,
+  type TopProductItem,
+  type SalesSeriesItem,
+  type SalesVelocityItem,
+  type SellerAlert
 } from '../lib/sellerAnalyticsApi';
 import { buildWsUrl } from '../lib/realtime';
 import {
@@ -38,6 +65,7 @@ import {
   createFanOffer,
   createStockAlert,
   createCategorySpotlight,
+  listSellerReferrals,
   listCategorySpotlights,
   listFanOffers,
   listHotspots,
@@ -48,7 +76,8 @@ import {
   listSellerCampaigns,
   type Campaign as ApiCampaign,
   type Hotspot as MarketingHotspot,
-  type KPIStat as MarketingKPIStat
+  type KPIStat as MarketingKPIStat,
+  type Referral as MarketingReferral
 } from '../lib/marketingApi';
 import {
   createBroadcast,
@@ -68,9 +97,9 @@ import {
   requestLoan,
   createLoyaltyOffer,
   listBulkBuyGroups,
-  createBulkBuyGroup,
   joinBulkBuyGroup
 } from '../lib/growthApi';
+import { getRewardsBalance, getRewardsLedger, getRewardStreaks, listReceipts, submitReceipt, type RewardsLedgerEntry, type RewardsStreak, type RewardsReceipt } from '../lib/rewardsApi';
 import {
   completeSellerOnboarding,
   completeSellerTutorial,
@@ -86,6 +115,7 @@ import {
   getConnectionStatus,
   triggerConnectionSync,
   recordSellerOnboardingEvent,
+  getSellerShareLink,
   refreshSellerShareLink,
   requestSellerVerification,
   type OnboardingState as SellerOnboardingState,
@@ -100,24 +130,26 @@ import {
   createSellerProduct,
   deleteSellerProduct,
   listSellerProducts,
-  listSellerProductInsights,
   listSellerLowStock,
+  listSellerRecommendations,
   addSellerProductMedia,
   removeSellerProductMedia,
   updateSellerProduct,
   updateSellerProductPrice,
   updateSellerProductStock,
   type SellerProduct,
-  type SellerProductInsight,
-  type SellerLowStock
+  type SellerLowStock,
+  type SellerRecommendation
 } from '../lib/sellerProductsApi';
+import { listPlans, getSubscriptionView, type Plan, type SubscriptionView } from '../lib/subscriptionsApi';
 import { createGroupBuyOffer } from '../lib/groupBuyApi';
-import { listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
+import { createProduct, listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
 import { addPathLandmark, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, type PathPoint, type RecordedPath } from '../lib/searchApi';
-import { getOpsConfig, setOpsConfig } from '../lib/opsConfigApi';
-import { getDefaultRouteMultipliers, loadRouteMultipliers, type RouteMultipliersConfig } from '../lib/routeMultipliers';
+import { getOpsConfig } from '../lib/opsConfigApi';
 import {
+  getSellerRank,
+  getSellerMetrics,
   getSellerProfile,
   updateSellerProfile,
   listSellerLocations,
@@ -126,9 +158,10 @@ import {
   type SellerLocation,
   type DeliveryDetails
 } from '../lib/sellerProfileApi';
+import { getSellerPreferences, updateSellerPreferences, type SellerPreferences as SellerPreferencesApi } from '../lib/sellerPreferencesApi';
 import { listShopReviews, replyShopReview, type ShopReview } from '../lib/sellerShopApi';
-import { getSellerNotificationPreferences, updateSellerNotificationPreferences } from '../lib/sellerNotificationsApi';
-import { getSessionInfo } from '../lib/identityApi';
+import { getSellerNotificationPreferences, updateSellerNotificationPreferences, type SellerNotificationPreferences } from '../lib/sellerNotificationsApi';
+import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
 import {
   acceptRFQResponse,
   createRFQ,
@@ -136,10 +169,6 @@ import {
   getRFQComparison,
   getSupplierDelivery,
   getSupplierOffers,
-  listSupplierApplicationsAdmin,
-  approveSupplierApplication,
-  rejectSupplierApplication,
-  streamSupplierApplicationsAdmin,
   listRFQResponses,
   listRFQs,
   listSuppliers,
@@ -147,20 +176,64 @@ import {
   type RFQResponse,
   type RFQThread,
   type Supplier,
-  type SupplierApplication,
   type SupplierDelivery,
   type SupplierOffer
 } from '../lib/suppliersApi';
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const HOUR_LABELS = ['8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm', '10pm'];
-const WEEK_WEIGHTS = [0.12, 0.1, 0.09, 0.13, 0.17, 0.19, 0.2];
-const HOUR_WEIGHTS = [0.06, 0.12, 0.16, 0.14, 0.18, 0.2, 0.1, 0.04];
-
-const spreadSeries = (total: number, weights: number[]) =>
-  weights.map((w) => Math.max(0, Math.round(total * w)));
+const EMPTY_SELLER: Seller = {
+  id: '',
+  name: 'Seller',
+  avatar: '/logo.jpg',
+  description: '',
+  rating: 0,
+  followersCount: 0,
+  sokoScore: 0,
+  dailyViews: 0,
+  totalSales: 0
+};
 
 const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
+
+const formatCompactNumber = (value: number) =>
+  new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+
+const formatCurrencyKES = (value: number) =>
+  `KES ${Math.round(value).toLocaleString()}`;
+
+const formatHourLabel = (hour: number) => {
+  const normalized = ((hour % 24) + 24) % 24;
+  const period = normalized >= 12 ? 'pm' : 'am';
+  const display = normalized % 12 || 12;
+  return `${display}${period}`;
+};
+
+const formatHourRange = (hour: number) =>
+  `${formatHourLabel(hour)}-${formatHourLabel((hour + 2) % 24)}`;
+
+const formatDateLabel = (value?: string) => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+};
+
+const SalesSeriesTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const data = payload[0]?.payload || {};
+  const date = formatDateLabel(data.date || data.label);
+  const sales = Number(data.sales ?? 0);
+  const orders = Number(data.orders ?? data.velocity ?? 0);
+  const sessions = Number(data.sessions ?? data.reach ?? 0);
+  return (
+    <div className="rounded-xl bg-white p-2 text-[10px] font-bold text-zinc-700 shadow">
+      {date && <div className="text-zinc-500">{date}</div>}
+      {Number.isFinite(sales) && sales > 0 && <div>Sales: KES {Math.round(sales).toLocaleString()}</div>}
+      {Number.isFinite(orders) && orders > 0 && <div>Orders: {orders}</div>}
+      {Number.isFinite(sessions) && sessions > 0 && <div>Sessions: {sessions}</div>}
+    </div>
+  );
+};
 
 const haversineDistance = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
   const R = 6371;
@@ -180,6 +253,7 @@ const AGENT_STATUS_LABELS: Record<string, string> = {
   insight: 'Insight: Pulling market signals…',
   routing: 'Routing: Comparing routes…'
 };
+
 
 const projectionToSeries = (forecast?: Record<string, any>, fallback: Array<{ name: string; revenue: number }> = []) => {
   if (!forecast) return fallback;
@@ -298,40 +372,28 @@ const toPlaceholderImage = (label: string) => {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 };
 
-const normalizeRole = (role?: string) => {
-  const normalized = (role || '').toLowerCase();
-  if (normalized === 'admin' || normalized === 'owner') return 'admin';
-  if (normalized === 'seller') return 'seller';
-  return 'viewer';
-};
-
+const backendSeriesDays = (value?: number) => (Number.isFinite(value ?? NaN) && (value ?? 0) > 0 ? value : undefined);
 
 interface SellerDashboardProps {
   products: Product[];
   onProductsChange: (next: Product[]) => void;
   onToast?: (msg: string) => void;
-  sellerBalance: number;
-  onSellerBalanceChange: (next: number) => void;
-  sellerPayouts: Array<{ id: string; amount: number; reason: string; timestamp: number }>;
-  onSellerPayoutsChange: (next: Array<{ id: string; amount: number; reason: string; timestamp: number }>) => void;
   verifiedSellerIds: string[];
   onVerifiedSellerIdsChange: (next: string[]) => void;
   onOpenSellerChat?: () => void;
   onOpenSupportChat?: () => void;
+  onOpenSupplierChat?: () => void;
 }
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   products,
   onProductsChange,
   onToast,
-  sellerBalance,
-  onSellerBalanceChange,
-  sellerPayouts,
-  onSellerPayoutsChange,
   verifiedSellerIds,
   onVerifiedSellerIdsChange,
   onOpenSellerChat,
-  onOpenSupportChat
+  onOpenSupportChat,
+  onOpenSupplierChat
 }) => {
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const mediaDrawerInputRef = useRef<HTMLInputElement | null>(null);
@@ -339,13 +401,44 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [activeTab, setActiveTab] = useState('onboarding');
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [seller, setSeller] = useState<Seller>(SELLERS[0]); // Mocking s1
-  const [myProducts, setMyProducts] = useState<Product[]>(
-    products.filter(p => p.sellerId === SELLERS[0].id)
-  );
+  const [seller, setSeller] = useState<Seller>(EMPTY_SELLER);
+  const [myProducts, setMyProducts] = useState<Product[]>([]);
   const [showReferralModal, setShowReferralModal] = useState(false);
-  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
-  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const [referralTarget, setReferralTarget] = useState<'shop' | 'supplier'>('shop');
+  const [sellerRewardsBalance, setSellerRewardsBalance] = useState<{ balance?: number; pending?: number; currency?: string } | null>(null);
+  const [sellerRewardsLedger, setSellerRewardsLedger] = useState<RewardsLedgerEntry[]>([]);
+  const [sellerRewardStreaks, setSellerRewardStreaks] = useState<RewardsStreak[]>([]);
+  const [sellerReceipts, setSellerReceipts] = useState<RewardsReceipt[]>([]);
+  const [sellerRewardsLoading, setSellerRewardsLoading] = useState(false);
+  const [sellerRewardsError, setSellerRewardsError] = useState<string | null>(null);
+  const [receiptUploadStatus, setReceiptUploadStatus] = useState<string | null>(null);
+  const [receiptUploading, setReceiptUploading] = useState(false);
+  const receiptUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [dataSharingRewards, setDataSharingRewards] = useState<{ price_update?: number; stock_update?: number; photo_upload?: number; complete_profile?: number; currency?: string } | null>(null);
+  const [referralRewards, setReferralRewards] = useState<{ shop?: number; supplier?: number; currency?: string } | null>(null);
+  const [receiptRewardsConfig, setReceiptRewardsConfig] = useState<{ daily_min?: number; daily_max?: number; streak_bonus?: number; streak_days?: number; currency?: string } | null>(null);
+  const [claimShopRewardConfig, setClaimShopRewardConfig] = useState<{ amount?: number; currency?: string } | null>(null);
+  const [verificationRewardConfig, setVerificationRewardConfig] = useState<{ amount?: number; currency?: string } | null>(null);
+  const [featuredListingConfig, setFeaturedListingConfig] = useState<{ price_per_week?: number; currency?: string; duration_days?: number; discount_threshold?: number; discount_pct?: number } | null>(null);
+  const [categorySpotlightConfig, setCategorySpotlightConfig] = useState<{ budget?: number; currency?: string; min_budget?: number; max_budget?: number } | null>(null);
+  const [clearancePromoConfig, setClearancePromoConfig] = useState<{ discount_pct?: number; currency?: string } | null>(null);
+  const [fanOfferConfig, setFanOfferConfig] = useState<{ discount_pct?: number; min_pct?: number; max_pct?: number } | null>(null);
+  const [campaignDefaults, setCampaignDefaults] = useState<{ budget?: number; duration_days?: number; objective?: string; channel?: string } | null>(null);
+  const [campaignDefaultsApplied, setCampaignDefaultsApplied] = useState(false);
+  const [marketingKpiDefaults, setMarketingKpiDefaults] = useState<{ range?: string } | null>(null);
+  const [groupBuyDefaults, setGroupBuyDefaults] = useState<{ min_group_size?: number; max_groups?: number; duration_hours?: number } | null>(null);
+  const [analyticsDefaults, setAnalyticsDefaults] = useState<{ sales_series_days?: number; sales_velocity_days?: number; peak_hours_days?: number; inventory_series_days?: number; conversion_series_days?: number } | null>(null);
+  const [analyticsDefaultsApplied, setAnalyticsDefaultsApplied] = useState(false);
+  const [topProductsDefaults, setTopProductsDefaults] = useState<{ days?: number; limit?: number } | null>(null);
+  const [broadcastsDefaults, setBroadcastsDefaults] = useState<{ limit?: number } | null>(null);
+  const [quickBoostConfig, setQuickBoostConfig] = useState<{ budget?: number; currency?: string } | null>(null);
+  const [offlineUssdConfig, setOfflineUssdConfig] = useState<{ code?: string; menu?: string } | null>(null);
+  const [offlineSmsConfig, setOfflineSmsConfig] = useState<{ sample?: string } | null>(null);
+  const [offlineVoiceConfig, setOfflineVoiceConfig] = useState<{ sample?: string } | null>(null);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<Plan[]>([]);
+  const [subscriptionView, setSubscriptionView] = useState<SubscriptionView | null>(null);
+  const [sellerRankInfo, setSellerRankInfo] = useState<{ rank?: number; breakdown?: Record<string, any> } | null>(null);
+  const [offlineEnabled, setOfflineEnabled] = useState(false);
   const [campaigns, setCampaigns] = useState<Array<{
     id: string;
     name: string;
@@ -359,14 +452,128 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [campaignForm, setCampaignForm] = useState({
     name: '',
     objective: 'sales' as 'reach' | 'sales' | 'favorites',
-    budget: 1200,
-    durationDays: 7,
+    budget: 0,
+    durationDays: 0,
     productId: '',
     channel: 'search' as 'search' | 'feed' | 'messages'
   });
   const [campaignStatus, setCampaignStatus] = useState<string | null>(null);
   const [campaignLoading, setCampaignLoading] = useState(false);
   const [referralPhone, setReferralPhone] = useState('');
+
+  useEffect(() => {
+    if (!seller.id) return;
+    setMyProducts(products.filter(p => p.sellerId === seller.id));
+  }, [seller.id, products]);
+
+  useEffect(() => {
+    let ignore = false;
+    const loadSeller = async () => {
+      try {
+      const [profile, locations, shareLink, metrics, prefsResp] = await Promise.all([
+        getSellerProfile(),
+        listSellerLocations(),
+        getSellerShareLink().catch(() => null),
+        getSellerMetrics().catch(() => null),
+          getSellerPreferences().catch(() => null)
+        ]);
+        if (ignore || !profile) return;
+        const primaryLocation = locations?.[0];
+        const rawLocation = primaryLocation || null;
+        const location =
+          typeof rawLocation === 'string'
+            ? { address: rawLocation }
+            : rawLocation
+            ? (() => {
+                const latRaw = (rawLocation as any).lat ?? (rawLocation as any).latitude;
+                const lngRaw = (rawLocation as any).lng ?? (rawLocation as any).longitude;
+                const lat = Number.isFinite(Number(latRaw)) ? Number(latRaw) : undefined;
+                const lng = Number.isFinite(Number(lngRaw)) ? Number(lngRaw) : undefined;
+                return {
+                  address: (rawLocation as any).address || (rawLocation as any).label || (rawLocation as any).name || '',
+                  ...(lat !== undefined ? { lat } : {}),
+                  ...(lng !== undefined ? { lng } : {})
+                };
+              })()
+            : undefined;
+        setSeller(prev => ({
+          ...prev,
+          id: profile.seller_id || prev.id,
+          name: profile.name || prev.name,
+          description: profile.description || prev.description,
+          avatar: profile.logo_url || prev.avatar,
+          rating: Number((metrics as any)?.avg_rating ?? prev.rating),
+          followersCount: Number((metrics as any)?.followers ?? prev.followersCount),
+          location: location && location.lat !== undefined && location.lng !== undefined
+            ? { address: location.address, lat: location.lat, lng: location.lng }
+            : prev.location
+        }));
+        setSellerShareLink((shareLink as any)?.share_url ?? null);
+        const prefs = (prefsResp as SellerPreferencesApi | null) ?? null;
+        setSellerPreferences(prefs);
+        if (prefs?.analytics) {
+          const salesDays = Number(prefs.analytics.sales_series_days);
+          const velocityDays = Number(prefs.analytics.sales_velocity_days);
+          const peakDays = Number(prefs.analytics.peak_hours_days);
+          const inventoryDays = Number(prefs.analytics.inventory_series_days);
+          const conversionDays = Number(prefs.analytics.conversion_series_days);
+          if (Number.isFinite(salesDays) && salesDays > 0) setSalesSeriesDays(salesDays);
+          if (Number.isFinite(velocityDays) && velocityDays > 0) setSalesVelocityDays(velocityDays);
+          if (Number.isFinite(peakDays) && peakDays > 0) setPeakHoursDays(peakDays);
+          if (Number.isFinite(inventoryDays) && inventoryDays > 0) setInventorySeriesDays(inventoryDays);
+          if (Number.isFinite(conversionDays) && conversionDays > 0) setConversionSeriesDays(conversionDays);
+        }
+        setSellerPreferencesDraft(prev => ({
+          marketing: {
+            ...prev.marketing,
+            ...(prefs?.marketing ?? {}),
+            kpi_range: String(prefs?.marketing?.kpi_range ?? prev.marketing.kpi_range ?? '30d'),
+            campaign_duration_days: Number(prefs?.marketing?.campaign_duration_days ?? prev.marketing.campaign_duration_days ?? 7),
+            top_products_days: Number(prefs?.marketing?.top_products_days ?? prev.marketing.top_products_days ?? 30),
+            top_products_limit: Number(prefs?.marketing?.top_products_limit ?? prev.marketing.top_products_limit ?? 5),
+            broadcast_limit: Number(prefs?.marketing?.broadcast_limit ?? prev.marketing.broadcast_limit ?? 50),
+            quick_boost_budget: Number(prefs?.marketing?.quick_boost_budget ?? prev.marketing.quick_boost_budget ?? 500)
+          },
+          growth: {
+            ...prev.growth,
+            ...(prefs?.growth ?? {}),
+            projection_type: String(prefs?.growth?.projection_type ?? prev.growth.projection_type ?? 'cashflow'),
+            loan_request_ratio: Number(prefs?.growth?.loan_request_ratio ?? prev.growth.loan_request_ratio ?? 0.5)
+          },
+          comms: {
+            ...prev.comms,
+            ...(prefs?.comms ?? {}),
+            broadcast_limit: Number(prefs?.comms?.broadcast_limit ?? prev.comms.broadcast_limit ?? 50)
+          },
+          analytics: {
+            ...prev.analytics,
+            ...(prefs?.analytics ?? {}),
+            sales_series_days: Number(prefs?.analytics?.sales_series_days ?? prev.analytics.sales_series_days ?? 7),
+            sales_velocity_days: Number(prefs?.analytics?.sales_velocity_days ?? prev.analytics.sales_velocity_days ?? 7),
+            peak_hours_days: Number(prefs?.analytics?.peak_hours_days ?? prev.analytics.peak_hours_days ?? 7),
+            inventory_series_days: Number(prefs?.analytics?.inventory_series_days ?? prev.analytics.inventory_series_days ?? 14),
+            conversion_series_days: Number(prefs?.analytics?.conversion_series_days ?? prev.analytics.conversion_series_days ?? 14)
+          },
+          procurement: {
+            ...prev.procurement,
+            ...(prefs?.procurement ?? {}),
+            max_distance_km: Number(prefs?.procurement?.max_distance_km ?? prev.procurement.max_distance_km ?? 50),
+            max_unit_cost: Number(prefs?.procurement?.max_unit_cost ?? prev.procurement.max_unit_cost ?? 500),
+            max_moq: Number(prefs?.procurement?.max_moq ?? prev.procurement.max_moq ?? 50),
+            max_lead_time_days: Number(prefs?.procurement?.max_lead_time_days ?? prev.procurement.max_lead_time_days ?? 14),
+            min_rating: Number(prefs?.procurement?.min_rating ?? prev.procurement.min_rating ?? 0),
+            verified_only: Boolean(prefs?.procurement?.verified_only ?? prev.procurement.verified_only ?? false)
+          }
+        }));
+      } catch {
+        // Ignore profile errors; screen still renders.
+      }
+    };
+    loadSeller();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   // Form States
   const [formData, setFormData] = useState<{
@@ -415,11 +622,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [suppliersStatus, setSuppliersStatus] = useState<string | null>(null);
   const [supplierOffersById, setSupplierOffersById] = useState<Record<string, SupplierOffer[]>>({});
   const [supplierDeliveryById, setSupplierDeliveryById] = useState<Record<string, SupplierDelivery>>({});
-  const [adminSupplierApps, setAdminSupplierApps] = useState<SupplierApplication[]>([]);
-  const [adminSupplierAppsLoading, setAdminSupplierAppsLoading] = useState(false);
-  const [adminSupplierAppsStatus, setAdminSupplierAppsStatus] = useState<string | null>(null);
-  const [adminDecisionReasons, setAdminDecisionReasons] = useState<Record<string, string>>({});
-  const [isAdmin, setIsAdmin] = useState(false);
   const [rfqThreadsRemote, setRfqThreadsRemote] = useState<RFQThread[]>([]);
   const [rfqResponsesById, setRfqResponsesById] = useState<Record<string, RFQResponse[]>>({});
   const [rfqComparisonById, setRfqComparisonById] = useState<Record<string, RFQComparison>>({});
@@ -432,9 +634,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     category: '',
     maxDistance: 50,
     minRating: 0,
-    verifiedOnly: false,
-    minOrderValue: 0
+    verifiedOnly: false
   });
+  const [sellerDirectory, setSellerDirectory] = useState<Array<{
+    shop: ShopDirectoryEntry;
+    distanceKm: number | null;
+    score: number;
+  }>>([]);
+  const [sellerDirectoryLoading, setSellerDirectoryLoading] = useState(false);
+  const [sellerDirectoryStatus, setSellerDirectoryStatus] = useState<string | null>(null);
   const [sellerReviews, setSellerReviews] = useState<any[]>([]);
   const [shopReviews, setShopReviews] = useState<any[]>([]);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
@@ -456,7 +664,34 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [analyticsBuyers, setAnalyticsBuyers] = useState<BuyerInsight | null>(null);
   const [analyticsMarket, setAnalyticsMarket] = useState<MarketBenchmarks | null>(null);
   const [analyticsAnomalies, setAnalyticsAnomalies] = useState<Anomaly[]>([]);
-  const [analyticsStatus, setAnalyticsStatus] = useState<string | null>(null);
+  const [analyticsChannelMix, setAnalyticsChannelMix] = useState<ChannelMixItem[]>([]);
+  const [analyticsDemographicsData, setAnalyticsDemographicsData] = useState<CustomerDemographicItem[]>([]);
+  const [analyticsMarketDemand, setAnalyticsMarketDemand] = useState<MarketDemandItem[]>([]);
+  const [analyticsMarketTrending, setAnalyticsMarketTrending] = useState<MarketTrendingItem[]>([]);
+  const [analyticsTrendingSuppliers, setAnalyticsTrendingSuppliers] = useState<TrendingSupplierItem[]>([]);
+  const [analyticsLiveBuyers, setAnalyticsLiveBuyers] = useState<LiveBuyerPoint[]>([]);
+  const [analyticsPeakHoursData, setAnalyticsPeakHoursData] = useState<PeakHourItem[]>([]);
+  const [analyticsSalesSeries, setAnalyticsSalesSeries] = useState<SalesSeriesItem[]>([]);
+  const [analyticsSalesVelocitySeries, setAnalyticsSalesVelocitySeries] = useState<SalesVelocityItem[]>([]);
+  const [analyticsInventorySeries, setAnalyticsInventorySeries] = useState<InventorySeriesItem[]>([]);
+  const [analyticsConversionSeries, setAnalyticsConversionSeries] = useState<ConversionSeriesItem[]>([]);
+  const [analyticsTopProducts, setAnalyticsTopProducts] = useState<TopProductItem[]>([]);
+  const [analyticsDataQuality, setAnalyticsDataQuality] = useState<DataQuality | null>(null);
+  const [, setAnalyticsStatus] = useState<string | null>(null);
+  const [salesSeriesDays, setSalesSeriesDays] = useState<number | undefined>(undefined);
+  const [salesVelocityDays, setSalesVelocityDays] = useState<number | undefined>(undefined);
+  const [peakHoursDays, setPeakHoursDays] = useState<number | undefined>(undefined);
+  const [inventorySeriesDays, setInventorySeriesDays] = useState<number | undefined>(undefined);
+  const [conversionSeriesDays, setConversionSeriesDays] = useState<number | undefined>(undefined);
+  const [salesSeriesLoading, setSalesSeriesLoading] = useState(false);
+  const [salesVelocityLoading, setSalesVelocityLoading] = useState(false);
+  const [peakHoursLoading, setPeakHoursLoading] = useState(false);
+  const [inventorySeriesLoading, setInventorySeriesLoading] = useState(false);
+  const [conversionSeriesLoading, setConversionSeriesLoading] = useState(false);
+  const [, setSellerAlerts] = useState<SellerAlert[]>([]);
+  const [sellerAlertsDraft, setSellerAlertsDraft] = useState<SellerAlert[]>([]);
+  const [sellerAlertsStatus, setSellerAlertsStatus] = useState<string | null>(null);
+  const [sellerAlertsSaving, setSellerAlertsSaving] = useState(false);
   const heatmapContainerRef = useRef<HTMLDivElement | null>(null);
   const heatmapMapRef = useRef<any>(null);
   const heatmapReadyRef = useRef(false);
@@ -480,28 +715,61 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [pathRecordingStatus, setPathRecordingStatus] = useState<string | null>(null);
   const [sellerPaths, setSellerPaths] = useState<RecordedPath[]>([]);
   const [sellerPathsStatus, setSellerPathsStatus] = useState<string | null>(null);
-  const [routeConfigDraft, setRouteConfigDraft] = useState<string>('');
-  const [routeConfigStatus, setRouteConfigStatus] = useState<string | null>(null);
-  const [routeConfigSaving, setRouteConfigSaving] = useState(false);
-  const [routeConfigUpdatedAt, setRouteConfigUpdatedAt] = useState<string | null>(null);
   const landmarkDragIndexRef = useRef<number | null>(null);
   const pathRecorderContainerRef = useRef<HTMLDivElement | null>(null);
   const pathRecorderMapRef = useRef<any>(null);
   const pathRecordingWatchIdRef = useRef<number | null>(null);
   const [, setBroadcasts] = useState<Broadcast[]>([]);
-  const [broadcastMessage, setBroadcastMessage] = useState('Leo Unga 2kg KES 175 • Sukari 1kg KES 150 • Maziwa fresh!');
-  const [commsStatus, setCommsStatus] = useState<string | null>(null);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [, setCommsStatus] = useState<string | null>(null);
   const [marketingKpis, setMarketingKpis] = useState<MarketingKPIStat | null>(null);
   const [marketingHotspots, setMarketingHotspots] = useState<MarketingHotspot[]>([]);
   const [marketingStockAlerts, setMarketingStockAlerts] = useState<Array<{ id?: string; product_id?: string; message?: string; status?: string }>>([]);
   const [, setMarketingFanOffers] = useState<Array<{ id?: string; offer_title?: string; discount?: string; status?: string }>>([]);
   const [marketingCategorySpotlights, setMarketingCategorySpotlights] = useState<Array<{ id?: string; category?: string; budget?: string; status?: string }>>([]);
   const [marketingStatus, setMarketingStatus] = useState<string | null>(null);
+  const [sellerPreferences, setSellerPreferences] = useState<SellerPreferencesApi | null>(null);
+  const [sellerPreferencesDraft, setSellerPreferencesDraft] = useState({
+    marketing: {
+      kpi_range: '30d',
+      campaign_duration_days: 7,
+      top_products_days: 30,
+      top_products_limit: 5,
+      broadcast_limit: 50,
+      quick_boost_budget: 500
+    },
+    growth: {
+      projection_type: 'cashflow',
+      loan_request_ratio: 0.5
+    },
+    comms: {
+      broadcast_limit: 50
+    },
+    analytics: {
+      sales_series_days: 7,
+      sales_velocity_days: 7,
+      peak_hours_days: 7,
+      inventory_series_days: 14,
+      conversion_series_days: 14
+    },
+    procurement: {
+      max_distance_km: 50,
+      max_unit_cost: 500,
+      max_moq: 50,
+      max_lead_time_days: 14,
+      min_rating: 0,
+      verified_only: false
+    }
+  });
+  const [sellerPreferencesSaving, setSellerPreferencesSaving] = useState(false);
+  const [sellerPreferencesStatus, setSellerPreferencesStatus] = useState<string | null>(null);
   const [stockAlertProductId, setStockAlertProductId] = useState('');
+  const [sellerReferralCodes, setSellerReferralCodes] = useState<MarketingReferral[]>([]);
   const [onboardingState, setOnboardingState] = useState<SellerOnboardingState | null>(null);
   const [onboardingEligible, setOnboardingEligible] = useState<boolean | null>(null);
   const [onboardingTutorials, setOnboardingTutorials] = useState<SellerTutorial[]>([]);
   const [onboardingStatus, setOnboardingStatus] = useState<string | null>(null);
+  const [sellerShareLink, setSellerShareLink] = useState<string | null>(null);
   const [shopType, setShopType] = useState('physical');
   const [sellerMode, setSellerMode] = useState('fixed_shop');
   const [buyerReach, setBuyerReach] = useState<'fixed_address' | 'market_stall' | 'delivery_only'>('fixed_address');
@@ -547,74 +815,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [productsStatus, setProductsStatus] = useState<string | null>(null);
   const [productsLoading, setProductsLoading] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
-  const [productInsights, setProductInsights] = useState<SellerProductInsight[]>([]);
+  const [sellerRecommendations, setSellerRecommendations] = useState<SellerRecommendation[]>([]);
   const [productLowStock, setProductLowStock] = useState<SellerLowStock[]>([]);
 
-  useEffect(() => {
-    let active = true;
-    loadRouteMultipliers()
-      .then((config) => {
-        if (!active) return;
-        setRouteConfigDraft(JSON.stringify(config, null, 2));
-      })
-      .catch(() => {
-        if (!active) return;
-        setRouteConfigDraft(JSON.stringify(getDefaultRouteMultipliers(), null, 2));
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
-  const parseRouteConfigDraft = () => {
-    const raw = routeConfigDraft.trim();
-    if (!raw) {
-      throw new Error('Route config cannot be empty.');
-    }
-    return JSON.parse(raw) as RouteMultipliersConfig;
-  };
-
-  const handleSaveRouteConfigLocal = () => {
-    try {
-      const parsed = parseRouteConfigDraft();
-      localStorage.setItem('soko:route_multipliers', JSON.stringify(parsed));
-      setRouteConfigStatus('Saved locally. Routes will use this immediately.');
-    } catch (err: any) {
-      setRouteConfigStatus(err?.message || 'Invalid JSON config.');
-    }
-  };
-
-  const handleLoadRouteConfigFromOps = async () => {
-    setRouteConfigStatus('Loading from ops...');
-    try {
-      const resp = await getOpsConfig('route_multipliers');
-      if (resp?.value) {
-        setRouteConfigDraft(JSON.stringify(resp.value, null, 2));
-        setRouteConfigUpdatedAt(resp.updated_at || null);
-        setRouteConfigStatus('Loaded from ops config.');
-        return;
-      }
-      setRouteConfigStatus('No ops config found yet.');
-    } catch (err: any) {
-      setRouteConfigStatus(err?.message || 'Unable to load ops config.');
-    }
-  };
-
-  const handlePublishRouteConfig = async () => {
-    setRouteConfigSaving(true);
-    setRouteConfigStatus(null);
-    try {
-      const parsed = parseRouteConfigDraft();
-      const resp = await setOpsConfig('route_multipliers', parsed);
-      setRouteConfigUpdatedAt(resp.updated_at || null);
-      localStorage.setItem('soko:route_multipliers', JSON.stringify(parsed));
-      setRouteConfigStatus('Published to ops config.');
-    } catch (err: any) {
-      setRouteConfigStatus(err?.message || 'Unable to publish config.');
-    } finally {
-      setRouteConfigSaving(false);
-    }
-  };
   const [productMediaByProductId, setProductMediaByProductId] = useState<Record<string, ProductMedia[]>>({});
   const [showMediaDrawer, setShowMediaDrawer] = useState(false);
   const [mediaDrawerProduct, setMediaDrawerProduct] = useState<Product | null>(null);
@@ -623,11 +827,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [sellerLocations, setSellerLocations] = useState<SellerLocation[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
-  const [notificationPrefs, setNotificationPrefs] = useState<{ email?: boolean; in_app?: boolean; whatsapp?: boolean; sms?: boolean }>({
-    email: true,
-    in_app: true,
-    whatsapp: false,
-    sms: false
+  const [notificationPrefs, setNotificationPrefs] = useState<SellerNotificationPreferences>({
+    price_drops: true,
+    back_in_stock: true,
+    trending: true,
+    marketing: true,
+    rewards: true,
+    support: true,
+    system: true,
+    watched_items: true,
+    location_based: true,
+    frequency: 'instant',
+    quiet_hours_start: '',
+    quiet_hours_end: ''
   });
   const [notificationsUpdating, setNotificationsUpdating] = useState(false);
   const [growthOverview, setGrowthOverview] = useState<Record<string, any> | null>(null);
@@ -646,6 +858,24 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const aiInsightContextRef = useRef<string>('');
   const aiInsightInFlightRef = useRef(false);
 
+  const sellerMarketingPreferences = sellerPreferences?.marketing || {};
+  const sellerGrowthPreferences = sellerPreferences?.growth || {};
+  const sellerCommsPreferences = sellerPreferences?.comms || {};
+  const sellerAnalyticsPreferences = sellerPreferences?.analytics || {};
+  const sellerProcurementPreferences = sellerPreferences?.procurement || {};
+  const marketingKpiRange = String(sellerMarketingPreferences.kpi_range ?? marketingKpiDefaults?.range ?? '30d').trim() || '30d';
+  const campaignDurationDays = Number(sellerMarketingPreferences.campaign_duration_days ?? campaignDefaults?.duration_days ?? 7);
+  const topProductsDays = Number(sellerMarketingPreferences.top_products_days ?? topProductsDefaults?.days ?? 30);
+  const topProductsLimit = Number(sellerMarketingPreferences.top_products_limit ?? topProductsDefaults?.limit ?? 5);
+  const broadcastsLimit = Number(sellerCommsPreferences.broadcast_limit ?? broadcastsDefaults?.limit ?? 50);
+  const growthProjectionType = String(sellerGrowthPreferences.projection_type ?? 'cashflow').trim() || 'cashflow';
+  const loanRequestRatio = Number(sellerGrowthPreferences.loan_request_ratio ?? 0.5);
+  const analyticsSalesDays = Number(sellerAnalyticsPreferences.sales_series_days ?? analyticsDefaults?.sales_series_days ?? 7);
+  const analyticsVelocityDays = Number(sellerAnalyticsPreferences.sales_velocity_days ?? analyticsDefaults?.sales_velocity_days ?? 7);
+  const analyticsPeakHoursDays = Number(sellerAnalyticsPreferences.peak_hours_days ?? analyticsDefaults?.peak_hours_days ?? 7);
+  const analyticsInventoryDays = Number(sellerAnalyticsPreferences.inventory_series_days ?? analyticsDefaults?.inventory_series_days ?? 14);
+  const analyticsConversionDays = Number(sellerAnalyticsPreferences.conversion_series_days ?? analyticsDefaults?.conversion_series_days ?? 14);
+
   useEffect(() => {
     const isVerified = verifiedSellerIds.includes(seller.id);
     setSeller(prev => ({ ...prev, isVerified }));
@@ -653,36 +883,236 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   }, [products, seller.id, verifiedSellerIds]);
 
   useEffect(() => {
+    setSupplierFilters(prev => ({
+      ...prev,
+      maxDistance: Number(sellerProcurementPreferences.max_distance_km ?? prev.maxDistance ?? 50),
+      maxUnitCost: Number(sellerProcurementPreferences.max_unit_cost ?? prev.maxUnitCost ?? 500),
+      maxMOQ: Number(sellerProcurementPreferences.max_moq ?? prev.maxMOQ ?? 50),
+      maxLeadTime: Number(sellerProcurementPreferences.max_lead_time_days ?? prev.maxLeadTime ?? 14),
+      minRating: Number(sellerProcurementPreferences.min_rating ?? prev.minRating ?? 0),
+      verifiedOnly: Boolean(sellerProcurementPreferences.verified_only ?? prev.verifiedOnly ?? false)
+    }));
+  }, [sellerProcurementPreferences.max_distance_km, sellerProcurementPreferences.max_lead_time_days, sellerProcurementPreferences.max_moq, sellerProcurementPreferences.max_unit_cost, sellerProcurementPreferences.min_rating, sellerProcurementPreferences.verified_only]);
+
+  useEffect(() => {
+    if (broadcastMessage.trim()) return;
+    if (marketingStockAlerts.length === 0) return;
+    const alerts = marketingStockAlerts
+      .filter((alert) => alert.message)
+      .slice(0, 3)
+      .map((alert) => alert.message)
+      .join(' • ');
+    if (alerts) setBroadcastMessage(alerts);
+  }, [broadcastMessage, marketingStockAlerts]);
+
+  const loadSellerRewards = React.useCallback(async () => {
+    setSellerRewardsLoading(true);
+    setSellerRewardsError(null);
     try {
-      const rawBroadcasts = localStorage.getItem(`soko:seller_broadcasts:${seller.id}`);
-      setBroadcastCount(rawBroadcasts ? Number(rawBroadcasts) : 0);
-    } catch {
-      setBroadcastCount(0);
+      const [balance, ledger, streaks, receipts] = await Promise.all([
+        getRewardsBalance(),
+        getRewardsLedger(),
+        getRewardStreaks().catch(() => []),
+        listReceipts().catch(() => [])
+      ]);
+      setSellerRewardsBalance(balance || null);
+      setSellerRewardsLedger(Array.isArray(ledger) ? ledger : []);
+      setSellerRewardStreaks(Array.isArray(streaks) ? streaks : []);
+      setSellerReceipts(Array.isArray(receipts) ? receipts : []);
+    } catch (err: any) {
+      setSellerRewardsError(err?.message || 'Unable to load rewards wallet.');
+    } finally {
+      setSellerRewardsLoading(false);
     }
-  }, [seller.id]);
+  }, []);
+
+  useEffect(() => {
+    loadSellerRewards();
+  }, [loadSellerRewards]);
+
+  const loadRewardConfigs = React.useCallback(async () => {
+    try {
+      const [
+        dataSharingResp,
+        referralResp,
+        offlineResp,
+        receiptRewardsResp,
+        claimShopResp,
+        verificationResp,
+        featuredListingResp,
+        clearancePromoResp,
+        categorySpotlightResp,
+        fanOfferResp,
+        campaignDefaultsResp,
+        marketingKpiDefaultsResp,
+        groupBuyDefaultsResp,
+        analyticsDefaultsResp,
+        topProductsDefaultsResp,
+        broadcastsDefaultsResp,
+        quickBoostResp,
+        offlineUssdResp,
+        offlineSmsResp,
+        offlineVoiceResp
+      ] = await Promise.all([
+        getOpsConfig('rewards.data_sharing').catch(() => null),
+        getOpsConfig('rewards.referrals').catch(() => null),
+        getOpsConfig('features.offline').catch(() => null),
+        getOpsConfig('rewards.receipts').catch(() => null),
+        getOpsConfig('rewards.claim_shop').catch(() => null),
+        getOpsConfig('rewards.verification').catch(() => null),
+        getOpsConfig('marketing.featured_listing').catch(() => null),
+        getOpsConfig('marketing.clearance_promotion').catch(() => null),
+        getOpsConfig('marketing.category_spotlight').catch(() => null),
+        getOpsConfig('marketing.fan_offer').catch(() => null),
+        getOpsConfig('marketing.campaign_defaults').catch(() => null),
+        getOpsConfig('marketing.kpi_defaults').catch(() => null),
+        getOpsConfig('groupbuy.offer_defaults').catch(() => null),
+        getOpsConfig('analytics.series_defaults').catch(() => null),
+        getOpsConfig('analytics.top_products_defaults').catch(() => null),
+        getOpsConfig('comms.broadcasts_defaults').catch(() => null),
+        getOpsConfig('marketing.quick_boost').catch(() => null),
+        getOpsConfig('offline.ussd').catch(() => null),
+        getOpsConfig('offline.sms_sample').catch(() => null),
+        getOpsConfig('offline.voice_sample').catch(() => null)
+      ]);
+      setDataSharingRewards((dataSharingResp as any)?.value ?? null);
+      setReferralRewards((referralResp as any)?.value ?? null);
+      const offlineValue = (offlineResp as any)?.value;
+      setOfflineEnabled(
+        typeof offlineValue === 'boolean'
+          ? offlineValue
+          : typeof offlineValue === 'string'
+            ? offlineValue.toLowerCase() === 'true'
+            : Boolean(offlineValue?.enabled ?? offlineValue?.value ?? offlineValue?.active),
+      );
+      setReceiptRewardsConfig((receiptRewardsResp as any)?.value ?? null);
+      setClaimShopRewardConfig((claimShopResp as any)?.value ?? null);
+      setVerificationRewardConfig((verificationResp as any)?.value ?? null);
+      setFeaturedListingConfig((featuredListingResp as any)?.value ?? null);
+      setClearancePromoConfig((clearancePromoResp as any)?.value ?? null);
+      setCategorySpotlightConfig((categorySpotlightResp as any)?.value ?? null);
+      setFanOfferConfig((fanOfferResp as any)?.value ?? null);
+      setCampaignDefaults((campaignDefaultsResp as any)?.value ?? null);
+      setMarketingKpiDefaults((marketingKpiDefaultsResp as any)?.value ?? null);
+      setGroupBuyDefaults((groupBuyDefaultsResp as any)?.value ?? null);
+      setAnalyticsDefaults((analyticsDefaultsResp as any)?.value ?? null);
+      setTopProductsDefaults((topProductsDefaultsResp as any)?.value ?? null);
+      setBroadcastsDefaults((broadcastsDefaultsResp as any)?.value ?? null);
+      setQuickBoostConfig((quickBoostResp as any)?.value ?? null);
+      setOfflineUssdConfig((offlineUssdResp as any)?.value ?? null);
+      setOfflineSmsConfig((offlineSmsResp as any)?.value ?? null);
+      setOfflineVoiceConfig((offlineVoiceResp as any)?.value ?? null);
+    } catch {
+      setDataSharingRewards(null);
+      setReferralRewards(null);
+      setOfflineEnabled(false);
+      setReceiptRewardsConfig(null);
+      setClaimShopRewardConfig(null);
+      setVerificationRewardConfig(null);
+      setFeaturedListingConfig(null);
+      setClearancePromoConfig(null);
+      setCategorySpotlightConfig(null);
+      setFanOfferConfig(null);
+      setCampaignDefaults(null);
+      setMarketingKpiDefaults(null);
+      setGroupBuyDefaults(null);
+      setAnalyticsDefaults(null);
+      setTopProductsDefaults(null);
+      setBroadcastsDefaults(null);
+      setQuickBoostConfig(null);
+      setOfflineUssdConfig(null);
+      setOfflineSmsConfig(null);
+      setOfflineVoiceConfig(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRewardConfigs();
+  }, [loadRewardConfigs]);
+
+  useEffect(() => {
+    if (!analyticsDefaults || analyticsDefaultsApplied) return;
+    const salesDays = Number(analyticsDefaults.sales_series_days);
+    const velocityDays = Number(analyticsDefaults.sales_velocity_days);
+    const peakDays = Number(analyticsDefaults.peak_hours_days);
+    const inventoryDays = Number(analyticsDefaults.inventory_series_days);
+    const conversionDays = Number(analyticsDefaults.conversion_series_days);
+    if (Number.isFinite(salesDays) && salesDays > 0) setSalesSeriesDays(salesDays);
+    if (Number.isFinite(velocityDays) && velocityDays > 0) setSalesVelocityDays(velocityDays);
+    if (Number.isFinite(peakDays) && peakDays > 0) setPeakHoursDays(peakDays);
+    if (Number.isFinite(inventoryDays) && inventoryDays > 0) setInventorySeriesDays(inventoryDays);
+    if (Number.isFinite(conversionDays) && conversionDays > 0) setConversionSeriesDays(conversionDays);
+    setAnalyticsDefaultsApplied(true);
+  }, [analyticsDefaults, analyticsDefaultsApplied]);
+
+  useEffect(() => {
+    if (!campaignDefaults || campaignDefaultsApplied) return;
+    setCampaignForm((prev) => {
+      const next = { ...prev };
+      if (!next.budget || next.budget === 0) {
+        const budget = Number(campaignDefaults.budget ?? 0);
+        if (budget > 0) next.budget = budget;
+      }
+      if (!next.durationDays || next.durationDays === 0) {
+        const duration = Number(campaignDurationDays ?? 0);
+        if (duration > 0) next.durationDays = duration;
+      }
+      if (campaignDefaults.objective && ['reach', 'sales', 'favorites'].includes(String(campaignDefaults.objective))) {
+        next.objective = campaignDefaults.objective as 'reach' | 'sales' | 'favorites';
+      }
+      if (campaignDefaults.channel && ['search', 'feed', 'messages'].includes(String(campaignDefaults.channel))) {
+        next.channel = campaignDefaults.channel as 'search' | 'feed' | 'messages';
+      }
+      return next;
+    });
+    setCampaignDefaultsApplied(true);
+  }, [campaignDurationDays, campaignDefaults, campaignDefaultsApplied]);
 
   useEffect(() => {
     let ignore = false;
-    const loadRole = async () => {
+    const loadSubscriptions = async () => {
       try {
-        const session = await getSessionInfo();
+        const [plans, view] = await Promise.all([
+          listPlans().catch(() => []),
+          getSubscriptionView().catch(() => null)
+        ]);
         if (ignore) return;
-        const role = normalizeRole(session?.role);
-        setIsAdmin(role === 'admin');
-        if (session?.role) {
-          try {
-            localStorage.setItem('soko:role', String(session.role).toLowerCase());
-          } catch {}
-        }
+        setSubscriptionPlans(Array.isArray(plans) ? plans : []);
+        setSubscriptionView(view as SubscriptionView | null);
       } catch {
-        if (!ignore) setIsAdmin(false);
+        if (!ignore) {
+          setSubscriptionPlans([]);
+          setSubscriptionView(null);
+        }
       }
     };
-    loadRole();
+    loadSubscriptions();
     return () => {
       ignore = true;
     };
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    const loadRank = async () => {
+      try {
+        const rank = await getSellerRank();
+        if (!ignore) setSellerRankInfo(rank as any);
+      } catch {
+        if (!ignore) setSellerRankInfo(null);
+      }
+    };
+    loadRank();
+    return () => {
+      ignore = true;
+    };
+  }, [seller.id]);
+
+  useEffect(() => {
+    if (!offlineEnabled && activeTab === 'offline') {
+      setActiveTab('onboarding');
+    }
+  }, [offlineEnabled, activeTab]);
 
   const runAiInsight = React.useCallback(async (force = false) => {
     if (!seller?.id) return;
@@ -917,13 +1347,29 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
     const loadOnce = async () => {
       try {
-        const [summary, funnel, inventory, buyers, market, anomalies] = await Promise.all([
+        const [summary, funnel, inventory, buyers, market, anomalies, channelMix, demographics, marketDemand, marketTrending, trendingSuppliers, liveBuyers, peakHours, salesSeries, inventorySeries, conversionSeries, dataQuality, topProducts, stockRecommendations] = await Promise.all([
           getSellerKpiSummary(),
           getSellerFunnel(),
           getSellerInventoryInsight(),
           getSellerBuyerInsight(),
           getSellerMarketBenchmarks(),
-          listSellerAnomalies()
+          listSellerAnomalies(),
+          getSellerChannelMix(),
+          getSellerCustomerDemographics(),
+          getSellerMarketDemand(),
+          getSellerMarketTrending(),
+          getSellerTrendingSuppliers(),
+          getSellerLiveBuyers(),
+          getSellerPeakHours(backendSeriesDays(peakHoursDays)),
+          getSellerSalesSeries(backendSeriesDays(salesSeriesDays)),
+          getSellerInventorySeries(backendSeriesDays(inventorySeriesDays)),
+          getSellerConversionSeries(backendSeriesDays(conversionSeriesDays)),
+          getSellerDataQuality(),
+          getSellerTopProducts(
+            backendSeriesDays(topProductsDays),
+            Number.isFinite(topProductsLimit) ? topProductsLimit : undefined
+          ),
+          listSellerRecommendations('stock')
         ]);
         if (cancelled) return;
         setAnalyticsSummary(summary);
@@ -932,6 +1378,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setAnalyticsBuyers(buyers);
         setAnalyticsMarket(market);
         setAnalyticsAnomalies(anomalies);
+        setAnalyticsChannelMix(channelMix);
+        setAnalyticsDemographicsData(demographics);
+        setAnalyticsMarketDemand(marketDemand);
+        setAnalyticsMarketTrending(marketTrending);
+        setAnalyticsTrendingSuppliers(trendingSuppliers);
+        setAnalyticsLiveBuyers(liveBuyers);
+        setAnalyticsPeakHoursData(peakHours);
+        setAnalyticsSalesSeries(salesSeries);
+        setAnalyticsInventorySeries(inventorySeries);
+        setAnalyticsConversionSeries(conversionSeries);
+        setAnalyticsDataQuality(dataQuality);
+        setAnalyticsTopProducts(topProducts);
+        setSellerRecommendations(stockRecommendations);
       } catch (err: any) {
         if (!cancelled) setAnalyticsStatus(err?.message || 'Unable to load analytics.');
       }
@@ -951,6 +1410,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           setAnalyticsBuyers(data.buyers ?? null);
           setAnalyticsMarket(data.market ?? null);
           setAnalyticsAnomalies(Array.isArray(data.anomalies) ? data.anomalies : []);
+          if (Array.isArray(data.channel_mix)) {
+            setAnalyticsChannelMix(data.channel_mix);
+          }
+          if (Array.isArray(data.demographics)) {
+            setAnalyticsDemographicsData(data.demographics);
+          }
+          if (Array.isArray(data.market_demand)) {
+            setAnalyticsMarketDemand(data.market_demand);
+          }
+          if (Array.isArray(data.market_trending)) {
+            setAnalyticsMarketTrending(data.market_trending);
+          }
+          if (Array.isArray(data.trending_suppliers)) {
+            setAnalyticsTrendingSuppliers(data.trending_suppliers);
+          }
         } catch {
           // Ignore parse errors.
         }
@@ -973,10 +1447,159 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       cancelled = true;
       if (ws) ws.close();
     };
-  }, [activeTab]);
+  }, [
+    activeTab,
+    analyticsConversionDays,
+    analyticsInventoryDays,
+    analyticsPeakHoursDays,
+    analyticsSalesDays,
+    topProductsDays,
+    topProductsLimit
+  ]);
+
+  // Series day ranges are backend-configured.
 
   useEffect(() => {
-    if (activeTab !== 'suppliers') return;
+    let cancelled = false;
+    if (activeTab !== 'analytics') return () => {};
+    setSalesSeriesLoading(true);
+    getSellerSalesSeries(backendSeriesDays(salesSeriesDays ?? analyticsSalesDays))
+      .then((items) => {
+        if (!cancelled) setAnalyticsSalesSeries(items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSalesSeriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, salesSeriesDays, analyticsSalesDays]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeTab !== 'analytics') return () => {};
+    setSalesVelocityLoading(true);
+    getSellerSalesVelocity(backendSeriesDays(salesVelocityDays ?? analyticsVelocityDays))
+      .then((items) => {
+        if (!cancelled) setAnalyticsSalesVelocitySeries(items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSalesVelocityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, salesVelocityDays, analyticsVelocityDays]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeTab !== 'analytics') return () => {};
+    setPeakHoursLoading(true);
+    getSellerPeakHours(backendSeriesDays(peakHoursDays ?? analyticsPeakHoursDays))
+      .then((items) => {
+        if (!cancelled) setAnalyticsPeakHoursData(items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPeakHoursLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, peakHoursDays, analyticsPeakHoursDays]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeTab !== 'analytics') return () => {};
+    setInventorySeriesLoading(true);
+    getSellerInventorySeries(backendSeriesDays(inventorySeriesDays ?? analyticsInventoryDays))
+      .then((items) => {
+        if (!cancelled) setAnalyticsInventorySeries(items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setInventorySeriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, inventorySeriesDays, analyticsInventoryDays]);
+
+  // Series day ranges are backend-configured.
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeTab !== 'analytics') return () => {};
+    setConversionSeriesLoading(true);
+    getSellerConversionSeries(backendSeriesDays(conversionSeriesDays ?? analyticsConversionDays))
+      .then((items) => {
+        if (!cancelled) setAnalyticsConversionSeries(items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setConversionSeriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, conversionSeriesDays, analyticsConversionDays]);
+
+  // Series day ranges are backend-configured.
+
+  useEffect(() => {
+    let cancelled = false;
+    setSellerAlertsStatus(null);
+    getSellerAlerts()
+      .then((items) => {
+        if (cancelled) return;
+        setSellerAlerts(items);
+        setSellerAlertsDraft(items);
+      })
+      .catch((err: any) => {
+        if (!cancelled) setSellerAlertsStatus(err?.message || 'Unable to load alert preferences.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [seller.id]);
+
+  const handleToggleSellerAlert = (type: string) => {
+    setSellerAlertsDraft((prev) =>
+      prev.map((item) => (item.type === type ? { ...item, active: !item.active } : item)),
+    );
+  };
+
+  const handleSellerAlertThreshold = (type: string, value: number) => {
+    setSellerAlertsDraft((prev) =>
+      prev.map((item) => (item.type === type ? { ...item, threshold: value } : item)),
+    );
+  };
+
+  const handleSaveSellerAlerts = async () => {
+    setSellerAlertsSaving(true);
+    setSellerAlertsStatus(null);
+    try {
+      const updated = await updateSellerAlerts(
+        sellerAlertsDraft.map((item) => ({
+          type: item.type,
+          threshold: Number(item.threshold ?? 0),
+          active: Boolean(item.active),
+        })),
+      );
+      setSellerAlerts(updated);
+      setSellerAlertsDraft(updated);
+      setSellerAlertsStatus('Alert preferences saved.');
+    } catch (err: any) {
+      setSellerAlertsStatus(err?.message || 'Unable to save alert preferences.');
+    } finally {
+      setSellerAlertsSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'suppliers' && activeTab !== 'analytics') return;
     let cancelled = false;
     let ws: WebSocket | null = null;
 
@@ -1021,7 +1644,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       cancelled = true;
       if (ws) ws.close();
     };
-  }, [activeTab]);
+  }, [activeTab, campaignDefaults?.duration_days]);
 
   useEffect(() => {
     if (activeTab !== 'marketing') return;
@@ -1031,7 +1654,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     const normalizeCampaigns = (items: ApiCampaign[]) =>
       items.map((c: ApiCampaign) => {
         const targeting = (c.targeting_rules || {}) as Record<string, any>;
-        const durationDays = Number(targeting.duration_days ?? 7);
+        const durationDays = Number(targeting.duration_days ?? campaignDefaults?.duration_days ?? 7);
         return {
           id: c.id,
           name: c.name || 'Campaign',
@@ -1051,7 +1674,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       try {
         const [items, kpis, hotspots, stockAlerts, fanOffers, spotlights] = await Promise.all([
           listSellerCampaigns(),
-          getMarketingKPIs('30d'),
+          getMarketingKPIs(marketingKpiRange),
           listHotspots(),
           listStockAlerts(),
           listFanOffers(),
@@ -1107,7 +1730,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       ignore = true;
       if (ws) ws.close();
     };
-  }, [activeTab]);
+  }, [activeTab, marketingKpiRange]);
 
   useEffect(() => {
     if (activeTab !== 'onboarding') return;
@@ -1184,35 +1807,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             scopes: state.connection?.scopes || prev.scopes
           }));
         }
-        if (!state?.shop_type) {
-          try {
-            const stored = localStorage.getItem('soko:shop_type');
-            if (stored) {
-              setShopType(stored);
-              await setSellerShopType({ shop_type: stored });
-            }
-          } catch {}
-        }
-        if (!state?.seller_mode) {
-          try {
-            const storedMode = localStorage.getItem('soko:seller_mode');
-            if (storedMode) {
-              setSellerMode(storedMode);
-              await updateSellerProfile({ seller_mode: storedMode });
-              await recordSellerOnboardingEvent({ step: 'seller_mode', status: 'complete' });
-            }
-          } catch {}
-        }
-        try {
-          const storedWhats = localStorage.getItem('soko:seller_whatsapp');
-          const storedRadius = localStorage.getItem('soko:seller_delivery_radius');
-          const storedMarket = localStorage.getItem('soko:seller_market_name');
-          const storedMarker = localStorage.getItem('soko:seller_visual_marker');
-          if (storedWhats && !whatsappNumber) setWhatsappNumber(storedWhats);
-          if (storedRadius && deliveryRadiusKm === '') setDeliveryRadiusKm(Number(storedRadius));
-          if (storedMarket && !marketName) setMarketName(storedMarket);
-          if (storedMarker && !visualMarker) setVisualMarker(storedMarker);
-        } catch {}
       } catch (err: any) {
         if (!ignore) setOnboardingStatus(err?.message || 'Unable to load onboarding status.');
       }
@@ -1272,10 +1866,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setProfileLoading(true);
       setReviewsLoading(true);
       try {
-        const [profile, locations, verification] = await Promise.all([
+        const [profile, locations, verification, prefs] = await Promise.all([
           getSellerProfile(),
           listSellerLocations(),
-          getSellerVerificationStatus()
+          getSellerVerificationStatus(),
+          getSellerPreferences().catch(() => null)
         ]);
         if (ignore) return;
         setSellerLocations(locations);
@@ -1303,6 +1898,63 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             onVerifiedSellerIdsChange(Array.from(new Set([...verifiedSellerIds, seller.id])));
           }
         }
+        if (prefs) {
+          setSellerPreferences(prefs);
+          if (prefs.analytics) {
+            const salesDays = Number(prefs.analytics.sales_series_days);
+            const velocityDays = Number(prefs.analytics.sales_velocity_days);
+            const peakDays = Number(prefs.analytics.peak_hours_days);
+            const inventoryDays = Number(prefs.analytics.inventory_series_days);
+            const conversionDays = Number(prefs.analytics.conversion_series_days);
+            if (Number.isFinite(salesDays) && salesDays > 0) setSalesSeriesDays(salesDays);
+            if (Number.isFinite(velocityDays) && velocityDays > 0) setSalesVelocityDays(velocityDays);
+            if (Number.isFinite(peakDays) && peakDays > 0) setPeakHoursDays(peakDays);
+            if (Number.isFinite(inventoryDays) && inventoryDays > 0) setInventorySeriesDays(inventoryDays);
+            if (Number.isFinite(conversionDays) && conversionDays > 0) setConversionSeriesDays(conversionDays);
+          }
+          setSellerPreferencesDraft(prev => ({
+            marketing: {
+              ...prev.marketing,
+              ...(prefs.marketing ?? {}),
+              kpi_range: String(prefs.marketing?.kpi_range ?? prev.marketing.kpi_range ?? '30d'),
+              campaign_duration_days: Number(prefs.marketing?.campaign_duration_days ?? prev.marketing.campaign_duration_days ?? 7),
+              top_products_days: Number(prefs.marketing?.top_products_days ?? prev.marketing.top_products_days ?? 30),
+              top_products_limit: Number(prefs.marketing?.top_products_limit ?? prev.marketing.top_products_limit ?? 5),
+              broadcast_limit: Number(prefs.marketing?.broadcast_limit ?? prev.marketing.broadcast_limit ?? 50),
+              quick_boost_budget: Number(prefs.marketing?.quick_boost_budget ?? prev.marketing.quick_boost_budget ?? 500)
+            },
+            growth: {
+              ...prev.growth,
+              ...(prefs.growth ?? {}),
+              projection_type: String(prefs.growth?.projection_type ?? prev.growth.projection_type ?? 'cashflow'),
+              loan_request_ratio: Number(prefs.growth?.loan_request_ratio ?? prev.growth.loan_request_ratio ?? 0.5)
+            },
+            comms: {
+              ...prev.comms,
+              ...(prefs.comms ?? {}),
+              broadcast_limit: Number(prefs.comms?.broadcast_limit ?? prev.comms.broadcast_limit ?? 50)
+            },
+            analytics: {
+              ...prev.analytics,
+              ...(prefs.analytics ?? {}),
+              sales_series_days: Number(prefs.analytics?.sales_series_days ?? prev.analytics.sales_series_days ?? 7),
+              sales_velocity_days: Number(prefs.analytics?.sales_velocity_days ?? prev.analytics.sales_velocity_days ?? 7),
+              peak_hours_days: Number(prefs.analytics?.peak_hours_days ?? prev.analytics.peak_hours_days ?? 7),
+              inventory_series_days: Number(prefs.analytics?.inventory_series_days ?? prev.analytics.inventory_series_days ?? 14),
+              conversion_series_days: Number(prefs.analytics?.conversion_series_days ?? prev.analytics.conversion_series_days ?? 14)
+            },
+            procurement: {
+              ...prev.procurement,
+              ...(prefs.procurement ?? {}),
+              max_distance_km: Number(prefs.procurement?.max_distance_km ?? prev.procurement.max_distance_km ?? 50),
+              max_unit_cost: Number(prefs.procurement?.max_unit_cost ?? prev.procurement.max_unit_cost ?? 500),
+              max_moq: Number(prefs.procurement?.max_moq ?? prev.procurement.max_moq ?? 50),
+              max_lead_time_days: Number(prefs.procurement?.max_lead_time_days ?? prev.procurement.max_lead_time_days ?? 14),
+              min_rating: Number(prefs.procurement?.min_rating ?? prev.procurement.min_rating ?? 0),
+              verified_only: Boolean(prefs.procurement?.verified_only ?? prev.procurement.verified_only ?? false)
+            }
+          }));
+        }
       } catch (err: any) {
         if (!ignore) setSettingsStatus(err?.message || 'Unable to load profile.');
       } finally {
@@ -1312,10 +1964,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         const prefs = await getSellerNotificationPreferences();
         if (!ignore) {
           setNotificationPrefs({
-            email: prefs?.email ?? true,
-            in_app: prefs?.in_app ?? true,
-            whatsapp: prefs?.whatsapp ?? false,
-            sms: prefs?.sms ?? false
+            price_drops: prefs?.price_drops ?? true,
+            back_in_stock: prefs?.back_in_stock ?? true,
+            trending: prefs?.trending ?? true,
+            marketing: prefs?.marketing ?? true,
+            rewards: prefs?.rewards ?? true,
+            support: prefs?.support ?? true,
+            system: prefs?.system ?? true,
+            watched_items: prefs?.watched_items ?? true,
+            location_based: prefs?.location_based ?? true,
+            frequency: prefs?.frequency ?? 'instant',
+            quiet_hours_start: prefs?.quiet_hours_start ?? '',
+            quiet_hours_end: prefs?.quiet_hours_end ?? ''
           });
         }
       } catch {}
@@ -1386,14 +2046,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setSuppliersLoading(true);
       setRfqLoading(true);
       let suppliersList: Supplier[] = [];
-      let rfqList: RFQThread[] = [];
-      try {
-        suppliersList = await listSuppliers();
-        if (ignore) return;
-        setSuppliersData(suppliersList);
-      } catch (err: any) {
-        if (!ignore) setSuppliersStatus(err?.message || 'Unable to load suppliers.');
-      }
+    let rfqList: RFQThread[] = [];
+    try {
+      suppliersList = await listSuppliers();
+      if (ignore) return;
+      setSuppliersData(suppliersList);
+    } catch (err: any) {
+      if (!ignore) setSuppliersStatus(err?.message || 'Unable to load suppliers.');
+    }
+    if (activeTab === 'suppliers') {
       try {
         rfqList = await listRFQs();
         if (ignore) return;
@@ -1401,6 +2062,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       } catch (err: any) {
         if (!ignore) setRfqStatus(err?.message || 'Unable to load RFQs.');
       }
+    }
       if (suppliersList.length) {
         const offerEntries = await Promise.all(
           suppliersList.map(async (supplier) => {
@@ -1459,46 +2121,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== 'suppliers' || !isAdmin) return;
-    let stop: null | (() => void) = null;
-    let cancelled = false;
-    const start = async () => {
-      try {
-        stop = await streamSupplierApplicationsAdmin(
-          (items) => {
-            if (cancelled) return;
-            setAdminSupplierApps(items || []);
-          },
-          (message) => {
-            if (cancelled) return;
-            setAdminSupplierAppsStatus(message);
-          }
-        );
-      } catch (err: any) {
-        if (cancelled) return;
-        setAdminSupplierAppsStatus(err?.message || 'Unable to open admin updates.');
-      }
-    };
-    start();
-    return () => {
-      cancelled = true;
-      if (stop) stop();
-    };
-  }, [activeTab, isAdmin]);
-
-  useEffect(() => {
-    if (activeTab !== 'suppliers') return;
-    if (!isAdmin) return;
-    refreshAdminSupplierApps();
-  }, [activeTab, isAdmin]);
-
-  useEffect(() => {
     if (activeTab !== 'comms') return;
     let ignore = false;
     const loadBroadcasts = async () => {
       setCommsStatus(null);
       try {
-        const items = await listBroadcasts(50);
+        const limit = Number.isFinite(broadcastsLimit) && broadcastsLimit > 0 ? broadcastsLimit : 50;
+        const items = await listBroadcasts(limit);
         if (!ignore) {
           setBroadcasts(items);
           setBroadcastCount(items.length);
@@ -1511,7 +2140,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     return () => {
       ignore = true;
     };
-  }, [activeTab]);
+  }, [activeTab, broadcastsLimit]);
 
   useEffect(() => {
     if (activeTab !== 'growth') return;
@@ -1521,14 +2150,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     const loadGrowth = async () => {
       setGrowthStatus(null);
       try {
-        const [overview, cashflow, health, loan, projection, referrals, groups] = await Promise.all([
+        const [overview, cashflow, health, loan, projection, referrals, groups, referralCodes] = await Promise.all([
           getGrowthOverview(),
           getCashflow(),
           getFinancialHealth(),
           getLoanEligibility(),
-          getFinancialProjections('cashflow'),
+          getFinancialProjections(growthProjectionType),
           getGrowthReferrals(),
-          listBulkBuyGroups()
+          listBulkBuyGroups(),
+          listSellerReferrals().catch(() => [])
         ]);
         if (ignore) return;
         setGrowthOverview(overview);
@@ -1538,6 +2168,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setGrowthProjection(projection);
         setGrowthReferrals(referrals);
         setBulkGroups(groups);
+        setSellerReferralCodes(Array.isArray(referralCodes) ? referralCodes : []);
       } catch (err: any) {
         if (!ignore) setGrowthStatus(err?.message || 'Unable to load growth data.');
       }
@@ -1557,6 +2188,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           setGrowthProjection(data.projection ?? null);
           setGrowthReferrals(data.referrals ?? null);
           setBulkGroups(Array.isArray(data.groups) ? data.groups : []);
+          if (Array.isArray(data.referral_codes)) {
+            setSellerReferralCodes(data.referral_codes);
+          }
         } catch {
           // ignore parse errors
         }
@@ -1579,7 +2213,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       ignore = true;
       if (ws) ws.close();
     };
-  }, [activeTab]);
+  }, [activeTab, growthProjectionType]);
 
   const mapSellerProducts = (items: SellerProduct[]): Product[] =>
     items.map((item) => ({
@@ -1594,10 +2228,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       mediaType: 'image',
       tags: [],
       stockLevel: Number(item.stock_level ?? 0),
-      stockStatus: (item.stock_status as Product['stockStatus']) || (Number(item.stock_level ?? 0) <= 0 ? 'out_of_stock' : Number(item.stock_level ?? 0) < 5 ? 'low_stock' : 'in_stock'),
+      stockStatus: (item.stock_status as Product['stockStatus']) || 'in_stock',
       discountPrice: item.discount_price ?? undefined,
       isFeatured: item.is_featured,
       location: seller.location,
+      expiryDate: item.expiry_date || undefined,
       groupBuyEligible: item.group_buy_eligible,
       groupBuyTiers: item.group_buy_tiers || []
     }));
@@ -1650,12 +2285,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setMyProducts(mapped);
         pushProducts(mapped);
         await loadMediaForProducts(mapped);
-        const [insights, lowStock] = await Promise.all([
-          listSellerProductInsights(),
+        const [lowStock] = await Promise.all([
           listSellerLowStock()
         ]);
         if (!ignore) {
-          setProductInsights(insights);
           setProductLowStock(lowStock);
         }
       } catch (err: any) {
@@ -1676,92 +2309,178 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const now = new Date();
-  const ordersForSeller = ORDERS.filter(o => o.sellerId === seller.id);
-  const last30Orders = ordersForSeller.filter(o => (now.getTime() - new Date(o.createdAt).getTime()) <= 30 * 24 * 60 * 60 * 1000);
-  const last30Revenue = last30Orders.reduce((sum, o) => sum + o.quantity * o.unitPrice, 0);
-  const totalOrders = ordersForSeller.length;
-  const totalUnits = ordersForSeller.reduce((sum, o) => sum + o.quantity, 0);
-  const totalRevenue = ordersForSeller.reduce((sum, o) => sum + o.quantity * o.unitPrice, 0);
-  const totalCost = ordersForSeller.reduce((sum, o) => sum + o.quantity * o.unitCost, 0);
-  const averagePrice = totalOrders ? totalRevenue / totalOrders : (myProducts.reduce((sum, p) => sum + p.price, 0) / Math.max(myProducts.length, 1));
-  const estimatedMonthlyViews = seller.dailyViews * 30;
-  const estimatedMonthlyOrders = Math.max(1, last30Orders.length || totalOrders || 1);
-  const conversionRate = estimatedMonthlyViews ? (estimatedMonthlyOrders / estimatedMonthlyViews) * 100 : 0;
-  const estimatedMonthlyRevenue = totalOrders ? (totalRevenue / Math.max(totalOrders, 1)) * estimatedMonthlyOrders : estimatedMonthlyOrders * averagePrice;
-  const loanBase = Math.round((Math.min(850, seller.sokoScore) / 850) * 150000);
-  const loanRevenueBoost = Math.round(estimatedMonthlyRevenue * 0.4);
-  const loanEligibilityMax = Math.max(50000, Math.min(300000, loanBase + loanRevenueBoost));
-  const marketingSpend = MARKETING_SPEND.filter(m => m.sellerId === seller.id).reduce((sum, m) => sum + m.amount, 0);
-  const customerOrderCounts = ordersForSeller.reduce((map, o) => {
-    map.set(o.customerId, (map.get(o.customerId) || 0) + 1);
-    return map;
-  }, new Map<string, number>());
-  const uniqueCustomers = customerOrderCounts.size || 1;
-  const newCustomers = Array.from(customerOrderCounts.values()).filter(c => c === 1).length || 1;
-  const purchaseFrequency = totalOrders / uniqueCustomers;
-  const churnRate = 0.25;
-  const ltv = Math.round(averagePrice * purchaseFrequency / churnRate);
-  const cac = Math.round(marketingSpend / Math.max(newCustomers, 1));
-  const roas = marketingSpend ? (estimatedMonthlyRevenue / marketingSpend) : 0;
-  const marketingROAS = Number.isFinite(Number(marketingKpis?.roas)) ? Number(marketingKpis?.roas) : roas;
-  const marketingCAC = Number.isFinite(Number(marketingKpis?.cac)) ? Number(marketingKpis?.cac) : cac;
-  const marketingLTV = Number.isFinite(Number(marketingKpis?.ltv)) ? Number(marketingKpis?.ltv) : ltv;
-  const marketingRevenue30d = Number(analyticsSummary?.gross_revenue ?? analyticsSummary?.net_revenue ?? last30Revenue);
-  const marketingOrders30d = Number(analyticsFunnel?.payment_success ?? last30Orders.length);
-  const marketingNewCustomers = Number(analyticsBuyers?.new_buyers ?? newCustomers);
-  const marketingUnits30d = Number(analyticsFunnel?.add_to_cart ?? last30Orders.reduce((sum, o) => sum + o.quantity, 0));
-  const marketingReturns30d = analyticsSummary?.cart_abandonment
-    ? Math.round((Number(analyticsSummary.cart_abandonment) / 100) * Number(analyticsFunnel?.checkout_start ?? marketingOrders30d))
-    : last30Orders.filter(o => o.returned).length;
-  const totalStock = myProducts.reduce((sum, p) => sum + p.stockLevel, 0);
-  const stockCoverageDays = Math.round(totalStock / Math.max(estimatedMonthlyOrders / 30, 1));
-  const repeatRate = Math.min(70, Math.round((purchaseFrequency / Math.max(1, purchaseFrequency + 1)) * 100 + seller.rating * 4));
-  const topCategories = Array.from(
-    myProducts.reduce((map, p) => {
-      map.set(p.category, (map.get(p.category) || 0) + 1);
-      return map;
-    }, new Map<string, number>())
-  )
-    .map(([category, count]) => ({ category, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 4);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const totalOrders = analyticsSummary?.orders ?? null;
+  const totalRevenue =
+    analyticsSummary?.gross_revenue !== undefined ? Number(analyticsSummary.gross_revenue)
+    : analyticsSummary?.net_revenue !== undefined ? Number(analyticsSummary.net_revenue)
+    : analyticsSummary?.revenue !== undefined ? Number(analyticsSummary.revenue)
+    : null;
+  const averagePrice = totalOrders && totalRevenue !== null ? totalRevenue / totalOrders : null;
+  const newCustomers = analyticsBuyers?.new_buyers ?? null;
+  const ltv = analyticsBuyers?.clv ? Number(analyticsBuyers.clv) : null;
+  const cac = analyticsBuyers?.cac ? Number(analyticsBuyers.cac) : null;
+  const roas = marketingKpis?.roas !== undefined ? Number(marketingKpis.roas) : null;
+  const marketingROAS = roas;
+  const marketingCAC = marketingKpis?.cac !== undefined ? Number(marketingKpis.cac) : cac;
+  const marketingLTV = marketingKpis?.ltv !== undefined ? Number(marketingKpis.ltv) : ltv;
+  const marketingRevenue30d =
+    analyticsSummary?.gross_revenue !== undefined ? Number(analyticsSummary.gross_revenue)
+    : analyticsSummary?.net_revenue !== undefined ? Number(analyticsSummary.net_revenue)
+    : null;
+  const marketingOrders30d = analyticsFunnel?.payment_success ?? null;
+  const marketingNewCustomers = analyticsBuyers?.new_buyers ?? null;
+  const marketingUnits30d = analyticsFunnel?.add_to_cart ?? null;
+  const marketingReturns30d = (analyticsSummary as any)?.returns ?? null;
+  const totalStock = analyticsInventory?.total_stock ?? null;
+  const repeatRate = analyticsBuyers?.repeat_rate !== undefined
+    ? Math.round(Number(analyticsBuyers.repeat_rate) * 100)
+    : null;
+  const repeatRateD30 =
+    analyticsSummary?.repeat_rate_d30 !== undefined
+      ? Number(analyticsSummary.repeat_rate_d30) * 100
+      : null;
+  const topCategories = (analyticsInventory?.top_categories || [])
+    .map((entry) => ({ category: entry.category || 'General', count: Number(entry.count ?? 0) }))
+    .filter((entry) => entry.category);
 
-  const funnelSessions = analyticsFunnel?.sessions ?? 0;
-  const funnelViews = analyticsFunnel?.pdp_views ?? 0;
-  const funnelInquiries = analyticsFunnel?.add_to_cart ?? 0;
-  const funnelSales = analyticsFunnel?.payment_success ?? 0;
+  const funnelSessions = analyticsFunnel?.sessions ?? null;
+  const funnelViews = analyticsFunnel?.pdp_views ?? null;
+  const funnelInquiries = analyticsFunnel?.add_to_cart ?? null;
   const dailyViews = funnelViews;
   const dailyInquiries = funnelInquiries;
-  const viewsDeltaPct = Math.round((funnelViews / Math.max(1, funnelSessions)) * 100);
-  const inquiriesDeltaPct = Math.round((funnelInquiries / Math.max(1, funnelViews || funnelSessions)) * 100);
 
-  const analyticsSalesData = WEEK_DAYS.map((name, idx) => ({
-    name,
-    sales: spreadSeries(funnelSales || Math.round(funnelSessions * 0.2), WEEK_WEIGHTS)[idx] || 0,
-    reach: spreadSeries(funnelViews || funnelSessions, WEEK_WEIGHTS)[idx] || 0,
+  const analyticsSalesData = analyticsSalesSeries.map((item, idx) => ({
+    name: item.label || item.date || WEEK_DAYS[idx % WEEK_DAYS.length],
+    date: item.date,
+    sales: Number(item.sales ?? 0),
+    reach: Number(item.reach ?? item.sessions ?? 0),
+    sessions: Number(item.sessions ?? 0),
+    orders: Number(item.orders ?? 0),
   }));
 
-  const analyticsSalesVelocity = WEEK_DAYS.map((name, idx) => {
-    const velocity = analyticsSalesData[idx]?.sales ?? 0;
-    const target = Math.max(1, Math.round((funnelSales || 0) / 7) || 0);
-    return { name, velocity, target };
-  });
-
-  const analyticsPeakHours = HOUR_LABELS.map((hour, idx) => ({
-    hour,
-    searches: spreadSeries(funnelViews || funnelSessions, HOUR_WEIGHTS)[idx] || 0,
+  const analyticsSalesVelocityData = analyticsSalesVelocitySeries.map((item, idx) => ({
+    name: item.label || item.date || WEEK_DAYS[idx % WEEK_DAYS.length],
+    date: item.date,
+    velocity: Number(item.velocity ?? item.orders ?? 0),
+    sessions: Number(item.sessions ?? 0),
+  }));
+  const avgVelocity = analyticsSalesVelocityData.length
+    ? analyticsSalesVelocityData.reduce((sum, item) => sum + (item.velocity || 0), 0) / analyticsSalesVelocityData.length
+    : 0;
+  const analyticsSalesVelocity = analyticsSalesVelocityData.map((item) => ({
+    name: item.name,
+    date: item.date,
+    velocity: item.velocity,
+    sessions: item.sessions,
+    target: Math.max(1, Math.round(avgVelocity)),
   }));
 
-  const analyticsCompetitorPricing = myProducts.slice(0, 4).map((product, idx) => {
-    const avgPrice = analyticsMarket?.competitor_median_price ?? product.price * 0.95;
-    const competitorMin = avgPrice ? Math.round(avgPrice * 0.9) : Math.round(product.price * 0.9);
-    return {
-      name: product.name,
-      yourPrice: product.price,
-      avgPrice: Math.round(avgPrice),
-      competitorMin: Math.max(1, competitorMin - idx),
-    };
-  });
+  const salesMinMax = analyticsSalesData.reduce(
+    (acc, item) => ({
+      min: item.sales < acc.min ? item.sales : acc.min,
+      max: item.sales > acc.max ? item.sales : acc.max,
+    }),
+    { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
+  );
+
+  const salesVelocityMinMax = analyticsSalesVelocity.reduce(
+    (acc, item) => ({
+      min: item.velocity < acc.min ? item.velocity : acc.min,
+      max: item.velocity > acc.max ? item.velocity : acc.max,
+    }),
+    { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
+  );
+
+  const analyticsInventoryTrend = analyticsInventorySeries.map((item, idx) => ({
+    name: item.label || item.date || WEEK_DAYS[idx % WEEK_DAYS.length],
+    date: item.date,
+    stock: Number(item.stock_level ?? item.stockLevel ?? 0),
+  }));
+
+  const analyticsConversionTrend = analyticsConversionSeries.map((item, idx) => ({
+    name: item.label || item.date || WEEK_DAYS[idx % WEEK_DAYS.length],
+    date: item.date,
+    rate: Number(item.conversion_rate ?? item.conversionRate ?? 0),
+  }));
+
+  const inventoryMinMax = analyticsInventoryTrend.reduce(
+    (acc, item) => ({
+      min: item.stock < acc.min ? item.stock : acc.min,
+      max: item.stock > acc.max ? item.stock : acc.max,
+    }),
+    { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
+  );
+  const inventoryTrendDelta =
+    analyticsInventoryTrend.length > 1
+      ? analyticsInventoryTrend[analyticsInventoryTrend.length - 1].stock -
+        analyticsInventoryTrend[0].stock
+      : 0;
+  const inventoryTrendLabel =
+    analyticsInventoryTrend.length > 1
+      ? inventoryTrendDelta >= 0
+        ? `Up ${inventoryTrendDelta}`
+        : `Down ${Math.abs(inventoryTrendDelta)}`
+      : '—';
+
+  const conversionMinMax = analyticsConversionTrend.reduce(
+    (acc, item) => ({
+      min: item.rate < acc.min ? item.rate : acc.min,
+      max: item.rate > acc.max ? item.rate : acc.max,
+    }),
+    { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
+  );
+  const conversionTrendDelta =
+    analyticsConversionTrend.length > 1
+      ? analyticsConversionTrend[analyticsConversionTrend.length - 1].rate -
+        analyticsConversionTrend[0].rate
+      : 0;
+  const conversionTrendLabel =
+    analyticsConversionTrend.length > 1
+      ? conversionTrendDelta >= 0
+        ? `Up ${conversionTrendDelta.toFixed(1)}%`
+        : `Down ${Math.abs(conversionTrendDelta).toFixed(1)}%`
+      : '—';
+
+  const analyticsPeakHours = analyticsPeakHoursData.length
+    ? analyticsPeakHoursData.map((item) => ({
+        hour: formatHourLabel(Number(item.hour ?? 0)),
+        searches: Number(item.searches ?? 0),
+      }))
+    : [];
+
+  const peakMinMax = analyticsPeakHours.reduce(
+    (acc, item) => ({
+      min: item.searches < acc.min ? item.searches : acc.min,
+      max: item.searches > acc.max ? item.searches : acc.max,
+    }),
+    { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
+  );
+
+  const peakHourSlots = analyticsPeakHoursData
+    .slice()
+    .sort((a, b) => Number(b.searches ?? 0) - Number(a.searches ?? 0))
+    .slice(0, 3)
+    .map((item) => formatHourRange(Number(item.hour ?? 0)));
+
+  const liveBuyerTotalScans = analyticsLiveBuyers.reduce(
+    (sum, item) => sum + Number(item.scan_count ?? item.scanCount ?? 0),
+    0,
+  );
+  const liveBuyerHotspots = analyticsLiveBuyers
+    .slice()
+    .sort((a, b) => Number(b.scan_count ?? b.scanCount ?? 0) - Number(a.scan_count ?? a.scanCount ?? 0))
+    .slice(0, 3);
+  const liveBuyerTop = liveBuyerHotspots[0];
+
+  const analyticsCompetitorPricing =
+    (analyticsMarket?.competitor_pricing || [])
+      .filter((item) => item.category && (Number(item.your_price ?? 0) > 0 || Number(item.market_price ?? 0) > 0))
+      .map((item) => ({
+        name: item.category || 'Category',
+        yourPrice: Number(item.your_price ?? 0),
+        avgPrice: Number(item.market_price ?? 0),
+      }));
 
   const stockoutRisk = clamp(analyticsInventory?.stockout_risk ?? 0);
   const lowStock = clamp(Math.round(stockoutRisk * 0.6), 0, 60);
@@ -1774,77 +2493,90 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     { name: 'Out of Stock', value: outOfStock, color: '#ef4444' },
   ];
 
-  const analyticsDemographics = [
-    { name: 'Gen Z (18-24)', value: clamp(30 + Math.round((analyticsBuyers?.repeat_rate ?? 0) * 10)), color: '#6366f1' },
-    { name: 'Millennials (25-34)', value: clamp(40 + Math.round((analyticsBuyers?.repeat_rate ?? 0) * 5)), color: '#8b5cf6' },
-    { name: 'Gen X (35-50)', value: clamp(20 - Math.round((analyticsBuyers?.repeat_rate ?? 0) * 5), 5, 30), color: '#d946ef' },
-    { name: 'Others', value: clamp(10, 5, 15), color: '#f43f5e' },
-  ].map((item, _, arr) => {
-    const total = arr.reduce((sum, i) => sum + i.value, 0) || 1;
-    return { ...item, value: Math.round((item.value / total) * 100) };
-  });
+  const handleAddStockFromTrend = (item: { name?: string; category?: string }) => {
+    setEditingProduct(null);
+    setFormData({
+      name: item.name || '',
+      description: '',
+      price: '',
+      category: item.category || '',
+      mediaUrl: '',
+      stockLevel: 10,
+      expiryDate: '',
+      groupBuyEligible: false,
+      groupBuyTiers: []
+    });
+    setIsAddingProduct(true);
+  };
 
-  const analyticsTopSearched = topCategories.slice(0, 3).map((cat, idx) => ({
-    name: cat.category,
-    searches: Math.max(10, cat.count * 10 + idx * 8),
-    trend: `${Math.max(1, Math.round((analyticsMarket?.market_share ?? 0) * 100) + idx * 2)}%`
+  const demographicPalette = ['#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#0ea5e9', '#10b981'];
+  const analyticsDemographics = analyticsDemographicsData
+    .map((item, idx) => ({
+      name: item.segment || item.name || `Segment ${idx + 1}`,
+      value: Number(item.percent ?? item.value ?? 0),
+      color: item.color || demographicPalette[idx % demographicPalette.length]
+    }))
+    .filter((item) => Number.isFinite(item.value));
+
+  const analyticsTopSearched = analyticsMarketTrending.map((item, idx) => ({
+    name: item.name || `Trend ${idx + 1}`,
+    searches: Number(item.searches ?? 0),
+    trend: item.trend || '',
+    category: item.category || item.category_path || ''
   }));
 
-  const analyticsTrendingProducts = myProducts.slice(0, 3).map((product, idx) => ({
-    name: product.name,
-    demand: idx === 0 ? 'High' : idx === 1 ? 'Medium' : 'Rising',
-    supplier: (product as any).supplier || (product as any).sellerName || `Supplier ${idx + 1}`
+  const analyticsTrendingProducts = analyticsTrendingSuppliers.map((item, idx) => ({
+    name: item.name || `Trending Item ${idx + 1}`,
+    demand: item.searches ? `${item.searches} searches` : '—',
+    supplier: item.supplier_name || 'No suppliers available yet',
+    supplierId: item.supplier_id
   }));
 
-  const analyticsCategoryDemand = topCategories.map((cat, idx) => ({
-    category: cat.category,
-    demand: clamp(40 + cat.count * 10 + idx * 5),
-    sellerShare: clamp(Math.round((cat.count / Math.max(1, myProducts.length)) * 100))
+  const analyticsCategoryDemand = analyticsMarketDemand.map((item, idx) => ({
+    category: item.category || `Category ${idx + 1}`,
+    demand: clamp(Number(item.demand ?? 0)),
+    sellerShare: clamp(Number(item.sellerShare ?? item.seller_share ?? 0))
   }));
 
-  const analyticsGodViewSources = [
-    { label: 'QR', value: funnelViews || 0 },
-    { label: 'Photos', value: Math.round((analyticsInventory?.days_cover ?? 0) * 10) },
-    { label: 'POS', value: funnelSales || 0 },
-    { label: 'CRM', value: analyticsBuyers?.new_buyers ?? 0 }
-  ];
+  const analyticsGodViewSources = analyticsChannelMix.map((item, idx) => ({
+    label: item.label || item.channel || `Source ${idx + 1}`,
+    value: Number(item.value ?? item.pct ?? item.count ?? 0)
+  }));
 
-  const analyticsSourceMap = analyticsGodViewSources.reduce<Record<string, number>>((acc, item) => {
-    acc[item.label] = item.value;
-    return acc;
-  }, {});
-
-  const sokoscore = Number(growthHealth?.sokoscore ?? seller.sokoScore);
-  const loanMaxAmount = Number(growthLoan?.max_amount ?? loanEligibilityMax);
-  const loanMinAmount = Math.max(0, Math.round(loanMaxAmount * 0.35));
+  const sokoscore = growthHealth?.sokoscore !== undefined ? Number(growthHealth.sokoscore) : null;
+  const loanMaxAmount = growthLoan?.max_amount ?? null;
   const cashflowIn = Number(growthCashflow?.inflow ?? 0);
-  const projectionSeriesFallback = analyticsSalesData.map((d) => ({ name: d.name, revenue: d.sales }));
-  const projectionSeries = projectionToSeries(growthProjection?.forecast as Record<string, any>, projectionSeriesFallback);
-  const growthRetention = Number(growthOverview?.retention_rate ?? repeatRate);
+  const aovValue = analyticsSummary?.aov ? Number(analyticsSummary.aov) : null;
+  const projectionSeries = projectionToSeries(growthProjection?.forecast as Record<string, any>, []);
+  const growthRetention =
+    growthOverview?.retention_rate !== undefined
+      ? Number(growthOverview.retention_rate)
+      : repeatRate !== null
+        ? repeatRate
+        : null;
 
-  const analyticsGodViewDemand = analyticsTopSearched.map((item) => ({
-    name: item.name,
-    pct: clamp(Math.round((item.searches / Math.max(1, analyticsTopSearched[0]?.searches || 1)) * 100))
-  }));
-
-  const buyerSeed = (analyticsBuyers?.new_buyers ?? 0) || 1;
-  const analyticsGodViewBuyers = Array.from({ length: Math.max(1, Math.min(4, buyerSeed)) }).map((_, idx) => ({
-    name: `Buyer ${idx + 1}`,
-    item: analyticsTrendingProducts[idx]?.name || 'Top item',
-    price: `KSh ${Math.round(averagePrice)}`,
-    source: idx % 2 === 0 ? 'QR' : 'POS'
+  const analyticsGodViewDemand = analyticsCategoryDemand.map((item) => ({
+    name: item.category,
+    pct: clamp(item.demand)
   }));
 
   const analyticsGodViewCompetitors = [
-    { name: 'YOU', price: `KSh${Math.round(averagePrice)}`, stock: totalStock, trend: '—' },
-    { name: 'Competitor A', price: `KSh${Math.round((analyticsMarket?.competitor_median_price ?? averagePrice) * 0.98)}`, stock: Math.round((analyticsMarket?.competitor_stock ?? 0) * 100), trend: '🔻' },
-    { name: 'Competitor B', price: `KSh${Math.round((analyticsMarket?.competitor_median_price ?? averagePrice) * 1.02)}`, stock: Math.round((analyticsMarket?.competitor_stock ?? 0) * 90), trend: '🔺' },
-    { name: 'Network Avg', price: `KSh${Math.round(analyticsMarket?.competitor_median_price ?? averagePrice)}`, stock: Math.round((analyticsMarket?.competitor_stock ?? 0) * 95), trend: '—' }
-  ];
+    { name: 'Your Price', price: averagePrice !== null ? `KSh${Math.round(averagePrice)}` : '—', stock: totalStock !== null ? String(totalStock) : '—', trend: '—' },
+    analyticsMarket?.competitor_median_price
+      ? {
+          name: 'Market Median',
+          price: `KSh${Math.round(analyticsMarket.competitor_median_price)}`,
+          stock: `${Math.round((analyticsMarket?.competitor_stock ?? 0) * 100)}`,
+          trend: '—'
+        }
+      : null
+  ].filter(Boolean) as Array<{ name: string; price: string; stock: string; trend: string }>;
 
   const analyticsGodViewInventory = analyticsTrendingProducts.map((item) => ({
     name: item.name,
-    your: `${Math.round(totalStock / Math.max(1, analyticsTrendingProducts.length))} units`,
+    your: totalStock !== null
+      ? `${Math.round(totalStock / Math.max(1, analyticsTrendingProducts.length))} units`
+      : '—',
     network: `${Math.round((analyticsMarket?.market_share ?? 0) * 100)}% demand`
   }));
 
@@ -1852,49 +2584,136 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     ? analyticsAnomalies.slice(0, 4).map((item) => item.details || `${item.type} anomaly`)
     : ['No active anomalies detected'];
 
+  const receiptWeekCount = sellerReceipts.filter((r) => {
+    const created = r.created_at ? new Date(r.created_at) : null;
+    if (!created || Number.isNaN(created.getTime())) return false;
+    return now.getTime() - created.getTime() <= 7 * 24 * 60 * 60 * 1000;
+  }).length;
+
+  const todayRewardsTotal = sellerRewardsLedger.reduce((sum, entry) => {
+    if (!entry.created_at) return sum;
+    const created = new Date(entry.created_at);
+    if (Number.isNaN(created.getTime()) || created < startOfToday) return sum;
+    const amount = Number(entry.amount ?? 0);
+    return amount > 0 ? sum + amount : sum;
+  }, 0);
+
+  const receiptStreak = sellerRewardStreaks.find((s) => String(s.type || '').toLowerCase().includes('receipt'));
+  const receiptStreakCount = receiptStreak?.count ?? 0;
+
+  const quickBoostBudget = Number(
+    sellerPreferencesDraft.marketing.quick_boost_budget
+      ?? sellerMarketingPreferences.quick_boost_budget
+      ?? quickBoostConfig?.budget
+      ?? 0,
+  );
+  const quickBoostCurrency = quickBoostConfig?.currency ?? 'KES';
+  const quickBoostTarget = analyticsMarketTrending[0]?.name;
+  const quickBoostLabel = quickBoostTarget ? `Boost ${quickBoostTarget}` : 'Boost Demand';
+  const quickBoostCta = quickBoostBudget > 0 ? `${quickBoostLabel} (${quickBoostCurrency} ${quickBoostBudget})` : quickBoostLabel;
+
+  const priceMatchValue = analyticsMarket?.competitor_median_price
+    ? Math.round(Number(analyticsMarket.competitor_median_price))
+    : null;
+
+  const rankScore = sellerRankInfo?.rank;
+  const networkFollowers = seller.followersCount;
+
+  const proPlan = subscriptionPlans.find((plan) => String(plan.name || '').toLowerCase().includes('pro'))
+    || [...subscriptionPlans].sort((a, b) => (Number(b.price ?? 0) - Number(a.price ?? 0)))[0];
+  const proPrice = proPlan?.price ?? null;
+  const proCurrency = (proPlan?.features as any)?.currency ?? 'KES';
+  const activePlanTier = String(subscriptionView?.subscription?.plan_tier ?? '');
+  const isProActive = Boolean(proPlan?.name && activePlanTier && activePlanTier.toLowerCase() === String(proPlan.name).toLowerCase());
+  const proFeaturesRaw = proPlan?.features;
+  const proFeatures = Array.isArray(proFeaturesRaw)
+    ? proFeaturesRaw
+    : proFeaturesRaw && typeof proFeaturesRaw === 'object'
+      ? Object.values(proFeaturesRaw)
+      : [];
+  const featuredListingPrice = featuredListingConfig?.price_per_week ?? null;
+  const featuredListingCurrency = featuredListingConfig?.currency ?? 'KES';
+  const featuredListingDiscountThreshold = featuredListingConfig?.discount_threshold ?? null;
+  const featuredListingDiscountPct = featuredListingConfig?.discount_pct ?? null;
+
+  const claimShopBonusLabel = claimShopRewardConfig?.amount
+    ? `${claimShopRewardConfig.currency ?? 'KES'} ${claimShopRewardConfig.amount}`
+    : null;
+  const verificationBonusLabel = verificationRewardConfig?.amount
+    ? `${verificationRewardConfig.currency ?? 'KES'} ${verificationRewardConfig.amount}`
+    : null;
+  const receiptRewardsHint = receiptRewardsConfig?.daily_min !== undefined && receiptRewardsConfig?.daily_max !== undefined
+    ? `Daily receipts earn ${receiptRewardsConfig.currency ?? 'KES'} ${receiptRewardsConfig.daily_min}-${receiptRewardsConfig.daily_max}.`
+    : 'Submit receipts to earn rewards.';
+  const receiptStreakHint = receiptRewardsConfig?.streak_bonus && receiptRewardsConfig?.streak_days
+    ? `Streak bonus at ${receiptRewardsConfig.streak_days} days: ${receiptRewardsConfig.currency ?? 'KES'} ${receiptRewardsConfig.streak_bonus}.`
+    : '';
+
   const productById = myProducts.reduce((map, item) => {
     map.set(item.id, item);
     return map;
   }, new Map<string, Product>());
 
-  const lowStockItems = productLowStock.length > 0
-    ? productLowStock
-    : myProducts
-        .filter(p => p.stockLevel < 5)
-        .map(p => ({ seller_product_id: p.id, stock_level: p.stockLevel, status: p.stockStatus || 'low_stock' }));
-
-  const reorderRecommendations = productInsights.length > 0
-    ? productInsights
-        .map((insight) => {
-          const product = productById.get(insight.seller_product_id || '');
-          const conversions = insight.conversions ?? 0;
-          return { product, conversions };
-        })
-        .filter(item => item.product)
-        .sort((a, b) => b.conversions - a.conversions)
-        .slice(0, 3)
-        .map(({ product, conversions }) => {
-          const recommended = Math.max(5, Math.round(conversions * 2 + (product?.stockLevel || 0) * 0.3));
-          return `${product?.name}: ${conversions} conversions → reorder ${recommended}`;
-        })
-    : [];
-
-  const demandHeatmap = (marketingHotspots.length > 0
-    ? marketingHotspots.map((h, i) => {
-        const product = myProducts.find(p => p.id === h.product_id) || myProducts[i % Math.max(1, myProducts.length)];
+  const retentionProducts = analyticsTopProducts
+    .map((item, idx) => {
+      const matched = item.seller_product_id
+        ? myProducts.find(p => p.id === item.seller_product_id)
+        : myProducts.find(p => p.productId === item.product_id);
+      if (matched) {
         return {
-          id: h.product_id || product?.id || `hotspot_${i}`,
-          name: product?.name || 'Hotspot',
-          location: product?.location,
-          demand: Math.max(10, Math.round((h.hotspot_score || 0) * 100))
+          id: matched.id,
+          name: matched.name,
+          price: matched.price,
+          mediaUrl: matched.mediaUrl,
+          productId: matched.id
         };
-      })
-    : myProducts.map((p, i) => ({
-        id: p.id,
-        name: p.name,
-        location: p.location,
-        demand: 40 + ((i * 23) % 60)
-      }))).filter(p => p.location);
+      }
+      return {
+        id: item.seller_product_id || item.product_id || `top_${idx}`,
+        name: item.name || 'Top product',
+        price: Number.isFinite(item.current_price) ? Number(item.current_price) : null,
+        mediaUrl: toPlaceholderImage(item.name || 'Product'),
+        productId: item.seller_product_id || ''
+      };
+    })
+    .filter((item) => item.name);
+
+  const lowStockItems = productLowStock;
+
+  const reorderRecommendations = sellerRecommendations
+    .map((rec) => {
+      let payload: any = rec.payload || {};
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = {};
+        }
+      }
+      const name = payload.product_name || payload.product_id || 'Item';
+      const recommended = Number(payload.recommended_reorder ?? NaN);
+      if (Number.isFinite(recommended) && recommended > 0) {
+        return `${name}: reorder ${Math.round(recommended)}`;
+      }
+      if (payload.message) {
+        return String(payload.message);
+      }
+      return null;
+    })
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 3);
+
+  const demandHeatmap = marketingHotspots
+    .map((h, i) => {
+      const product = myProducts.find(p => p.id === h.product_id) || myProducts[i % Math.max(1, myProducts.length)];
+      return {
+        id: h.product_id || product?.id || `hotspot_${i}`,
+        name: product?.name || 'Hotspot',
+        location: product?.location,
+        demand: Math.max(10, Math.round((h.hotspot_score || 0) * 100))
+      };
+    })
+    .filter(p => p.location);
 
   const ensureMapbox = async () => {
     if (mapboxModuleRef.current) {
@@ -1917,14 +2736,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     if (activeTab !== 'marketing') return;
     if (!mapboxToken) return;
     if (!heatmapContainerRef.current) return;
+    if (demandHeatmap.length === 0) {
+      if (heatmapMapRef.current) {
+        heatmapMapRef.current.remove();
+        heatmapMapRef.current = null;
+        heatmapReadyRef.current = false;
+      }
+      return;
+    }
     let active = true;
     ensureMapbox().then((mapboxgl) => {
       if (!active) return;
       mapboxgl.accessToken = mapboxToken;
       if (!heatmapMapRef.current) {
-        const center = demandHeatmap[0]?.location
-          ? [demandHeatmap[0].location!.lng || 39.6682, demandHeatmap[0].location!.lat || -4.0435]
-          : [39.6682, -4.0435];
+        const center = [demandHeatmap[0].location!.lng, demandHeatmap[0].location!.lat];
         const map = new mapboxgl.Map({
           container: heatmapContainerRef.current!,
           style: 'mapbox://styles/mapbox/streets-v12',
@@ -2000,18 +2825,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     if (!showPathRecorder) return;
     if (!mapboxToken) return;
     if (!pathRecorderContainerRef.current) return;
+    if (!sellerLocations[0]?.lat || !sellerLocations[0]?.lng) {
+      setPathRecordingStatus('Set your shop location to record paths.');
+      return;
+    }
     let active = true;
     ensureMapbox().then((mapboxgl) => {
       if (!active) return;
       mapboxgl.accessToken = mapboxToken;
       if (!pathRecorderMapRef.current) {
-        const fallback = sellerLocations[0] as any;
-        const centerLng = Number(fallback?.lng ?? fallback?.longitude ?? 39.6682);
-        const centerLat = Number(fallback?.lat ?? fallback?.latitude ?? -4.0435);
         const map = new mapboxgl.Map({
           container: pathRecorderContainerRef.current!,
           style: 'mapbox://styles/mapbox/streets-v12',
-          center: [centerLng, centerLat],
+          center: [sellerLocations[0].lng, sellerLocations[0].lat],
           zoom: 14
         });
         map.addControl(new mapboxgl.NavigationControl(), 'top-right');
@@ -2088,58 +2914,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   }, [activeTab]);
 
-  const productsWithCompetitor = myProducts.filter(p => p.competitorPrice);
-  const priceCompetitiveness = productsWithCompetitor.length
-    ? (productsWithCompetitor.reduce((sum, p) => sum + (p.price / (p.competitorPrice || p.price)), 0) / productsWithCompetitor.length) * 100
-    : 100;
-  const stockoutRate = myProducts.length
-    ? (myProducts.filter(p => p.stockLevel === 0).length / myProducts.length) * 100
-    : 0;
-  const sellThroughRate = totalStock + estimatedMonthlyOrders > 0
-    ? (estimatedMonthlyOrders / (totalStock + estimatedMonthlyOrders)) * 100
-    : 0;
-  const grossMarginPct = totalRevenue ? ((totalRevenue - totalCost) / totalRevenue) * 100 : 0;
-  const netMarginPct = totalRevenue ? ((totalRevenue - totalCost - marketingSpend - totalRevenue * 0.05) / totalRevenue) * 100 : 0;
-  const avgInventoryValue = myProducts.reduce((sum, p) => sum + p.stockLevel * (p.costPrice || p.price * 0.65), 0);
-  const inventoryTurns = avgInventoryValue ? ((totalCost || estimatedMonthlyRevenue * 0.65) / avgInventoryValue) * 12 : 0;
-  const gmroi = avgInventoryValue ? ((totalRevenue - totalCost) / avgInventoryValue) * 12 : 0;
-  const returnRate = totalOrders ? (ordersForSeller.filter(o => o.returned).length / totalOrders) * 100 : 0;
-  const cartAbandonRate = Math.min(90, Math.max(30, 100 - (conversionRate / 0.12)));
-  const avgItemsPerOrder = totalOrders ? totalUnits / totalOrders : 1;
-  const promoLift = Math.min(30, Math.max(5, marketingROAS * 3));
-  const repeatPurchaseIntervalDays = (() => {
-    const intervals: number[] = [];
-    customerOrderCounts.forEach((_, customerId) => {
-      const customerOrders = ordersForSeller.filter(o => o.customerId === customerId)
-        .map(o => new Date(o.createdAt).getTime())
-        .sort((a, b) => a - b);
-      for (let i = 1; i < customerOrders.length; i += 1) {
-        intervals.push((customerOrders[i] - customerOrders[i - 1]) / (1000 * 60 * 60 * 24));
-      }
-    });
-    if (intervals.length === 0) return 60;
-    return Math.round(intervals.reduce((sum, v) => sum + v, 0) / intervals.length);
-  })();
-  const channelMix = ['search', 'feed', 'messages', 'direct'].map((name) => {
-    const count = ordersForSeller.filter(o => o.channel === name).length;
-    return { name: name[0].toUpperCase() + name.slice(1), value: totalOrders ? Math.round((count / totalOrders) * 100) : 0 };
+  const cartAbandonRate = analyticsFunnel?.cart_abandonment ?? null;
+  const avgItemsPerOrder = analyticsSummary?.items_per_order ?? null;
+  const channelMixTotal = analyticsChannelMix.reduce((sum, item) => sum + Number(item.value ?? item.pct ?? item.count ?? 0), 0);
+  const channelMix = analyticsChannelMix.map((item, idx) => {
+    const raw = Number(item.value ?? item.pct ?? item.count ?? 0);
+    const pct = channelMixTotal > 0 ? Math.round((raw / channelMixTotal) * 100) : 0;
+    const name = item.label || item.channel || `Channel ${idx + 1}`;
+    return { name, value: pct };
   });
-  const onTimeRate = totalOrders
-    ? (ordersForSeller.filter(o => o.slaMet).length / totalOrders) * 100
-    : 0;
-  const csat = Math.min(5, Math.max(3, seller.rating));
-  const dataCoverageRate = myProducts.length
-    ? (myProducts.filter(p => p.location).length / myProducts.length) * 100
-    : 0;
-  const dataFreshnessDays = myProducts.reduce((sum, p) => {
-    const last = p.priceHistory?.[p.priceHistory.length - 1]?.date;
-    if (!last) return sum + 30;
-    const diff = (Date.now() - new Date(last).getTime()) / (1000 * 60 * 60 * 24);
-    return sum + Math.min(90, Math.max(0, diff));
-  }, 0) / Math.max(myProducts.length, 1);
-  const verificationRate = Math.min(98, 70 + seller.rating * 5);
-  const anomalyRate = Math.max(0.5, 6 - seller.rating);
-  const lostSalesEstimate = Math.round((stockoutRate / 100) * estimatedMonthlyOrders * averagePrice);
+  const csat = analyticsSummary?.rating_avg ?? null;
+  const csatCount = analyticsSummary?.rating_count ?? 0;
+  const dataCoverageRate = analyticsDataQuality?.coverage ?? null;
+  const dataFreshnessDays = analyticsDataQuality?.freshness_days ?? null;
+  const verificationRate = analyticsDataQuality?.verification_rate ?? null;
+  const anomalyRate = analyticsDataQuality?.anomaly_rate ?? null;
+  const dataMediaCoverage = analyticsDataQuality?.media_coverage ?? null;
+  const dataCategoryCoverage = analyticsDataQuality?.category_coverage ?? null;
 
   const handleLaunchCampaign = async () => {
     if (!campaignForm.name || !campaignForm.productId) {
@@ -2184,18 +2975,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const handleStartWhatsAppOnboarding = async () => {
-    setOnboardingStatus(null);
-    try {
-      await recordSellerOnboardingEvent({ step: 'whatsapp_onboarding', status: 'started' });
-      const state = await getSellerOnboardingState();
-      setOnboardingState(state);
-      setOnboardingStatus('WhatsApp onboarding started.');
-    } catch (err: any) {
-      setOnboardingStatus(err?.message || 'Unable to start WhatsApp onboarding.');
-    }
-  };
-
   const handleClaimShop = async () => {
     setOnboardingStatus(null);
     try {
@@ -2224,7 +3003,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const handleRefreshShareLink = async () => {
     setOnboardingStatus(null);
     try {
-      await refreshSellerShareLink();
+      const updated = await refreshSellerShareLink();
+      setSellerShareLink((updated as any)?.share_url ?? sellerShareLink);
       setOnboardingStatus('Share link refreshed.');
     } catch (err: any) {
       setOnboardingStatus(err?.message || 'Unable to refresh share link.');
@@ -2271,6 +3051,42 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       });
     }
     return presign.url || uploadUrl;
+  };
+
+  const uploadReceiptFile = async (file: File) => {
+    const presign = await requestUploadPresign({
+      file_name: file.name,
+      mime_type: file.type,
+      content_length: file.size,
+      context: 'reward_receipt'
+    });
+    if (!presign.upload_url && !presign.url) {
+      throw new Error('Upload presign failed.');
+    }
+    const uploadUrl = presign.upload_url || presign.url!;
+    if (presign.fields) {
+      const form = new FormData();
+      Object.entries(presign.fields).forEach(([key, value]) => {
+        form.append(key, value);
+      });
+      form.append('file', file);
+      await fetch(uploadUrl, {
+        method: presign.method || 'POST',
+        body: form,
+        headers: presign.headers
+      });
+    } else {
+      await fetch(uploadUrl, {
+        method: presign.method || 'PUT',
+        headers: presign.headers || { 'Content-Type': file.type },
+        body: file
+      });
+    }
+    const key = presign.s3_key || presign.key;
+    if (!key) {
+      throw new Error('Upload key missing.');
+    }
+    return key;
   };
 
   const handleProductMediaUpload = async (file: File, targetProduct?: Product) => {
@@ -2491,7 +3307,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     try {
       const platform = onlineConnectForm.platform;
       if (platform === 'shopify' || platform === 'woocommerce') {
-        const redirectUrl = `${window.location.origin}${window.location.pathname}?oauth=1&platform=${platform}`;
+        const redirectUrl = `${window.location.origin}${window.location.pathname}?oauth=1&platform=${platform}&shop=${encodeURIComponent(onlineConnectForm.shop_domain || '')}`;
         const start = await startOnlineOAuth({
           platform,
           shop_domain: onlineConnectForm.shop_domain || undefined,
@@ -2499,12 +3315,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           redirect_url: redirectUrl
         });
         if (start?.auth_url) {
-          try {
-            localStorage.setItem('soko:oauth_platform', platform);
-            if (onlineConnectForm.shop_domain) {
-              localStorage.setItem('soko:oauth_shop', onlineConnectForm.shop_domain);
-            }
-          } catch {}
           window.location.href = start.auth_url;
           return;
         }
@@ -2538,9 +3348,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') !== '1') return;
-    const platformParam = params.get('platform') || '';
-    const platform = platformParam || localStorage.getItem('soko:oauth_platform') || '';
-    const shop = params.get('shop') || localStorage.getItem('soko:oauth_shop') || onlineConnectForm.shop_domain || '';
+    const platform = params.get('platform') || '';
+    const shop = params.get('shop') || onlineConnectForm.shop_domain || '';
     const code = params.get('code') || '';
     const state = params.get('state') || '';
     const hmac = params.get('hmac') || '';
@@ -2633,13 +3442,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setGroupBuyOfferStatus('Enable group buy eligibility first.');
       return;
     }
+    if (!groupBuyDefaults) {
+      setGroupBuyOfferStatus('Group buy defaults not configured yet.');
+      return;
+    }
     try {
       await createGroupBuyOffer({
         product_sku: product.productId,
         tiers: product.groupBuyTiers || [],
-        min_group_size: 5,
-        max_groups: 5,
-        duration_hours: 48
+        min_group_size: groupBuyDefaults.min_group_size,
+        max_groups: groupBuyDefaults.max_groups,
+        duration_hours: groupBuyDefaults.duration_hours
       });
       setGroupBuyOfferStatus(`Group buy published for ${product.name}.`);
     } catch (err: any) {
@@ -2673,14 +3486,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setMarketingStatus('Select a product to broadcast.');
       return;
     }
-    const product = myProducts.find(p => p.id === stockAlertProductId);
-    const threshold = Math.max(1, Math.round((product?.stockLevel ?? 10) * 0.2));
-    const message = product
-      ? `Fresh stock of ${product.name} just landed. Limited availability.`
-      : 'Fresh stock now available. Limited availability.';
     setMarketingStatus(null);
     try {
-      await createStockAlert({ product_id: stockAlertProductId, threshold, message });
+      await createStockAlert({ product_id: stockAlertProductId });
       await broadcastStockAlerts();
       const latestAlerts = await listStockAlerts();
       setMarketingStockAlerts(latestAlerts);
@@ -2699,7 +3507,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
   const handleCreateFanOffer = async () => {
     setMarketingStatus(null);
-    const discountPct = Math.max(5, Math.min(20, Math.round((marketingROAS || 10) * 4)));
+    if (!fanOfferConfig?.discount_pct) {
+      setMarketingStatus('Fan offer discount not configured yet.');
+      return;
+    }
+    const discountPct = Math.round(Number(fanOfferConfig.discount_pct));
+    if (!Number.isFinite(discountPct) || discountPct <= 0) {
+      setMarketingStatus('Fan offer discount not configured yet.');
+      return;
+    }
     try {
       const created = await createFanOffer({
         offer_title: `${seller.name} Fan Exclusive`,
@@ -2712,15 +3528,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const handleCreateCategorySpotlight = async () => {
-    const category = topCategories[0]?.category;
+  const handleCreateCategorySpotlight = async (categoryOverride?: string) => {
+    const category = categoryOverride || topCategories[0]?.category;
     if (!category) {
       setMarketingStatus('Add products to request a category spotlight.');
       return;
     }
+    const budget = categorySpotlightConfig?.budget;
+    if (!budget) {
+      setMarketingStatus('Category spotlight pricing not configured yet.');
+      return;
+    }
     setMarketingStatus(null);
     try {
-      const created = await createCategorySpotlight({ category, budget: 500 });
+      const created = await createCategorySpotlight({ category, budget });
       setMarketingCategorySpotlights(prev => [created, ...prev]);
       setMarketingStatus(`Category spotlight requested for ${category}.`);
     } catch (err: any) {
@@ -2754,7 +3575,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     e.preventDefault();
     const price = Number(formData.price);
     const stockLevel = Number(formData.stockLevel);
-    const stockStatus = stockLevel <= 0 ? 'out_of_stock' : stockLevel < 5 ? 'low_stock' : 'in_stock';
     setProductsStatus(null);
     try {
       if (editingProduct) {
@@ -2763,9 +3583,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           category_id: formData.category,
           current_price: price,
           stock_level: stockLevel,
-          stock_status: stockStatus,
           group_buy_eligible: formData.groupBuyEligible,
-          group_buy_tiers: formData.groupBuyTiers
+          group_buy_tiers: formData.groupBuyTiers,
+          expiry_date: formData.expiryDate
         });
         if (formData.mediaUrl) {
           await addSellerProductMedia(editingProduct.id, {
@@ -2783,10 +3603,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           price: Number(updated.current_price ?? price),
           category: updated.category_id || formData.category,
           stockLevel: Number(updated.stock_level ?? stockLevel),
-          stockStatus: (updated.stock_status as Product['stockStatus']) || stockStatus,
+          stockStatus: (updated.stock_status as Product['stockStatus']) || editingProduct.stockStatus,
           discountPrice: updated.discount_price ?? undefined,
           isFeatured: updated.is_featured ?? editingProduct.isFeatured,
           mediaUrl: formData.mediaUrl || editingProduct.mediaUrl,
+          expiryDate: updated.expiry_date ?? formData.expiryDate,
           groupBuyEligible: updated.group_buy_eligible ?? formData.groupBuyEligible,
           groupBuyTiers: updated.group_buy_tiers ?? formData.groupBuyTiers
         };
@@ -2796,16 +3617,25 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           return next;
         });
       } else {
-        const productId = `prod_${Date.now()}`;
+        const baseProduct = await createProduct({
+          name: formData.name,
+          description: formData.description,
+          category_id: formData.category,
+          tags: []
+        });
+        const productId = baseProduct?.id;
+        if (!productId) {
+          throw new Error('Unable to create product.');
+        }
         const created = await createSellerProduct({
           product_id: productId,
           alias: formData.name,
           category_id: formData.category,
           current_price: price,
           stock_level: stockLevel || 10,
-          stock_status: stockStatus,
           group_buy_eligible: formData.groupBuyEligible,
-          group_buy_tiers: formData.groupBuyTiers
+          group_buy_tiers: formData.groupBuyTiers,
+          expiry_date: formData.expiryDate
         });
         if (formData.mediaUrl) {
           await addSellerProductMedia(created.id, {
@@ -2819,7 +3649,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           id: created.id,
           sellerId: seller.id,
           productId,
-          name: created.alias || formData.name,
+          name: created.alias || baseProduct?.name || formData.name,
           description: formData.description,
           price: Number(created.current_price ?? price),
           category: created.category_id || formData.category,
@@ -2827,9 +3657,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           mediaType: 'image',
           tags: [],
           stockLevel: Number(created.stock_level ?? stockLevel),
-          stockStatus: (created.stock_status as Product['stockStatus']) || stockStatus,
+          stockStatus: (created.stock_status as Product['stockStatus']) || 'in_stock',
           location: seller.location,
-          expiryDate: formData.expiryDate,
+          expiryDate: created.expiry_date ?? formData.expiryDate,
           discountPrice: created.discount_price ?? undefined,
           isFeatured: created.is_featured,
           groupBuyEligible: created.group_buy_eligible ?? formData.groupBuyEligible,
@@ -2900,32 +3730,136 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const applyReceiptSimulation = async () => {
-    setProductsStatus(null);
+  const handleSavePreferences = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSellerPreferencesStatus(null);
+    setSellerPreferencesSaving(true);
     try {
-      const result = await bulkImportSellerProducts();
-      const refreshed = await listSellerProducts();
-      const mapped = mapSellerProducts(refreshed);
-      setMyProducts(mapped);
-      pushProducts(mapped);
-      await loadMediaForProducts(mapped);
-      const [insights, lowStock] = await Promise.all([
-        listSellerProductInsights(),
-        listSellerLowStock()
-      ]);
-      setProductInsights(insights);
-      setProductLowStock(lowStock);
-      setProductsStatus(result?.import_id ? `Receipts queued. Import ${result.import_id}.` : 'Receipts queued for processing.');
-      onToast?.('Receipts queued for processing.');
+      const payload = {
+        marketing: {
+          kpi_range: sellerPreferencesDraft.marketing.kpi_range,
+          campaign_duration_days: Number(sellerPreferencesDraft.marketing.campaign_duration_days),
+          top_products_days: Number(sellerPreferencesDraft.marketing.top_products_days),
+          top_products_limit: Number(sellerPreferencesDraft.marketing.top_products_limit),
+          broadcast_limit: Number(sellerPreferencesDraft.marketing.broadcast_limit),
+          quick_boost_budget: Number(sellerPreferencesDraft.marketing.quick_boost_budget)
+        },
+        growth: {
+          projection_type: sellerPreferencesDraft.growth.projection_type,
+          loan_request_ratio: Number(sellerPreferencesDraft.growth.loan_request_ratio)
+        },
+        comms: {
+          broadcast_limit: Number(sellerPreferencesDraft.comms.broadcast_limit)
+        },
+        analytics: {
+          sales_series_days: Number(sellerPreferencesDraft.analytics.sales_series_days),
+          sales_velocity_days: Number(sellerPreferencesDraft.analytics.sales_velocity_days),
+          peak_hours_days: Number(sellerPreferencesDraft.analytics.peak_hours_days),
+          inventory_series_days: Number(sellerPreferencesDraft.analytics.inventory_series_days),
+          conversion_series_days: Number(sellerPreferencesDraft.analytics.conversion_series_days)
+        },
+        procurement: {
+          max_distance_km: Number(sellerPreferencesDraft.procurement.max_distance_km),
+          max_unit_cost: Number(sellerPreferencesDraft.procurement.max_unit_cost),
+          max_moq: Number(sellerPreferencesDraft.procurement.max_moq),
+          max_lead_time_days: Number(sellerPreferencesDraft.procurement.max_lead_time_days),
+          min_rating: Number(sellerPreferencesDraft.procurement.min_rating),
+          verified_only: Boolean(sellerPreferencesDraft.procurement.verified_only)
+        }
+      };
+      const saved = await updateSellerPreferences(payload);
+      setSellerPreferences(saved);
+      if (saved.analytics) {
+        const salesDays = Number(saved.analytics.sales_series_days);
+        const velocityDays = Number(saved.analytics.sales_velocity_days);
+        const peakDays = Number(saved.analytics.peak_hours_days);
+        const inventoryDays = Number(saved.analytics.inventory_series_days);
+        const conversionDays = Number(saved.analytics.conversion_series_days);
+        if (Number.isFinite(salesDays) && salesDays > 0) setSalesSeriesDays(salesDays);
+        if (Number.isFinite(velocityDays) && velocityDays > 0) setSalesVelocityDays(velocityDays);
+        if (Number.isFinite(peakDays) && peakDays > 0) setPeakHoursDays(peakDays);
+        if (Number.isFinite(inventoryDays) && inventoryDays > 0) setInventorySeriesDays(inventoryDays);
+        if (Number.isFinite(conversionDays) && conversionDays > 0) setConversionSeriesDays(conversionDays);
+      }
+      setSellerPreferencesDraft(prev => ({
+        marketing: {
+          ...prev.marketing,
+          ...(saved.marketing ?? {}),
+          kpi_range: String(saved.marketing?.kpi_range ?? prev.marketing.kpi_range ?? '30d'),
+          campaign_duration_days: Number(saved.marketing?.campaign_duration_days ?? prev.marketing.campaign_duration_days ?? 7),
+          top_products_days: Number(saved.marketing?.top_products_days ?? prev.marketing.top_products_days ?? 30),
+          top_products_limit: Number(saved.marketing?.top_products_limit ?? prev.marketing.top_products_limit ?? 5),
+          broadcast_limit: Number(saved.marketing?.broadcast_limit ?? prev.marketing.broadcast_limit ?? 50),
+          quick_boost_budget: Number(saved.marketing?.quick_boost_budget ?? prev.marketing.quick_boost_budget ?? 500)
+        },
+        growth: {
+          ...prev.growth,
+          ...(saved.growth ?? {}),
+          projection_type: String(saved.growth?.projection_type ?? prev.growth.projection_type ?? 'cashflow'),
+          loan_request_ratio: Number(saved.growth?.loan_request_ratio ?? prev.growth.loan_request_ratio ?? 0.5)
+        },
+        comms: {
+          ...prev.comms,
+          ...(saved.comms ?? {}),
+          broadcast_limit: Number(saved.comms?.broadcast_limit ?? prev.comms.broadcast_limit ?? 50)
+        },
+        analytics: {
+          ...prev.analytics,
+          ...(saved.analytics ?? {}),
+          sales_series_days: Number(saved.analytics?.sales_series_days ?? prev.analytics.sales_series_days ?? 7),
+          sales_velocity_days: Number(saved.analytics?.sales_velocity_days ?? prev.analytics.sales_velocity_days ?? 7),
+          peak_hours_days: Number(saved.analytics?.peak_hours_days ?? prev.analytics.peak_hours_days ?? 7),
+          inventory_series_days: Number(saved.analytics?.inventory_series_days ?? prev.analytics.inventory_series_days ?? 14),
+          conversion_series_days: Number(saved.analytics?.conversion_series_days ?? prev.analytics.conversion_series_days ?? 14)
+        },
+        procurement: {
+          ...prev.procurement,
+          ...(saved.procurement ?? {}),
+          max_distance_km: Number(saved.procurement?.max_distance_km ?? prev.procurement.max_distance_km ?? 50),
+          max_unit_cost: Number(saved.procurement?.max_unit_cost ?? prev.procurement.max_unit_cost ?? 500),
+          max_moq: Number(saved.procurement?.max_moq ?? prev.procurement.max_moq ?? 50),
+          max_lead_time_days: Number(saved.procurement?.max_lead_time_days ?? prev.procurement.max_lead_time_days ?? 14),
+          min_rating: Number(saved.procurement?.min_rating ?? prev.procurement.min_rating ?? 0),
+          verified_only: Boolean(saved.procurement?.verified_only ?? prev.procurement.verified_only ?? false)
+        }
+      }));
+      setSellerPreferencesStatus('Preferences saved.');
+      onToast?.('Preferences saved.');
     } catch (err: any) {
-      setProductsStatus(err?.message || 'Unable to upload receipts.');
+      setSellerPreferencesStatus(err?.message || 'Unable to save preferences.');
+    } finally {
+      setSellerPreferencesSaving(false);
+    }
+  };
+
+  const handleReceiptUpload = async (file: File) => {
+    setReceiptUploadStatus(null);
+    setReceiptUploading(true);
+    try {
+      const key = await uploadReceiptFile(file);
+      await submitReceipt({ s3_key: key });
+      setReceiptUploadStatus('Receipt uploaded. OCR processing queued.');
+      onToast?.('Receipt uploaded for processing.');
+      loadSellerRewards();
+    } catch (err: any) {
+      setReceiptUploadStatus(err?.message || 'Unable to upload receipt.');
+    } finally {
+      setReceiptUploading(false);
     }
   };
 
   const applyPriceMatch = async () => {
-    if (myProducts.length === 0) return;
-    const target = myProducts[0];
-    const nextPrice = Math.max(1, target.price - 5);
+    if (myProducts.length === 0) {
+      onToast?.('Add a product first to match market pricing.');
+      return;
+    }
+    const target = myProducts.find(p => typeof p.competitorPrice === 'number') || myProducts[0];
+    const matchPrice = Number(target.competitorPrice ?? priceMatchValue ?? 0);
+    if (!matchPrice) {
+      onToast?.('No market price available to match yet.');
+      return;
+    }
+    const nextPrice = Math.max(1, matchPrice);
     setProductsStatus(null);
     try {
       const updated = await updateSellerProductPrice(target.id, { current_price: nextPrice });
@@ -2941,6 +3875,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
+  const handleOpenProductsTab = () => {
+    setActiveTab('products');
+  };
+
+  const handleQuickBoost = () => {
+    setActiveTab('marketing');
+    setCampaignForm(prev => ({
+      ...prev,
+      name: quickBoostLabel,
+      budget: quickBoostBudget > 0 ? quickBoostBudget : prev.budget,
+      productId: prev.productId || (myProducts[0]?.id ?? '')
+    }));
+  };
+
   const applyBulkUpdate = async () => {
     setProductsStatus(null);
     try {
@@ -2950,11 +3898,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setMyProducts(mapped);
       pushProducts(mapped);
       await loadMediaForProducts(mapped);
-      const [insights, lowStock] = await Promise.all([
-        listSellerProductInsights(),
+      const [lowStock] = await Promise.all([
         listSellerLowStock()
       ]);
-      setProductInsights(insights);
       setProductLowStock(lowStock);
       setProductsStatus(result?.batch_id ? `Bulk update started. Batch ${result.batch_id}.` : 'Bulk update started.');
       onToast?.('Bulk update queued.');
@@ -2974,7 +3920,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             ? {
                 ...p,
                 stockLevel: Number(updated.stock_level ?? nextStock),
-                stockStatus: (updated.stock_status as Product['stockStatus']) || (nextStock <= 0 ? 'out_of_stock' : nextStock < 5 ? 'low_stock' : 'in_stock')
+                stockStatus: (updated.stock_status as Product['stockStatus']) || product.stockStatus
               }
             : p
         );
@@ -3006,6 +3952,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
     setCommsStatus(null);
     try {
+      const limit = Number.isFinite(broadcastsLimit) && broadcastsLimit > 0 ? broadcastsLimit : 50;
       await createBroadcast({
         name: message.slice(0, 60),
         channel: 'whatsapp',
@@ -3020,43 +3967,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           }
         } catch {}
       }
-      const items = await listBroadcasts(50);
+      const items = await listBroadcasts(limit);
       setBroadcasts(items);
       setBroadcastCount(items.length);
       onToast?.('Broadcast sent to followers.');
     } catch (err: any) {
       setCommsStatus(err?.message || 'Broadcast failed.');
-    }
-  };
-
-  const handleWhatsAppSummaryRequest = async () => {
-    setAnalyticsStatus(null);
-    try {
-      const resp = await requestSellerWhatsAppDailySummary();
-      const status = resp?.status || 'queued';
-      setAnalyticsStatus(`WhatsApp summary ${status}.`);
-    } catch (err: any) {
-      setAnalyticsStatus(err?.message || 'Unable to send WhatsApp summary.');
-    }
-  };
-
-  const handleCommsWhatsAppSummary = async () => {
-    setCommsStatus(null);
-    const summary = `Daily summary: ${dailyViews} views, ${dailyInquiries} inquiries, ${funnelSales} sales.`;
-    try {
-      const resp = await sendWhatsApp({ content: summary });
-      if (resp?.id) {
-        try {
-          const status = await getCommsWhatsAppStatus(resp.id);
-          if (status?.status) {
-            setCommsStatus(`WhatsApp ${status.status}.`);
-          }
-        } catch {}
-      } else {
-        setCommsStatus(resp?.status ? `WhatsApp ${resp.status}.` : 'WhatsApp message queued.');
-      }
-    } catch (err: any) {
-      setCommsStatus(err?.message || 'Unable to send WhatsApp summary.');
     }
   };
 
@@ -3078,17 +3994,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const handleFollowerNotificationsToggle = async (field: keyof typeof notificationPrefs) => {
+  const persistNotificationPrefs = async (next: SellerNotificationPreferences) => {
     const previous = { ...notificationPrefs };
-    const next = { ...notificationPrefs, [field]: !notificationPrefs[field] };
     setNotificationPrefs(next);
     setNotificationsUpdating(true);
     setSettingsStatus(null);
     try {
-      await updateSellerNotificationPreferences({
-        ...next,
-        followers: true
-      });
+      await updateSellerNotificationPreferences(next);
       setSettingsStatus('Notification preferences updated.');
     } catch (err: any) {
       setSettingsStatus(err?.message || 'Unable to update notifications.');
@@ -3098,31 +4010,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const handleAllNotificationsToggle = async () => {
-    const previous = { ...notificationPrefs };
-    const enableAll = !(notificationPrefs.email || notificationPrefs.in_app || notificationPrefs.whatsapp || notificationPrefs.sms);
-    const next = {
+  const toggleNotificationPref = async (field: keyof SellerNotificationPreferences) => {
+    const current = Boolean(notificationPrefs[field]);
+    await persistNotificationPrefs({
       ...notificationPrefs,
-      email: enableAll,
-      in_app: enableAll,
-      whatsapp: enableAll,
-      sms: enableAll
-    };
-    setNotificationPrefs(next);
-    setNotificationsUpdating(true);
-    setSettingsStatus(null);
-    try {
-      await updateSellerNotificationPreferences({
-        ...next,
-        followers: true
-      });
-      setSettingsStatus('Notification preferences updated.');
-    } catch (err: any) {
-      setSettingsStatus(err?.message || 'Unable to update notifications.');
-      setNotificationPrefs(previous);
-    } finally {
-      setNotificationsUpdating(false);
-    }
+      [field]: !current
+    });
+  };
+
+  const updateNotificationPrefField = async (field: keyof SellerNotificationPreferences, value: string) => {
+    await persistNotificationPrefs({
+      ...notificationPrefs,
+      [field]: value
+    });
   };
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -3146,45 +4046,57 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     );
   };
 
-  const refreshAdminSupplierApps = async () => {
-    if (!isAdmin) return;
-    setAdminSupplierAppsStatus(null);
-    setAdminSupplierAppsLoading(true);
-    try {
-      const apps = await listSupplierApplicationsAdmin();
-      setAdminSupplierApps(apps || []);
-    } catch (err: any) {
-      setAdminSupplierAppsStatus(err?.message || 'Unable to load supplier applications.');
-    } finally {
-      setAdminSupplierAppsLoading(false);
-    }
-  };
-
-  const handleApproveSupplierApp = async (id: string) => {
-    setAdminSupplierAppsStatus(null);
-    try {
-      await approveSupplierApplication(id, {
-        decision_reason: adminDecisionReasons[id] || ''
-      });
-      await refreshAdminSupplierApps();
-    } catch (err: any) {
-      setAdminSupplierAppsStatus(err?.message || 'Unable to approve application.');
-    }
-  };
-
-  const handleRejectSupplierApp = async (id: string) => {
-    setAdminSupplierAppsStatus(null);
-    try {
-      await rejectSupplierApplication(id, {
-        decision_reason: adminDecisionReasons[id] || ''
-      });
-      await refreshAdminSupplierApps();
-    } catch (err: any) {
-      setAdminSupplierAppsStatus(err?.message || 'Unable to reject application.');
-    }
-  };
-
   const baseLocation = userCoords || seller.location || null;
+  useEffect(() => {
+    if (activeTab !== 'suppliers') return;
+    let ignore = false;
+    const loadDirectory = async () => {
+      setSellerDirectoryLoading(true);
+      setSellerDirectoryStatus(null);
+      try {
+        const results = await searchShops({
+          category: sellerFilters.category || undefined,
+          minRating: sellerFilters.minRating || undefined,
+          verified: sellerFilters.verifiedOnly || undefined,
+          lat: baseLocation?.lat,
+          lng: baseLocation?.lng,
+          radiusKm: sellerFilters.maxDistance || undefined,
+          sort: 'rating'
+        });
+        if (ignore) return;
+        const mapped = results.map((shop) => {
+          const loc = typeof shop.location === 'object' ? shop.location : {};
+          const lat = Number((loc as any)?.lat ?? (loc as any)?.latitude);
+          const lng = Number((loc as any)?.lng ?? (loc as any)?.longitude);
+          const distanceKm = baseLocation && Number.isFinite(lat) && Number.isFinite(lng)
+            ? calculateDistance(baseLocation.lat, baseLocation.lng, lat, lng)
+            : null;
+          const rating = Number(shop.rating ?? 0);
+          const distanceScore = distanceKm !== null && sellerFilters.maxDistance
+            ? Math.max(0, 100 - (distanceKm / Math.max(sellerFilters.maxDistance, 1)) * 100)
+            : 40;
+          const score = rating * 20 * 0.6 + distanceScore * 0.4;
+          return { shop, distanceKm, score };
+        }).sort((a, b) => b.score - a.score);
+        setSellerDirectory(mapped);
+      } catch (err: any) {
+        if (!ignore) {
+          setSellerDirectory([]);
+          setSellerDirectoryStatus(err?.message || 'Unable to load sellers.');
+        }
+      } finally {
+        if (!ignore) setSellerDirectoryLoading(false);
+      }
+    };
+    loadDirectory();
+    return () => {
+      ignore = true;
+    };
+  }, [activeTab, sellerFilters.category, sellerFilters.minRating, sellerFilters.verifiedOnly, sellerFilters.maxDistance, baseLocation?.lat, baseLocation?.lng]);
+
+  const sellerDirectoryCategories = Array.from(new Set(
+    sellerDirectory.map(({ shop }) => shop.category).filter((cat): cat is string => Boolean(cat))
+  ));
   const suppliersById = suppliersData.reduce<Record<string, Supplier>>((acc, supplier) => {
     if (supplier.id) acc[supplier.id] = supplier;
     return acc;
@@ -3492,24 +4404,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     };
   });
 
-  const sellersWithMeta = SELLERS.map((s) => {
-    const sellerOrders = ORDERS.filter(o => o.sellerId === s.id);
-    const sellerRevenue = sellerOrders.reduce((sum, o) => sum + o.unitPrice * o.quantity, 0);
-    const avgOrderValue = sellerOrders.length ? sellerRevenue / sellerOrders.length : 0;
-    const categories = Array.from(new Set(PRODUCTS.filter(p => p.sellerId === s.id).map(p => p.category)));
-    const distance = baseLocation && s.location
-      ? calculateDistance(baseLocation.lat, baseLocation.lng, s.location.lat, s.location.lng)
-      : null;
-    const score = s.rating * 20 * 0.5 + (distance ? Math.max(0, 100 - (distance / Math.max(sellerFilters.maxDistance, 1)) * 100) : 40) * 0.3 + Math.min(100, sellerRevenue / 100) * 0.2;
-    return { seller: s, categories, avgOrderValue, distance, score };
-  }).filter(({ seller, categories, avgOrderValue, distance }) => {
-    if (sellerFilters.category && !categories.includes(sellerFilters.category)) return false;
-    if (sellerFilters.verifiedOnly && !seller.isVerified) return false;
-    if (sellerFilters.minRating && seller.rating < sellerFilters.minRating) return false;
-    if (sellerFilters.minOrderValue && avgOrderValue < sellerFilters.minOrderValue) return false;
-    if (sellerFilters.maxDistance && distance !== null && distance > sellerFilters.maxDistance) return false;
-    return true;
-  }).sort((a, b) => b.score - a.score);
+  const sellersWithMeta = sellerDirectory;
 
 
 
@@ -3557,23 +4452,24 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     || buyerReach === 'delivery_only'
     || sellerMode === 'solopreneur'
     || sellerMode === 'hybrid';
+  const tabs = [
+    { id: 'onboarding', icon: Sparkles, label: 'Onboarding' },
+    { id: 'products', icon: Package, label: 'Products' },
+    { id: 'analytics', icon: BarChart3, label: 'Intelligence' },
+    { id: 'rewards', icon: Star, label: 'Rewards' },
+    { id: 'marketing', icon: Megaphone, label: 'Marketing' },
+    { id: 'growth', icon: Wallet, label: 'Growth' },
+    { id: 'suppliers', icon: MapPin, label: 'Suppliers' },
+    { id: 'comms', icon: MessageSquare, label: 'Comms' },
+    ...(offlineEnabled ? [{ id: 'offline', icon: Clock, label: 'Offline' }] : []),
+    { id: 'settings', icon: Settings, label: 'Shop Profile' }
+  ];
 
   return (
     <div className="h-full bg-zinc-50 flex flex-col">
       {/* Sidebar / Nav */}
       <div className="flex border-b bg-white overflow-x-auto no-scrollbar">
-        {[
-          { id: 'onboarding', icon: Sparkles, label: 'Onboarding' },
-          { id: 'products', icon: Package, label: 'Products' },
-          { id: 'analytics', icon: BarChart3, label: 'Intelligence' },
-          { id: 'rewards', icon: Star, label: 'Rewards' },
-          { id: 'marketing', icon: Megaphone, label: 'Marketing' },
-          { id: 'growth', icon: Wallet, label: 'Growth' },
-          { id: 'suppliers', icon: MapPin, label: 'Suppliers' },
-          { id: 'comms', icon: MessageSquare, label: 'Comms' },
-          { id: 'offline', icon: Clock, label: 'Offline' },
-          { id: 'settings', icon: Settings, label: 'Shop Profile' }
-        ].map(tab => (
+        {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -3586,6 +4482,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           </button>
         ))}
       </div>
+
+      <input
+        ref={receiptUploadInputRef}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleReceiptUpload(file);
+          if (e.currentTarget) e.currentTarget.value = '';
+        }}
+      />
 
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
@@ -4329,28 +5237,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             )}
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">WhatsApp-Based Onboarding</p>
-                  <p className="text-sm font-bold text-zinc-900">Send “Hi” → guided flow creates your shop</p>
-                </div>
-                <button
-                  onClick={() => setShowOnboardingModal(true)}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
-                >
-                  Start on WhatsApp
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-zinc-600">
-                <div className="p-3 bg-zinc-50 rounded-2xl">1. Jina la duka</div>
-                <div className="p-3 bg-zinc-50 rounded-2xl">2. Eneo la duka</div>
-                <div className="p-3 bg-zinc-50 rounded-2xl">3. Aina ya bidhaa</div>
-                <div className="p-3 bg-zinc-50 rounded-2xl">4. Tuma picha za bidhaa</div>
-              </div>
-              <div className="mt-4 text-[10px] text-zinc-500 font-bold">Voice onboarding available for low-literacy sellers.</div>
-            </div>
-
-            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
                 <MapPin className="w-5 h-5 text-emerald-600" />
                 <div>
@@ -4366,49 +5252,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               </button>
             </div>
 
-            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
-              <div className="flex items-center gap-3 mb-3">
-                <Settings className="w-5 h-5 text-indigo-600" />
-                <div>
-                  <p className="text-sm font-bold text-zinc-900">Route Multipliers</p>
-                  <p className="text-[10px] text-zinc-500">Tune ETA multipliers for city + road types.</p>
-                </div>
-              </div>
-              <textarea
-                value={routeConfigDraft}
-                onChange={(e) => setRouteConfigDraft(e.target.value)}
-                rows={12}
-                className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-[10px] font-mono text-zinc-700"
-                placeholder='{"profile":{"motorbike":0.85},"city":{"mombasa":{"tuktuk":1.1}},"roadClass":{"service":1.12}}'
-              />
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  onClick={handleSaveRouteConfigLocal}
-                  className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black"
-                >
-                  Save Locally
-                </button>
-                <button
-                  onClick={handleLoadRouteConfigFromOps}
-                  className="px-4 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black"
-                >
-                  Load From Ops
-                </button>
-                <button
-                  onClick={handlePublishRouteConfig}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
-                  disabled={routeConfigSaving}
-                >
-                  {routeConfigSaving ? 'Publishing…' : 'Publish to Ops'}
-                </button>
-              </div>
-              {routeConfigUpdatedAt && (
-                <div className="mt-2 text-[10px] text-zinc-500 font-bold">Last published: {new Date(routeConfigUpdatedAt).toLocaleString()}</div>
-              )}
-              {routeConfigStatus && (
-                <div className="mt-2 text-[10px] font-bold text-emerald-600">{routeConfigStatus}</div>
-              )}
-            </div>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
@@ -4421,7 +5264,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-bold text-zinc-400 uppercase">Your public page</p>
-                  <p className="text-sm font-black text-zinc-900">soko.connect/shop/{seller.name.toLowerCase().replace(/\s/g, '')}</p>
+                  <p className="text-sm font-black text-zinc-900">
+                    {sellerShareLink || 'Share link not available yet.'}
+                  </p>
                 </div>
                 <button
                   onClick={handleRefreshShareLink}
@@ -4441,14 +5286,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
               </div>
               <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
-                5 customers uploaded receipts from your shop this week.
+                {receiptWeekCount > 0
+                  ? `${receiptWeekCount} customers uploaded receipts from your shop this week.`
+                  : 'No receipt uploads yet this week.'}
               </div>
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={handleClaimShop}
                   className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
                 >
-                  Claim Shop (KES 200 bonus)
+                  {claimShopBonusLabel ? `Claim Shop (${claimShopBonusLabel} bonus)` : 'Claim Shop'}
                 </button>
                 <button
                   onClick={handleStartVerification}
@@ -4463,7 +5310,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-3">Digital Storefront Preview</p>
               <div className="p-4 bg-zinc-50 rounded-2xl">
                 <p className="text-sm font-black text-zinc-900">{seller.name}</p>
-                <p className="text-[10px] text-zinc-500">{seller.location?.address || 'Kawangware, Stage Road'} • Open 7am-9pm</p>
+                <p className="text-[10px] text-zinc-500">
+                  {seller.location?.address ? seller.location.address : 'Add your address'} • {deliveryDetails.delivery_hours || 'Hours not set'}
+                </p>
                 <div className="mt-3 grid grid-cols-4 gap-2">
                   {myProducts.slice(0, 4).map(p => (
                     <div key={p.id} className="text-[9px] font-bold text-zinc-700 bg-white rounded-xl p-2 text-center">
@@ -4541,12 +5390,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                             <p className="text-[10px] text-amber-600 font-medium">Expires: {p.expiryDate}</p>
                           </div>
                         </div>
-                        <button 
-                          onClick={() => {
+                          <button 
+                            onClick={() => {
+                            if (!clearancePromoConfig?.discount_pct) {
+                              setProductsStatus('Clearance promotion not configured yet.');
+                              return;
+                            }
+                            const discountPct = Number(clearancePromoConfig.discount_pct);
                             setFormData({
                               name: p.name,
                               description: p.description,
-                              price: (p.price * 0.7).toFixed(2),
+                              price: (p.price * (1 - discountPct / 100)).toFixed(2),
                               category: p.category,
                               mediaUrl: p.mediaUrl,
                               stockLevel: p.stockLevel,
@@ -4559,7 +5413,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                           }}
                           className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-[10px] font-bold shadow-sm"
                         >
-                          Clearance Promotion (30% Off)
+                          Clearance Promotion
                         </button>
                       </div>
                     ))}
@@ -4610,25 +5464,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Receipt-Based Auto-Update</h3>
                 </div>
                 <p className="text-[10px] text-zinc-500 font-bold">Send daily receipts → stock auto-updates and sales totals.</p>
-                <button onClick={applyReceiptSimulation} className="mt-3 w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black">
+                <button
+                  onClick={() => receiptUploadInputRef.current?.click()}
+                  className="mt-3 w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+                >
                   Upload Daily Receipts
                 </button>
-                <div className="mt-3 p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
-                  Today: Unga sold 15 • Stock left 5 • Sales KES 8,450
-                </div>
               </div>
               <div className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">
                 <div className="flex items-center gap-2 mb-3">
                   <MessageSquare className="w-4 h-4 text-indigo-600" />
-                  <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">WhatsApp Inventory Commands</h3>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Bulk Inventory Update</h3>
                 </div>
-                <div className="space-y-2 text-[10px] font-bold text-zinc-600">
-                  <div className="p-2 bg-zinc-50 rounded-xl">"Bei Unga 185" → price updated</div>
-                  <div className="p-2 bg-zinc-50 rounded-xl">"Stock Unga 25" → stock updated</div>
-                  <div className="p-2 bg-zinc-50 rounded-xl">"Remove Sukari" → product hidden</div>
-                </div>
+                <p className="text-[10px] text-zinc-500 font-bold">
+                  Sync stock and pricing from your latest import or POS export.
+                </p>
                 <button onClick={applyBulkUpdate} className="mt-3 w-full py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
-                  Try WhatsApp Update
+                  Run Bulk Update
                 </button>
               </div>
             </div>
@@ -4682,7 +5534,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     Upload a customer receipt to automatically list new products.
                   </p>
                   <button
-                    onClick={applyReceiptSimulation}
+                    onClick={() => receiptUploadInputRef.current?.click()}
                     className="flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-lg font-bold text-sm hover:bg-zinc-800 transition-colors"
                   >
                     <Upload className="w-4 h-4" /> Scan Receipt
@@ -4725,9 +5577,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     <h4 className="font-bold text-zinc-800">{product.name}</h4>
                     <div className="flex items-center gap-2 mt-0.5">
                       <p className="text-xs text-zinc-500">${product.price} • {product.category}</p>
-                      {product.stockLevel < 10 && (
+                      {product.stockStatus && product.stockStatus !== 'in_stock' && (
                         <div className="flex items-center gap-1 px-1.5 py-0.5 bg-red-50 rounded text-[8px] font-bold text-red-600 uppercase">
-                          <AlertCircle className="w-2 h-2" /> Low Stock: {product.stockLevel}
+                          <AlertCircle className="w-2 h-2" /> {product.stockStatus === 'out_of_stock' ? 'Out of Stock' : 'Low Stock'}: {product.stockLevel}
                         </div>
                       )}
                       {product.expiryDate && (
@@ -4836,8 +5688,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     : 'No active demand alerts right now.'}
                 </div>
                 <div className="mt-3 flex gap-2">
-                  <button className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black">Boost Unga (KES 100)</button>
-                  <button className="flex-1 py-3 bg-zinc-100 text-zinc-600 rounded-xl text-[10px] font-black">Update Stock</button>
+                  <button
+                    onClick={handleQuickBoost}
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+                  >
+                    {quickBoostCta}
+                  </button>
+                  <button
+                    onClick={handleOpenProductsTab}
+                    className="flex-1 py-3 bg-zinc-100 text-zinc-600 rounded-xl text-[10px] font-black"
+                  >
+                    Update Stock
+                  </button>
                 </div>
               </div>
               <div className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">
@@ -4846,11 +5708,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Competitive Intelligence</h3>
                 </div>
                 <div className="p-3 bg-indigo-50 rounded-2xl text-[10px] font-bold text-indigo-700">
-                  Price position {Math.round((analyticsMarket?.price_position ?? 0) * 100)}% • Market median KES {Math.round(analyticsMarket?.competitor_median_price ?? averagePrice)} • Market share {Math.round((analyticsMarket?.market_share ?? 0) * 100)}%
+                  Price position {Math.round((analyticsMarket?.price_position ?? 0) * 100)}% • Market median {analyticsMarket?.competitor_median_price !== undefined
+                    ? `KES ${Math.round(analyticsMarket.competitor_median_price)}`
+                    : '—'} • Market share {Math.round((analyticsMarket?.market_share ?? 0) * 100)}%
                 </div>
                 <div className="mt-3 flex gap-2">
-                <button onClick={applyPriceMatch} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-[10px] font-black">Match KES 175</button>
-                <button className="flex-1 py-3 bg-zinc-100 text-zinc-600 rounded-xl text-[10px] font-black">View All Prices</button>
+                <button
+                  onClick={applyPriceMatch}
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
+                >
+                  {priceMatchValue ? `Match KES ${priceMatchValue}` : 'Match Market Price'}
+                </button>
+                <button
+                  onClick={handleOpenProductsTab}
+                  className="flex-1 py-3 bg-zinc-100 text-zinc-600 rounded-xl text-[10px] font-black"
+                >
+                  View All Prices
+                </button>
                 </div>
               </div>
             </div>
@@ -4880,38 +5754,50 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <p className="text-lg font-black">{seller.name}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] text-white/60 font-black">Rank</p>
-                  <p className="text-sm font-black">🥉 #3 Mombasa</p>
+                  <p className="text-[10px] text-white/60 font-black">Rank Score</p>
+                  <p className="text-sm font-black">{rankScore !== undefined ? rankScore.toFixed(2) : '—'}</p>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-3 text-[10px] font-bold">
                 <div className="bg-white/10 rounded-2xl p-3">
-                  <p className="text-white/60 uppercase">Stars</p>
-                  <p className="text-sm font-black">{Math.round(seller.sokoScore * 1.4)}</p>
+                  <p className="text-white/60 uppercase">Rewards (24h)</p>
+                  <p className="text-sm font-black">
+                    {todayRewardsTotal > 0 ? `${sellerRewardsBalance?.currency ?? 'KES'} ${Math.round(todayRewardsTotal)}` : '—'}
+                  </p>
                 </div>
                 <div className="bg-white/10 rounded-2xl p-3">
                   <p className="text-white/60 uppercase">Revenue</p>
-                  <p className="text-sm font-black">KSh {estimatedMonthlyRevenue.toFixed(0)}</p>
+                  <p className="text-sm font-black">
+                    {totalRevenue !== null ? `KSh ${Math.round(totalRevenue)}` : '—'}
+                  </p>
                 </div>
                 <div className="bg-white/10 rounded-2xl p-3">
                   <p className="text-white/60 uppercase">Network</p>
-                  <p className="text-sm font-black">16k dukas</p>
+                  <p className="text-sm font-black">
+                    {networkFollowers ? `${networkFollowers.toLocaleString()} followers` : '—'}
+                  </p>
                 </div>
               </div>
               <div className="mt-4 bg-white/10 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-white/70 mb-2">Data Sources (Active)</p>
-                <div className="grid grid-cols-5 gap-2 text-[10px] font-bold text-white/80">
-                  {analyticsGodViewSources.map(source => (
-                    <div key={source.label} className="bg-white/10 rounded-xl p-2 text-center">
-                      <p className="text-white/60">{source.label}</p>
-                      <p className="text-white font-black">{source.value}</p>
-                    </div>
-                  ))}
-                  <div className="bg-emerald-500/20 rounded-xl p-2 text-center">
-                    <p className="text-white/60">Total</p>
-                    <p className="text-white font-black">{analyticsGodViewSources.reduce((sum, s) => sum + s.value, 0)}</p>
+                {analyticsGodViewSources.length === 0 ? (
+                  <div className="p-2 bg-white/10 rounded-xl text-[10px] text-white/70">
+                    No data sources yet.
                   </div>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-5 gap-2 text-[10px] font-bold text-white/80">
+                    {analyticsGodViewSources.map(source => (
+                      <div key={source.label} className="bg-white/10 rounded-xl p-2 text-center">
+                        <p className="text-white/60">{source.label}</p>
+                        <p className="text-white font-black">{source.value}</p>
+                      </div>
+                    ))}
+                    <div className="bg-emerald-500/20 rounded-xl p-2 text-center">
+                      <p className="text-white/60">Total</p>
+                      <p className="text-white font-black">{analyticsGodViewSources.reduce((sum, s) => sum + s.value, 0)}</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -4919,9 +5805,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Live Demand Forecasts</h3>
-                <button className="px-3 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-bold">Stock Up</button>
+                <button
+                  onClick={handleOpenProductsTab}
+                  className="px-3 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-bold"
+                >
+                  Stock Up
+                </button>
               </div>
               <div className="space-y-3">
+                {analyticsGodViewDemand.length === 0 && (
+                  <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                    No demand data yet.
+                  </div>
+                )}
                 {analyticsGodViewDemand.map(item => (
                   <div key={item.name}>
                     <div className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
@@ -4942,16 +5838,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             {/* Buyer Insights */}
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Verified Buyers</h3>
-                <span className="text-[10px] font-bold text-emerald-600">Repeat rate: 67%</span>
+                <h3 className="text-sm font-bold">Buyer Insights</h3>
+                <span className="text-[10px] font-bold text-emerald-600">
+                  Repeat rate: {analyticsBuyers?.repeat_rate !== undefined ? `${Math.round(Number(analyticsBuyers.repeat_rate) * 100)}%` : '—'}
+                </span>
               </div>
-              <div className="space-y-2 text-[10px] font-bold text-zinc-600">
-                {analyticsGodViewBuyers.map(buyer => (
-                  <div key={`${buyer.name}-${buyer.item}`} className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2">
-                    <span>{buyer.name} ({buyer.source})</span>
-                    <span>{buyer.item} • {buyer.price}</span>
-                  </div>
-                ))}
+              <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-zinc-600">
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  New buyers: {analyticsBuyers?.new_buyers ?? '—'}
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  CLV: {analyticsBuyers?.clv ? `KES ${analyticsBuyers.clv}` : '—'}
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  CAC: {analyticsBuyers?.cac ? `KES ${analyticsBuyers.cac}` : '—'}
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  Repeat buyers: {analyticsBuyers?.repeat_rate !== undefined
+                    ? `${Math.round(Number(analyticsBuyers.repeat_rate) * 100)}%`
+                    : '—'}
+                </div>
               </div>
             </div>
 
@@ -5005,14 +5911,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Live Data Feeds</h3>
-                <span className="text-[10px] font-bold text-emerald-600">+247⭐ earned today</span>
+                <span className="text-[10px] font-bold text-emerald-600">
+                  {todayRewardsTotal > 0
+                    ? `+${Math.round(todayRewardsTotal)} ${sellerRewardsBalance?.currency ?? 'KES'} earned today`
+                    : 'No rewards yet today'}
+                </span>
               </div>
               <div className="space-y-2 text-[10px] font-bold text-zinc-600">
-                <div className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2"><span>QR Scans</span><span>● {analyticsSourceMap.QR ?? 0} today</span></div>
-                <div className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2"><span>Shelf Photos</span><span>● {analyticsSourceMap.Photos ?? 0} shelves</span></div>
-                <div className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2"><span>MyDuka POS</span><span>● {analyticsSourceMap.POS ?? 0} products</span></div>
-                <div className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2"><span>SAP B1</span><span>● {Math.round((analyticsSourceMap.POS ?? 0) * 1.4)} items</span></div>
-                <div className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2"><span>Zoho CRM</span><span>● {analyticsSourceMap.CRM ?? 0} contacts</span></div>
+                {analyticsGodViewSources.length === 0 && (
+                  <div className="p-2 bg-zinc-50 rounded-2xl text-zinc-400">No live feed data yet.</div>
+                )}
+                {analyticsGodViewSources.map((source) => (
+                  <div key={source.label} className="flex items-center justify-between bg-zinc-50 rounded-2xl p-2">
+                    <span>{source.label}</span>
+                    <span>● {source.value}</span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -5020,12 +5934,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Action Required</h3>
-                <div className="flex gap-2">
-                  <button className="px-3 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-bold">Stock Omo</button>
-                  <button className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-bold">Photo Now</button>
-                </div>
               </div>
               <div className="space-y-2 text-[10px] font-bold text-zinc-600">
+                {analyticsGodViewAlerts.length === 0 && (
+                  <div className="p-2 bg-zinc-50 rounded-2xl text-zinc-400">No actions required right now.</div>
+                )}
                 {analyticsGodViewAlerts.map(alert => (
                   <div key={alert} className="p-2 bg-zinc-50 rounded-2xl">{alert}</div>
                 ))}
@@ -5036,7 +5949,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Neighborhood Heatmap</h3>
-                <span className="text-[10px] font-bold text-zinc-400">Your rank #3 vs 127 dukas</span>
+                <span className="text-[10px] font-bold text-zinc-400">Live demand overview</span>
               </div>
               <div className="space-y-3">
                 {analyticsGodViewDemand.map(item => (
@@ -5052,14 +5965,28 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-zinc-900 text-white p-6 rounded-3xl shadow-xl">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-bold">Pro Unlocks</h3>
-                <span className="text-[10px] font-bold text-emerald-400">KSh2k →</span>
+                <span className="text-[10px] font-bold text-emerald-400">
+                  {isProActive
+                    ? `Current plan: ${proPlan?.name ?? (activePlanTier || 'Pro')}`
+                    : proPrice !== null
+                      ? `${proCurrency} ${proPrice} →`
+                      : 'Upgrade →'}
+                </span>
               </div>
               <div className="space-y-2 text-[10px] font-bold text-white/80">
-                <div>✓ Full buyer phone numbers</div>
-                <div>✓ Competitor stock levels</div>
-                <div>✓ API exports</div>
+                {proFeatures.length > 0 ? (
+                  proFeatures.slice(0, 3).map((feature, idx) => (
+                    <div key={`${feature}-${idx}`}>✓ {String(feature)}</div>
+                  ))
+                ) : (
+                  <div>✓ Unlock premium analytics and exports</div>
+                )}
               </div>
-              <div className="mt-3 text-[10px] text-white/70 font-bold">“127 buyers waiting…”</div>
+              <div className="mt-3 text-[10px] text-white/70 font-bold">
+                {liveBuyerTotalScans > 0
+                  ? `${liveBuyerTotalScans} buyer signals in the last 24h`
+                  : 'No buyer signals yet.'}
+              </div>
             </div>
 
             {/* Key Metrics Grid */}
@@ -5069,24 +5996,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <div className="p-2 bg-indigo-50 rounded-xl">
                     <TrendingUp className="w-5 h-5 text-indigo-600" />
                   </div>
-                  <div className="flex items-center gap-1 text-emerald-500 font-bold text-xs">
-                    <ArrowUpRight className="w-3 h-3" /> 12.5%
-                  </div>
                 </div>
                 <p className="text-[10px] text-zinc-400 font-black uppercase tracking-widest">Total Revenue</p>
-                <p className="text-2xl font-black text-zinc-900 mt-1">$12,450.00</p>
+                <p className="text-2xl font-black text-zinc-900 mt-1">
+                  {totalRevenue !== null ? formatCurrencyKES(totalRevenue) : '—'}
+                </p>
               </div>
               <div className="bg-white p-5 rounded-3xl border border-zinc-100 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-2 bg-emerald-50 rounded-xl">
                     <Users className="w-5 h-5 text-emerald-600" />
                   </div>
-                  <div className="flex items-center gap-1 text-emerald-500 font-bold text-xs">
-                    <ArrowUpRight className="w-3 h-3" /> 8.2%
-                  </div>
                 </div>
                 <p className="text-[10px] text-zinc-400 font-black uppercase tracking-widest">Customer Reach</p>
-                <p className="text-2xl font-black text-zinc-900 mt-1">45.2k</p>
+                <p className="text-2xl font-black text-zinc-900 mt-1">
+                  {funnelSessions !== null ? formatCompactNumber(funnelSessions) : '—'}
+                </p>
               </div>
             </div>
 
@@ -5095,27 +6020,35 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Business KPIs</h3>
-                  <p className="text-[10px] text-zinc-500">Estimated from current catalog and activity</p>
+                  <p className="text-[10px] text-zinc-500">All KPIs are backend sourced.</p>
                 </div>
-                <div className="px-2 py-1 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-500 uppercase">Estimated</div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: 'CAC', value: `KES ${Math.round(marketingCAC)}` },
-                  { label: 'ROAS', value: `${marketingROAS.toFixed(1)}x` },
-                  { label: 'LTV', value: `KES ${Math.round(marketingLTV)}` },
-                  { label: 'Gross Margin', value: `${grossMarginPct.toFixed(0)}%` },
-                  { label: 'Net Margin', value: `${netMarginPct.toFixed(0)}%` },
-                  { label: 'Return Rate', value: `${returnRate.toFixed(1)}%` },
-                  { label: 'Cart Abandon', value: `${cartAbandonRate.toFixed(0)}%` },
-                  { label: 'Items/Order', value: `${avgItemsPerOrder.toFixed(1)}` },
-                  { label: 'Promo Lift', value: `${promoLift}%` },
-                  { label: 'Repeat Interval', value: `${repeatPurchaseIntervalDays} days` },
-                  { label: 'On-time Rate', value: `${onTimeRate}%` },
-                  { label: 'CSAT', value: `${csat.toFixed(1)}/5` }
+                  { label: 'Gross Revenue', value: analyticsSummary?.gross_revenue !== undefined && analyticsSummary.gross_revenue !== '' ? `KES ${analyticsSummary.gross_revenue}` : '—', source: 'Analytics' },
+                  { label: 'Net Revenue', value: analyticsSummary?.net_revenue !== undefined && analyticsSummary.net_revenue !== '' ? `KES ${analyticsSummary.net_revenue}` : '—', source: 'Analytics' },
+                  { label: 'AOV', value: analyticsSummary?.aov !== undefined && analyticsSummary.aov !== '' ? `KES ${analyticsSummary.aov}` : '—', source: 'Analytics' },
+                  { label: 'Orders', value: totalOrders !== null ? `${totalOrders}` : '—', source: 'Orders' },
+                  { label: 'New Buyers', value: newCustomers !== null ? `${newCustomers}` : '—', source: 'Analytics' },
+                  { label: 'Conversion', value: analyticsSummary?.conversion_rate !== undefined ? `${Number(analyticsSummary.conversion_rate).toFixed(1)}%` : '—', source: 'Analytics' },
+                  { label: 'Repeat Rate', value: repeatRateD30 !== null ? `${repeatRateD30.toFixed(1)}%` : repeatRate !== null ? `${repeatRate}%` : '—', source: 'Analytics' },
+                  { label: 'Sessions', value: analyticsSummary?.sessions !== undefined ? `${analyticsSummary.sessions}` : '—', source: 'Analytics' },
+                  { label: 'CAC', value: marketingCAC !== null && Number.isFinite(marketingCAC) ? `KES ${Math.round(marketingCAC)}` : '—', source: 'Marketing' },
+                  { label: 'LTV', value: marketingLTV !== null && Number.isFinite(marketingLTV) ? `KES ${Math.round(marketingLTV)}` : '—', source: 'Marketing' },
+                  { label: 'ROAS', value: marketingROAS !== null && Number.isFinite(marketingROAS) ? `${marketingROAS.toFixed(1)}x` : '—', source: 'Marketing' },
+                  { label: 'Cart Abandon', value: cartAbandonRate !== null ? `${cartAbandonRate.toFixed(0)}%` : '—', source: 'Analytics' },
+                  { label: 'Items/Order', value: avgItemsPerOrder !== null && avgItemsPerOrder !== undefined ? `${avgItemsPerOrder.toFixed(1)}` : '—', source: 'Orders' },
+                  { label: 'Rating', value: csat && csatCount > 0 ? `${csat.toFixed(1)}/5` : '—', source: 'Ratings' }
                 ].map(metric => (
                   <div key={metric.label} className="p-3 bg-zinc-50 rounded-2xl">
-                    <p className="text-[10px] font-black uppercase text-zinc-400">{metric.label}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-black uppercase text-zinc-400">{metric.label}</p>
+                      {metric.source && (
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-zinc-200 text-zinc-600">
+                          {metric.source}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm font-black text-zinc-900 mt-1">{metric.value}</p>
                   </div>
                 ))}
@@ -5127,228 +6060,257 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-sm font-bold">Buyer QR Rewards</h3>
-                  <p className="text-[10px] text-zinc-500">Unlimited scans driving your stars</p>
+                  <p className="text-[10px] text-zinc-500">Live buyer signals from scans and searches</p>
                 </div>
-                <div className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black">+50⭐ unlocked</div>
+                <div className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black">Live signals</div>
               </div>
               <div className="grid grid-cols-3 gap-3 text-[10px] font-bold text-zinc-600">
                 <div className="p-3 bg-zinc-50 rounded-2xl">
-                  <p className="text-[9px] text-zinc-400 uppercase">Today scans</p>
-                  <p className="text-sm font-black text-zinc-900">127</p>
+                  <p className="text-[9px] text-zinc-400 uppercase">24h scans</p>
+                  <p className="text-sm font-black text-zinc-900">{Number.isFinite(liveBuyerTotalScans) ? liveBuyerTotalScans : '—'}</p>
                 </div>
                 <div className="p-3 bg-zinc-50 rounded-2xl">
-                  <p className="text-[9px] text-zinc-400 uppercase">Stars earned</p>
-                  <p className="text-sm font-black text-zinc-900">+50</p>
+                  <p className="text-[9px] text-zinc-400 uppercase">Hotspots</p>
+                  <p className="text-sm font-black text-zinc-900">{liveBuyerHotspots.length}</p>
                 </div>
                 <div className="p-3 bg-zinc-50 rounded-2xl">
-                  <p className="text-[9px] text-zinc-400 uppercase">Rank</p>
-                  <p className="text-sm font-black text-zinc-900">#3 Mombasa</p>
+                  <p className="text-[9px] text-zinc-400 uppercase">Top hotspot</p>
+                  <p className="text-sm font-black text-zinc-900">
+                    {liveBuyerTop && typeof liveBuyerTop.lat === 'number' && typeof liveBuyerTop.lng === 'number'
+                      ? `${liveBuyerTop.lat.toFixed(2)}, ${liveBuyerTop.lng.toFixed(2)}`
+                      : '—'}
+                  </p>
                 </div>
               </div>
               <div className="mt-4 h-40 rounded-2xl bg-zinc-100 flex items-center justify-center text-[10px] font-bold text-zinc-500">
-                Live buyer map: Kibera 42 scans, CBD 85 scans
+                {liveBuyerHotspots.length === 0
+                  ? 'No live buyer signals yet.'
+                  : `Top hotspots: ${liveBuyerHotspots
+                      .map(
+                        (item) =>
+                          `${item.lat?.toFixed(2) ?? '—'}, ${item.lng?.toFixed(2) ?? '—'} (${item.scan_count ?? item.scanCount ?? 0})`,
+                      )
+                      .join(' • ')}`}
               </div>
-              <div className="mt-3 text-[10px] text-zinc-500 font-bold">Daily nudge: “127 buyers scanned today! Photo fresh stock?”</div>
-            </div>
-
-            {/* Demand Alerts */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Demand Alerts</h3>
-                <span className="text-[10px] text-emerald-600 font-bold">Actionable</span>
-              </div>
-              <div className="space-y-3">
-                {analyticsTrendingProducts.map((item) => (
-                  <div key={item.name} className="p-3 bg-zinc-50 rounded-2xl flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-zinc-900">{item.name}</p>
-                      <p className="text-[10px] text-zinc-500">Demand: {item.demand} • Supplier: {item.supplier}</p>
-                    </div>
-                    <button className="px-3 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-bold">
-                      Feature
-                    </button>
-                  </div>
-                ))}
+              <div className="mt-3 text-[10px] text-zinc-500 font-bold">
+                {liveBuyerTotalScans > 0
+                  ? `Daily nudge: ${liveBuyerTotalScans} buyer signals in the last 24h. Refresh top SKUs.`
+                  : 'Daily nudge: No buyer signals yet. Promote or share your top items.'}
               </div>
             </div>
 
-            {/* Top Searched Products */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Top Searched Products</h3>
-                <span className="text-[10px] text-zinc-400 font-bold">Your area</span>
-              </div>
-              <div className="space-y-3">
-                {analyticsTopSearched.map((item) => (
-                  <div key={item.name} className="p-3 bg-zinc-50 rounded-2xl flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-zinc-900">{item.name}</p>
-                      <p className="text-[10px] text-zinc-500">{item.searches} searches • {item.trend}</p>
-                    </div>
-                    <button className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-bold">
-                      Add Stock
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Peak Hours */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Peak Hours Report</h3>
-                <span className="text-[10px] text-zinc-400 font-bold">Search intensity</span>
-              </div>
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={analyticsPeakHours}>
-                    <defs>
-                      <linearGradient id="peakFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
-                    <YAxis hide />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="searches" stroke="#6366f1" fill="url(#peakFill)" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Sales Velocity */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Sales Velocity Trends</h3>
-                <span className="text-[10px] text-emerald-600 font-bold">Target 40/day</span>
-              </div>
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={analyticsSalesVelocity}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis hide />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="velocity" stroke="#10b981" strokeWidth={2} />
-                    <Line type="monotone" dataKey="target" stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 4" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Competitor Price Benchmarks */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Competitor Price Benchmarks</h3>
-                <span className="text-[10px] text-zinc-400 font-bold">Market comparison</span>
-              </div>
-              <div className="space-y-3">
-                {analyticsCompetitorPricing.map((item) => (
-                  <div key={item.name} className="p-3 bg-zinc-50 rounded-2xl">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-bold text-zinc-900">{item.name}</p>
-                      <span className="text-[10px] font-bold text-zinc-500">Avg: ${item.avgPrice}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
-                      <span>Your: ${item.yourPrice}</span>
-                      <span>Min: ${item.competitorMin}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Sales Performance Chart */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Sales Performance</h3>
-                <select className="text-[10px] font-bold bg-zinc-50 border-none rounded-lg px-2 py-1">
-                  <option>Last 7 Days</option>
-                  <option>Last 30 Days</option>
-                </select>
-              </div>
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={analyticsSalesData}>
-                    <defs>
-                      <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                    <XAxis 
-                      dataKey="name" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fontSize: 10, fontWeight: 700, fill: '#a1a1aa' }}
-                    />
-                    <YAxis hide />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                      labelStyle={{ fontWeight: 800, color: '#18181b' }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="sales" 
-                      stroke="#4f46e5" 
-                      strokeWidth={3}
-                      fillOpacity={1} 
-                      fill="url(#colorSales)" 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Sales Velocity Trends */}
-            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Sales Velocity Trends</h3>
-                  <p className="text-[10px] text-zinc-400 mt-1">Units sold per day vs Target</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Demand Alerts */}
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold">Demand Alerts</h3>
+                  <span className="text-[10px] text-emerald-600 font-bold">Actionable</span>
                 </div>
-                <div className="p-2 bg-indigo-50 rounded-xl">
-                  <LineChartIcon className="w-5 h-5 text-indigo-600" />
+                <div className="space-y-3">
+                  {analyticsTopSearched.length === 0 && (
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                      No demand alerts yet.
+                    </div>
+                  )}
+                  {analyticsTopSearched.slice(0, 3).map((item) => (
+                    <div key={item.name} className="p-3 bg-zinc-50 rounded-2xl flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-zinc-900">{item.name}</p>
+                        <p className="text-[10px] text-zinc-500">{item.searches} searches • {item.trend || 'steady'}</p>
+                      </div>
+                      <button
+                        onClick={() => handleCreateCategorySpotlight(item.category)}
+                        className="px-3 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-bold"
+                      >
+                        Feature
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={analyticsSalesVelocity}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                    <XAxis 
-                      dataKey="name" 
-                      axisLine={false} 
-                      tickLine={false}
-                      tick={{ fontSize: 10, fontWeight: 700, fill: '#18181b' }}
-                    />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#a1a1aa' }} />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                    />
-                    <Legend iconType="circle" wrapperStyle={{ fontSize: 10, fontWeight: 700, paddingTop: 20 }} />
-                    <Line 
-                      type="monotone" 
-                      dataKey="velocity" 
-                      stroke="#4f46e5" 
-                      strokeWidth={3} 
-                      dot={{ r: 4, fill: '#4f46e5', strokeWidth: 2, stroke: '#fff' }}
-                      activeDot={{ r: 6 }}
-                      name="Current Velocity"
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="target" 
-                      stroke="#e2e8f0" 
-                      strokeWidth={2} 
-                      strokeDasharray="5 5"
-                      dot={false}
-                      name="Daily Target"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+
+              {/* Top Searched Products */}
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold">Top Searched Products</h3>
+                  <span className="text-[10px] text-zinc-400 font-bold">Your area</span>
+                </div>
+                <div className="space-y-3">
+                  {analyticsTopSearched.map((item) => (
+                    <div key={item.name} className="p-3 bg-zinc-50 rounded-2xl flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-zinc-900">{item.name}</p>
+                        <p className="text-[10px] text-zinc-500">{item.searches} searches • {item.trend}</p>
+                      </div>
+                      <button
+                        onClick={() => handleAddStockFromTrend(item)}
+                        className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-bold"
+                      >
+                        Add Stock
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Competitor Price Benchmarks */}
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold">Competitor Price Benchmarks</h3>
+                  <span className="text-[10px] text-zinc-400 font-bold">Market comparison</span>
+                </div>
+                <div className="space-y-3">
+                  {analyticsCompetitorPricing.length === 0 && (
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                      No market pricing data yet.
+                    </div>
+                  )}
+                  {analyticsCompetitorPricing.map((item) => (
+                    <div key={item.name} className="p-3 bg-zinc-50 rounded-2xl">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold text-zinc-900">{item.name}</p>
+                        <span className="text-[10px] font-bold text-zinc-500">Market median: KES {item.avgPrice}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-600">
+                        <span>Your: KES {item.yourPrice}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Sales Performance Chart */}
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Sales Performance</h3>
+                  <div className="flex items-center gap-2">
+                    {[7, 14, 30].map((days) => (
+                      <button
+                        key={days}
+                        onClick={() => setSalesSeriesDays(days)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold ${salesSeriesDays === days ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {analyticsSalesData.length === 0 ? (
+                  <div className="h-64 rounded-2xl bg-zinc-50 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                    No sales data yet.
+                  </div>
+                ) : (
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={analyticsSalesData}>
+                        <defs>
+                          <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                        <XAxis 
+                          dataKey="name" 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{ fontSize: 10, fontWeight: 700, fill: '#a1a1aa' }}
+                        />
+                        <YAxis hide />
+                        <Tooltip content={<SalesSeriesTooltip />} />
+                        <Area 
+                          type="monotone" 
+                          dataKey="sales" 
+                          stroke="#4f46e5" 
+                          strokeWidth={3}
+                          fillOpacity={1} 
+                          fill="url(#colorSales)" 
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {analyticsSalesData.length > 0 && (
+                  <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
+                    <span>Min KES {Number.isFinite(salesMinMax.min) ? Math.round(salesMinMax.min).toLocaleString() : '0'}</span>
+                    <span>Max KES {Number.isFinite(salesMinMax.max) ? Math.round(salesMinMax.max).toLocaleString() : '0'}</span>
+                  </div>
+                )}
+                {salesSeriesLoading && (
+                  <div className="mt-2 text-[10px] text-zinc-400 font-bold">Updating sales performance…</div>
+                )}
+              </div>
+
+              {/* Sales Velocity Trends */}
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Sales Velocity Trends</h3>
+                    <p className="text-[10px] text-zinc-400 mt-1">Units sold per day vs Target</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {[7, 14, 30].map((days) => (
+                      <button
+                        key={days}
+                        onClick={() => setSalesVelocityDays(days)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold ${salesVelocityDays === days ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {analyticsSalesVelocity.length === 0 ? (
+                  <div className="h-64 rounded-2xl bg-zinc-50 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                    No velocity data yet.
+                  </div>
+                ) : (
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={analyticsSalesVelocity}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                        <XAxis 
+                          dataKey="name" 
+                          axisLine={false} 
+                          tickLine={false}
+                          tick={{ fontSize: 10, fontWeight: 700, fill: '#18181b' }}
+                        />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#a1a1aa' }} />
+                        <Tooltip content={<SalesSeriesTooltip />} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: 10, fontWeight: 700, paddingTop: 20 }} />
+                        <Line 
+                          type="monotone" 
+                          dataKey="velocity" 
+                          stroke="#4f46e5" 
+                          strokeWidth={3} 
+                          dot={{ r: 4, fill: '#4f46e5', strokeWidth: 2, stroke: '#fff' }}
+                          activeDot={{ r: 6 }}
+                          name="Current Velocity"
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="target" 
+                          stroke="#e2e8f0" 
+                          strokeWidth={2} 
+                          strokeDasharray="5 5"
+                          dot={false}
+                          name="Daily Target"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {analyticsSalesVelocity.length > 0 && (
+                  <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
+                    <span>Min {Number.isFinite(salesVelocityMinMax.min) ? salesVelocityMinMax.min : 0}</span>
+                    <span>Max {Number.isFinite(salesVelocityMinMax.max) ? salesVelocityMinMax.max : 0}</span>
+                  </div>
+                )}
+                {salesVelocityLoading && (
+                  <div className="mt-2 text-[10px] text-zinc-400 font-bold">Updating velocity…</div>
+                )}
               </div>
             </div>
 
@@ -5358,12 +6320,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400 mb-4">Inventory Management</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Stockout Rate', value: `${stockoutRate.toFixed(1)}%` },
-                    { label: 'Sell-Through', value: `${sellThroughRate.toFixed(1)}%` },
-                    { label: 'Inventory Turns', value: `${inventoryTurns.toFixed(1)}x` },
-                    { label: 'GMROI', value: `${gmroi.toFixed(2)}x` },
-                    { label: 'Price Index', value: `${priceCompetitiveness.toFixed(0)}%` },
-                    { label: 'Lost Sales', value: `KES ${lostSalesEstimate}` }
+                    { label: 'Stockout Risk', value: `${stockoutRisk.toFixed(0)}%` },
+                    { label: 'Days Cover', value: analyticsInventory?.days_cover ? `${analyticsInventory.days_cover.toFixed(1)} days` : '—' },
+                    { label: 'Reorder Point', value: analyticsInventory?.reorder_point ? `${analyticsInventory.reorder_point}` : '—' }
                   ].map(metric => (
                     <div key={metric.label} className="p-3 bg-zinc-50 rounded-2xl">
                       <p className="text-[10px] font-black uppercase text-zinc-400">{metric.label}</p>
@@ -5380,40 +6339,264 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400 mb-4">Data Management</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Coverage', value: `${dataCoverageRate.toFixed(0)}%` },
-                    { label: 'Freshness', value: `${Math.round(dataFreshnessDays)} days` },
-                    { label: 'Verification', value: `${verificationRate.toFixed(0)}%` },
-                    { label: 'Anomaly Rate', value: `${anomalyRate.toFixed(1)}%` }
+                    { label: 'Coverage', value: dataCoverageRate !== null ? `${dataCoverageRate.toFixed(0)}%` : '—', tooltip: 'Share of required analytics inputs present for this seller.' },
+                    { label: 'Freshness', value: dataFreshnessDays !== null ? `${Math.round(dataFreshnessDays)} days` : '—', tooltip: 'Average age of key data feeds used for analytics.' },
+                    { label: 'Verification', value: verificationRate !== null ? `${verificationRate.toFixed(0)}%` : '—', tooltip: 'Portion of data that has been verified via trusted sources.' },
+                    { label: 'Anomaly Rate', value: anomalyRate !== null ? `${anomalyRate.toFixed(1)}%` : '—', tooltip: 'Percentage of events flagged as anomalies in the last 30 days.' }
                   ].map(metric => (
                     <div key={metric.label} className="p-3 bg-zinc-50 rounded-2xl">
-                      <p className="text-[10px] font-black uppercase text-zinc-400">{metric.label}</p>
+                      <p className="text-[10px] font-black uppercase text-zinc-400" title={metric.tooltip}>{metric.label}</p>
                       <p className="text-sm font-black text-zinc-900 mt-1">{metric.value}</p>
                     </div>
                   ))}
                 </div>
                 <div className="mt-4 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
-                  <span>Receipt match rate</span>
-                  <span>{Math.min(98, verificationRate + 2).toFixed(0)}%</span>
+                  <span title="Percent of listings with at least one verified media asset.">Media coverage</span>
+                  <span>{dataMediaCoverage !== null ? dataMediaCoverage.toFixed(0) : '—'}%</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
-                  <span>Geo completeness</span>
-                  <span>{dataCoverageRate.toFixed(0)}%</span>
+                  <span title="Percent of listings mapped to a valid category.">Category coverage</span>
+                  <span>{dataCategoryCoverage !== null ? dataCategoryCoverage.toFixed(0) : '—'}%</span>
                 </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Inventory Trend</h3>
+                    <p className="text-[10px] text-zinc-500">Change: {inventoryTrendLabel}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {[7, 14, 30].map((days) => (
+                      <button
+                        key={days}
+                        onClick={() => setInventorySeriesDays(days)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold ${inventorySeriesDays === days ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {analyticsInventoryTrend.length === 0 ? (
+                  <div className="h-40 rounded-2xl bg-zinc-50 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                    No inventory trend data yet.
+                  </div>
+                ) : (
+                  <div className="h-40">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={analyticsInventoryTrend}>
+                        <defs>
+                          <linearGradient id="inventoryFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
+                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                        <YAxis hide />
+                        <Tooltip labelFormatter={(_, payload) => formatDateLabel(payload?.[0]?.payload?.date)} />
+                        <Area type="monotone" dataKey="stock" stroke="#16a34a" fill="url(#inventoryFill)" strokeWidth={2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {analyticsInventoryTrend.length > 0 && (
+                  <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
+                    <span>Min {Number.isFinite(inventoryMinMax.min) ? inventoryMinMax.min : 0}</span>
+                    <span>Max {Number.isFinite(inventoryMinMax.max) ? inventoryMinMax.max : 0}</span>
+                  </div>
+                )}
+                {inventorySeriesLoading && (
+                  <div className="mt-2 text-[10px] text-zinc-400 font-bold">Updating inventory trend…</div>
+                )}
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Conversion Trend</h3>
+                    <p className="text-[10px] text-zinc-500">Change: {conversionTrendLabel}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {[7, 14, 30].map((days) => (
+                      <button
+                        key={days}
+                        onClick={() => setConversionSeriesDays(days)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold ${conversionSeriesDays === days ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {analyticsConversionTrend.length === 0 ? (
+                  <div className="h-40 rounded-2xl bg-zinc-50 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                    No conversion data yet.
+                  </div>
+                ) : (
+                  <div className="h-40">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={analyticsConversionTrend}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                        <YAxis hide />
+                        <Tooltip
+                          formatter={(value) => `${Number(value).toFixed(1)}%`}
+                          labelFormatter={(_, payload) => formatDateLabel(payload?.[0]?.payload?.date)}
+                        />
+                        <Line type="monotone" dataKey="rate" stroke="#f97316" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {analyticsConversionTrend.length > 0 && (
+                  <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
+                    <span>Min {Number.isFinite(conversionMinMax.min) ? conversionMinMax.min.toFixed(1) : '0.0'}%</span>
+                    <span>Max {Number.isFinite(conversionMinMax.max) ? conversionMinMax.max.toFixed(1) : '0.0'}%</span>
+                  </div>
+                )}
+                {conversionSeriesLoading && (
+                  <div className="mt-2 text-[10px] text-zinc-400 font-bold">Updating conversion trend…</div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Alert Preferences</h3>
+                  <p className="text-[10px] text-zinc-500">Opt-in alerts based on your live analytics.</p>
+                </div>
+                <button
+                  onClick={handleSaveSellerAlerts}
+                  disabled={sellerAlertsSaving}
+                  className="px-3 py-2 rounded-xl text-[10px] font-bold bg-zinc-900 text-white disabled:opacity-60"
+                >
+                  {sellerAlertsSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              {sellerAlertsStatus && (
+                <div className="mb-3 text-[10px] font-bold text-zinc-500">{sellerAlertsStatus}</div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {sellerAlertsDraft.map((def) => {
+                  const active = def.active ?? false;
+                  const threshold = typeof def.threshold === 'number' ? def.threshold : 0;
+                  const label = def.label || def.type || 'Alert';
+                  const unit = def.unit || '';
+                  return (
+                    <div key={def.type || label} className="p-3 bg-zinc-50 rounded-2xl">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold text-zinc-900">{label}</p>
+                        <button
+                          onClick={() => def.type && handleToggleSellerAlert(def.type)}
+                          className={`px-2 py-1 rounded-full text-[10px] font-bold ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-200 text-zinc-600'}`}
+                        >
+                          {active ? 'On' : 'Off'}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold">
+                        <span>Threshold</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            className="w-20 px-2 py-1 rounded-lg bg-white border border-zinc-200 text-[10px] font-bold text-zinc-700"
+                            value={threshold}
+                            min={0}
+                            step={unit === 'stars' ? 0.1 : 1}
+                            onChange={(e) => def.type && handleSellerAlertThreshold(def.type, Number(e.target.value || 0))}
+                          />
+                          <span>{unit}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {sellerAlertsDraft.length === 0 && (
+                  <div className="col-span-2 p-3 bg-zinc-50 rounded-2xl text-center text-[10px] text-zinc-500 font-bold">
+                    No alert rules configured yet.
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Peak Hours Report</h3>
-                <span className="text-[10px] text-zinc-400 font-bold">Updated today</span>
+                <div className="flex items-center gap-2">
+                  {[7, 14, 30].map((days) => (
+                    <button
+                      key={days}
+                      onClick={() => setPeakHoursDays(days)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold ${peakHoursDays === days ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                    >
+                      {days}d
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                {['Mon-Wed 5-7pm', 'Thu-Fri 4-8pm', 'Sat 10am-2pm'].map(slot => (
+                <div className="flex items-center gap-2">
+                  {[7, 14, 30].map((days) => (
+                    <button
+                      key={days}
+                      onClick={() => setPeakHoursDays(days)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold ${peakHoursDays === days ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                    >
+                      {days}d
+                    </button>
+                  ))}
+                </div>
+                {peakHourSlots.length === 0 && (
+                  <div className="px-3 py-2 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-600">
+                    No peak hour data yet.
+                  </div>
+                )}
+                {peakHourSlots.map((slot) => (
                   <div key={slot} className="px-3 py-2 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-600">
                     {slot}
                   </div>
                 ))}
               </div>
+              {analyticsPeakHours.length === 0 ? (
+                <div className="mt-4 h-48 rounded-2xl bg-zinc-50 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                  No peak hour data yet.
+                </div>
+              ) : (
+                <div className="mt-4 h-48 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={analyticsPeakHours}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                      <XAxis
+                        dataKey="hour"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 8, fontWeight: 700, fill: '#18181b' }}
+                      />
+                      <YAxis hide />
+                      <Tooltip />
+                      <Bar dataKey="searches" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {analyticsPeakHours.length > 0 && (
+                <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-500 font-bold">
+                  <span>Min {Number.isFinite(peakMinMax.min) ? peakMinMax.min : 0}</span>
+                  <span>Max {Number.isFinite(peakMinMax.max) ? peakMinMax.max : 0}</span>
+                </div>
+              )}
+              {peakHoursLoading && (
+                <div className="mt-2 text-[10px] text-zinc-400 font-bold">Updating peak hours…</div>
+              )}
+              <p className="mt-4 text-[10px] text-zinc-500 font-medium italic">
+                {peakHourSlots.length > 0
+                  ? `"Most searches happen around ${peakHourSlots[0]}. Consider staffing for that window."`
+                  : '"Peak hour insights will appear once search data is available."'}
+              </p>
             </div>
 
             {/* Channel Mix */}
@@ -5422,73 +6605,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Channel Mix</h3>
                 <span className="text-[10px] text-zinc-400 font-bold">Traffic sources</span>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {channelMix.map(c => (
-                  <div key={c.name} className="p-3 bg-zinc-50 rounded-2xl text-center">
-                    <p className="text-xs font-black text-zinc-900">{c.value}%</p>
-                    <p className="text-[10px] text-zinc-400 font-bold uppercase">{c.name}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Top Searched & Peak Hours */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Top Searched (Your Area)</h3>
-                    <p className="text-[10px] text-zinc-400 mt-1">Opportunity for inventory expansion</p>
-                  </div>
-                  <div className="p-2 bg-zinc-50 rounded-xl">
-                    <SearchIcon className="w-5 h-5 text-zinc-400" />
-                  </div>
+              {channelMix.length === 0 ? (
+                <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                  No channel mix data yet.
                 </div>
-                <div className="space-y-4">
-                  {analyticsTopSearched.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 bg-zinc-50 rounded-2xl">
-                      <div>
-                        <p className="text-xs font-bold text-zinc-900">{item.name}</p>
-                        <p className="text-[10px] text-zinc-400">{item.searches} searches this week</p>
-                      </div>
-                      <span className="text-[10px] font-black text-emerald-500">{item.trend}</span>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  {channelMix.map(c => (
+                    <div key={c.name} className="p-3 bg-zinc-50 rounded-2xl text-center">
+                      <p className="text-xs font-black text-zinc-900">{c.value}%</p>
+                      <p className="text-[10px] text-zinc-400 font-bold uppercase">{c.name}</p>
                     </div>
                   ))}
                 </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Peak Hours Report</h3>
-                    <p className="text-[10px] text-zinc-400 mt-1">Optimal operating times</p>
-                  </div>
-                  <div className="p-2 bg-zinc-50 rounded-xl">
-                    <Clock className="w-5 h-5 text-zinc-400" />
-                  </div>
-                </div>
-                <div className="h-48 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsPeakHours}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                      <XAxis 
-                        dataKey="hour" 
-                        axisLine={false} 
-                        tickLine={false}
-                        tick={{ fontSize: 8, fontWeight: 700, fill: '#18181b' }}
-                      />
-                      <YAxis hide />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                      />
-                      <Bar dataKey="searches" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <p className="text-[10px] text-zinc-500 mt-4 font-medium italic">
-                  "Most searches in your area happen 5-7pm. Consider staying open later."
-                </p>
-              </div>
+              )}
             </div>
 
             {/* Market Demand vs Seller Share */}
@@ -5503,28 +6633,34 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     <BarChart3 className="w-5 h-5 text-zinc-400" />
                   </div>
                 </div>
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsCategoryDemand} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f4f4f5" />
-                      <XAxis type="number" hide />
-                      <YAxis 
-                        dataKey="category" 
-                        type="category" 
-                        axisLine={false} 
-                        tickLine={false}
-                        tick={{ fontSize: 10, fontWeight: 700, fill: '#18181b' }}
-                        width={80}
-                      />
-                      <Tooltip 
-                        cursor={{ fill: '#f8fafc' }}
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                      />
-                      <Bar dataKey="demand" fill="#e2e8f0" radius={[0, 4, 4, 0]} barSize={12} name="Market Avg" />
-                      <Bar dataKey="sellerShare" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={12} name="Your Share" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                {analyticsCategoryDemand.length === 0 ? (
+                  <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                    No market demand data yet.
+                  </div>
+                ) : (
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={analyticsCategoryDemand} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f4f4f5" />
+                        <XAxis type="number" hide />
+                        <YAxis 
+                          dataKey="category" 
+                          type="category" 
+                          axisLine={false} 
+                          tickLine={false}
+                          tick={{ fontSize: 10, fontWeight: 700, fill: '#18181b' }}
+                          width={80}
+                        />
+                        <Tooltip 
+                          cursor={{ fill: '#f8fafc' }}
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Bar dataKey="demand" fill="#e2e8f0" radius={[0, 4, 4, 0]} barSize={12} name="Market Avg" />
+                        <Bar dataKey="sellerShare" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={12} name="Your Share" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
@@ -5537,39 +6673,45 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     <Users className="w-5 h-5 text-zinc-400" />
                   </div>
                 </div>
-                <div className="flex items-center gap-8">
-                  <div className="w-40 h-40">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={analyticsDemographics}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={40}
-                          outerRadius={60}
-                          paddingAngle={5}
-                          dataKey="value"
-                        >
-                          {analyticsDemographics.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
+                {analyticsDemographics.length === 0 ? (
+                  <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                    No demographic data yet.
                   </div>
-                  <div className="flex-1 space-y-2">
-                    {analyticsDemographics.map((item) => (
-                      <div key={item.name} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                          <span className="text-[10px] font-bold text-zinc-600">{item.name}</span>
+                ) : (
+                  <div className="flex items-center gap-8">
+                    <div className="w-40 h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={analyticsDemographics}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={40}
+                            outerRadius={60}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {analyticsDemographics.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      {analyticsDemographics.map((item) => (
+                        <div key={item.name} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                            <span className="text-[10px] font-bold text-zinc-600">{item.name}</span>
+                          </div>
+                          <span className="text-[10px] font-black">{item.value}%</span>
                         </div>
-                        <span className="text-[10px] font-black">{item.value}%</span>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
 
@@ -5630,8 +6772,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                       <p className="text-[10px] text-zinc-500">Demand: <span className="text-emerald-600 font-black">{item.demand}</span></p>
                       <p className="text-[10px] text-zinc-400">Supplier: {item.supplier}</p>
                     </div>
-                    <button className="px-3 py-1.5 bg-zinc-900 text-white rounded-lg text-[10px] font-bold">
-                      Connect
+                    <button
+                      onClick={() => setActiveTab('suppliers')}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-bold ${item.supplierId ? 'bg-zinc-900 text-white' : 'bg-zinc-200 text-zinc-500'}`}
+                      disabled={!item.supplierId}
+                    >
+                      {item.supplierId ? 'Connect' : 'Browse Suppliers'}
                     </button>
                   </div>
                 ))}
@@ -5742,68 +6888,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-zinc-50 rounded-2xl">
                     <p className="text-[10px] text-zinc-400 font-bold uppercase">Product Views</p>
-                    <p className="text-2xl font-black text-zinc-900">{dailyViews}</p>
-                    <p className="text-[10px] text-emerald-500 font-bold">+{viewsDeltaPct}% from yesterday</p>
+                    <p className="text-2xl font-black text-zinc-900">{dailyViews ?? '—'}</p>
+                    <p className="text-[10px] text-zinc-500 font-bold">Last 24h views</p>
                   </div>
                   <div className="p-4 bg-zinc-50 rounded-2xl">
                     <p className="text-[10px] text-zinc-400 font-bold uppercase">Inquiries</p>
-                    <p className="text-2xl font-black text-zinc-900">{dailyInquiries}</p>
-                    <p className="text-[10px] text-emerald-500 font-bold">+{inquiriesDeltaPct}% from yesterday</p>
+                    <p className="text-2xl font-black text-zinc-900">{dailyInquiries ?? '—'}</p>
+                    <p className="text-[10px] text-zinc-500 font-bold">Last 24h inquiries</p>
                   </div>
                 </div>
                 <p className="text-[10px] text-zinc-500 mt-4 text-center font-medium">
-                  "Today: {dailyViews} people saw your products. {dailyInquiries} clicked to message you."
+                  Today: {dailyViews ?? '—'} people saw your products. {dailyInquiries ?? '—'} clicked to message you.
                 </p>
-              </div>
-
-              {/* WhatsApp Daily Summary Simulation */}
-              <div 
-                onClick={() => {
-                  handleWhatsAppSummaryRequest();
-                  setShowWhatsAppModal(true);
-                }}
-                className="bg-emerald-50 border border-emerald-100 p-6 rounded-3xl cursor-pointer hover:bg-emerald-100 transition-colors"
-              >
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-emerald-500 rounded-xl">
-                    <MessageSquare className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-emerald-900">WhatsApp Daily Summary</h3>
-                    <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Automated Report</p>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="bg-white/50 p-3 rounded-xl text-[11px] text-emerald-800 italic">
-                    "Hi {seller.name}! Yesterday you had {dailyViews} views and {funnelSales} sales. Click to view full report."
-                  </div>
-                  <button className="w-full py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-emerald-500/20">
-                    View Full Summary
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-bold">WhatsApp Business Tools</h3>
-                  <div className="p-2 bg-emerald-50 rounded-xl">
-                    <MessageSquare className="w-5 h-5 text-emerald-600" />
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="p-4 bg-zinc-50 rounded-2xl">
-                    <p className="text-xs font-bold mb-1">Inventory via WhatsApp</p>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      Send "Add new stock" + Photo + Price to our number to list products instantly.
-                    </p>
-                  </div>
-                  <div className="p-4 bg-zinc-50 rounded-2xl">
-                    <p className="text-xs font-bold mb-1 text-emerald-700">WhatsApp Onboarding</p>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      Invite fellow sellers! They can send "Hi" to start their shop setup without the app.
-                    </p>
-                  </div>
-                </div>
               </div>
 
               <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
@@ -5857,10 +6953,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             {/* Marketing KPI Snapshot */}
             <div className="grid grid-cols-2 gap-4">
               {[
-                { label: 'Revenue (30d)', value: `KES ${marketingRevenue30d.toFixed(0)}`, hint: 'Completed orders' },
+                { label: 'Revenue', value: marketingRevenue30d !== null ? `KES ${marketingRevenue30d.toFixed(0)}` : '—', hint: 'Completed orders' },
                 { label: 'Orders (30d)', value: `${marketingOrders30d}`, hint: 'All channels' },
                 { label: 'New Customers', value: `${marketingNewCustomers}`, hint: 'First-time buyers' },
-                { label: 'ROAS', value: `${marketingROAS.toFixed(2)}x`, hint: 'Revenue / spend' }
+                { label: 'ROAS', value: marketingROAS !== null ? `${marketingROAS.toFixed(2)}x` : '—', hint: 'Revenue / spend' }
               ].map((stat) => (
                 <div key={stat.label} className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{stat.label}</p>
@@ -5873,9 +6969,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             {/* Advanced KPIs */}
             <div className="grid grid-cols-3 gap-3">
               {[
-                { label: 'CAC', value: `KES ${Math.round(marketingCAC)}`, hint: 'Cost per customer' },
-                { label: 'ROAS', value: `${marketingROAS.toFixed(1)}x`, hint: 'Revenue / spend' },
-                { label: 'LTV', value: `KES ${Math.round(marketingLTV)}`, hint: 'Value per customer' }
+                { label: 'CAC', value: marketingCAC !== null ? `KES ${Math.round(marketingCAC)}` : '—', hint: 'Cost per customer' },
+                { label: 'ROAS', value: marketingROAS !== null ? `${marketingROAS.toFixed(1)}x` : '—', hint: 'Revenue / spend' },
+                { label: 'LTV', value: marketingLTV !== null ? `KES ${Math.round(marketingLTV)}` : '—', hint: 'Value per customer' }
               ].map((stat) => (
                 <div key={stat.label} className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{stat.label}</p>
@@ -5889,7 +6985,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Order Funnel</h3>
-                <span className="text-[10px] font-bold text-indigo-600">Last 30 days</span>
+                <span className="text-[10px] font-bold text-indigo-600">Latest</span>
               </div>
               <div className="grid grid-cols-4 gap-3 text-center">
                 {[
@@ -5899,7 +6995,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   { label: 'Returns', value: marketingReturns30d }
                 ].map((step) => (
                   <div key={step.label} className="bg-zinc-50 rounded-2xl p-3">
-                    <p className="text-xs font-black text-zinc-900">{step.value.toLocaleString()}</p>
+                    <p className="text-xs font-black text-zinc-900">
+                      {step.value !== null && step.value !== undefined ? Number(step.value).toLocaleString() : '—'}
+                    </p>
                     <p className="text-[10px] text-zinc-400 font-bold uppercase">{step.label}</p>
                   </div>
                 ))}
@@ -5917,6 +7015,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 {!mapboxToken && (
                   <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
                     Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                  </div>
+                )}
+                {mapboxToken && demandHeatmap.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-zinc-600 bg-white/80">
+                    No demand hotspots yet.
                   </div>
                 )}
                 <div className="absolute top-3 right-3 flex flex-col gap-2">
@@ -5947,22 +7050,36 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
                 <span className="px-2 py-1 bg-zinc-100 rounded-lg text-[10px] font-bold text-zinc-500 uppercase">Inactive</span>
               </div>
-              <p className="text-xs text-zinc-500 mb-4">Boost your visibility for 7 days. Reach up to 5x more customers.</p>
+                <p className="text-xs text-zinc-500 mb-4">
+                  {featuredListingConfig?.duration_days
+                    ? `Boost your visibility for ${featuredListingConfig.duration_days} days with featured placement.`
+                    : 'Boost your visibility with featured placement.'}
+                </p>
               
-              {myProducts.length >= 50 ? (
-                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-emerald-600" />
-                  <p className="text-[10px] text-emerald-700 font-bold">Scale Discount Active! 20% off featured rates for 50+ products.</p>
-                </div>
+              {featuredListingDiscountThreshold && featuredListingDiscountPct ? (
+                myProducts.length >= featuredListingDiscountThreshold ? (
+                  <div className="mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-emerald-600" />
+                    <p className="text-[10px] text-emerald-700 font-bold">
+                      Scale Discount Active! {featuredListingDiscountPct}% off featured rates for {featuredListingDiscountThreshold}+ products.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-indigo-600 font-bold mb-4">
+                    Tip: List {featuredListingDiscountThreshold}+ products to unlock a {featuredListingDiscountPct}% discount on featured rates.
+                  </p>
+                )
               ) : (
-                <p className="text-[10px] text-indigo-600 font-bold mb-4">Tip: List 50+ products to unlock a 20% discount on featured rates!</p>
+                <p className="text-[10px] text-indigo-600 font-bold mb-4">Tip: List more products to unlock featured discounts.</p>
               )}
 
               <button
                 onClick={handleActivateFeatured}
                 className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-500/20"
               >
-                Activate for KES 500/week
+                {featuredListingPrice
+                  ? `Activate for ${featuredListingCurrency} ${featuredListingPrice}/week`
+                  : 'Activate Featured Listing'}
               </button>
             </div>
 
@@ -6025,7 +7142,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   </p>
                 </div>
               </div>
-              <p className="text-xs text-zinc-400 mb-6 italic">"Just got fresh stock of X. Notify your followers?"</p>
+              {broadcastMessage.trim() ? (
+                <p className="text-xs text-zinc-400 mb-6 italic">"{broadcastMessage.trim()}"</p>
+              ) : (
+                <p className="text-xs text-zinc-400 mb-6 italic">Pick a product or create a stock alert to prefill the message.</p>
+              )}
               <div className="flex gap-2">
                 <select
                   className="flex-1 bg-zinc-800 border-none rounded-xl text-xs font-bold px-4 py-3"
@@ -6033,8 +7154,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   onChange={(e) => setStockAlertProductId(e.target.value)}
                 >
                   <option value="">Select Product...</option>
-                  {myProducts.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                  {myProducts.filter(p => p.productId).map(p => (
+                    <option key={p.id} value={p.productId}>{p.name}</option>
                   ))}
                 </select>
                 <button
@@ -6106,11 +7227,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     : 'Boost a top category to appear in weekly spotlights.'}
                 </p>
                 <div className="flex items-center gap-2">
-                  <div className="px-3 py-1 bg-white/20 rounded-full text-[10px] font-bold">Current Rank: #3</div>
+                  <div className="px-3 py-1 bg-white/20 rounded-full text-[10px] font-bold">
+                    Rank Score: {rankScore !== undefined ? rankScore.toFixed(2) : '—'}
+                  </div>
                   <div className="px-3 py-1 bg-white/20 rounded-full text-[10px] font-bold">Rating: {seller.rating}</div>
                 </div>
                 <button
-                  onClick={handleCreateCategorySpotlight}
+                  onClick={() => handleCreateCategorySpotlight()}
                   className="mt-4 px-4 py-2 bg-white text-amber-600 rounded-xl text-[10px] font-black shadow"
                 >
                   Request Spotlight
@@ -6208,7 +7331,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex-1">
                 <h3 className="text-sm font-bold mb-1">QR Code Storefront</h3>
                 <p className="text-[10px] text-zinc-400 mb-4">Share your shop's unique code with customers on WhatsApp.</p>
-                <button className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-lg text-xs font-bold hover:bg-white/20 transition-colors">
+                <button
+                  onClick={handleRefreshShareLink}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-lg text-xs font-bold hover:bg-white/20 transition-colors"
+                >
                   <Download className="w-4 h-4" /> Download QR
                 </button>
               </div>
@@ -6228,15 +7354,36 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <Upload className="w-4 h-4 text-emerald-600" />
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Receipt Submission Rewards</h3>
               </div>
-              <p className="text-[10px] text-zinc-500 font-bold">Daily receipts earn KES 20-50. Streak bonuses at 7 & 30 days.</p>
+              <p className="text-[10px] text-zinc-500 font-bold">
+                {receiptRewardsHint} {receiptStreakHint}
+              </p>
+              {sellerRewardsError && (
+                <div className="mt-3 p-3 bg-rose-50 rounded-2xl text-[10px] font-bold text-rose-700">
+                  {sellerRewardsError}
+                </div>
+              )}
               <div className="mt-3 p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
-                6-day streak • Bonus tomorrow: KES 100
+                {receiptStreakCount > 0
+                  ? `${receiptStreakCount}-day streak`
+                  : 'Start your first receipt streak today.'}
+                {receiptRewardsConfig?.streak_bonus && receiptRewardsConfig?.streak_days && receiptStreakCount > 0
+                  ? ` • Next bonus at day ${receiptRewardsConfig.streak_days}`
+                  : ''}
               </div>
-                <div className="mt-3 p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
-                SC Wallet balance: {sellerBalance} SC
+              <div className="mt-3 p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
+                Wallet balance:{' '}
+                {sellerRewardsBalance?.currency ? `${sellerRewardsBalance.currency} ` : ''}
+                {Number(sellerRewardsBalance?.balance ?? 0).toFixed(0)}
               </div>
-              <button onClick={applyReceiptSimulation} className="mt-3 w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black">
-                Upload Receipts Now
+              {receiptUploadStatus && (
+                <div className="mt-3 text-[10px] font-bold text-emerald-600">{receiptUploadStatus}</div>
+              )}
+              <button
+                onClick={() => receiptUploadInputRef.current?.click()}
+                disabled={receiptUploading}
+                className="mt-3 w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black disabled:opacity-60"
+              >
+                {receiptUploading ? 'Uploading…' : 'Upload Receipt'}
               </button>
             </div>
 
@@ -6245,12 +7392,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <Edit3 className="w-4 h-4 text-indigo-600" />
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Data Sharing Rewards</h3>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-zinc-600">
-                <div className="p-3 bg-zinc-50 rounded-2xl">Price update: KES 10</div>
-                <div className="p-3 bg-zinc-50 rounded-2xl">Stock update: KES 5</div>
-                <div className="p-3 bg-zinc-50 rounded-2xl">Photo upload: KES 5</div>
-                <div className="p-3 bg-zinc-50 rounded-2xl">Complete profile: KES 100</div>
-              </div>
+              {dataSharingRewards ? (
+                <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-zinc-600">
+                  <div className="p-3 bg-zinc-50 rounded-2xl">
+                    Price update: {dataSharingRewards.currency ? `${dataSharingRewards.currency} ` : ''}{dataSharingRewards.price_update ?? 0}
+                  </div>
+                  <div className="p-3 bg-zinc-50 rounded-2xl">
+                    Stock update: {dataSharingRewards.currency ? `${dataSharingRewards.currency} ` : ''}{dataSharingRewards.stock_update ?? 0}
+                  </div>
+                  <div className="p-3 bg-zinc-50 rounded-2xl">
+                    Photo upload: {dataSharingRewards.currency ? `${dataSharingRewards.currency} ` : ''}{dataSharingRewards.photo_upload ?? 0}
+                  </div>
+                  <div className="p-3 bg-zinc-50 rounded-2xl">
+                    Complete profile: {dataSharingRewards.currency ? `${dataSharingRewards.currency} ` : ''}{dataSharingRewards.complete_profile ?? 0}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                  Rewards not configured yet.
+                </div>
+              )}
               <button onClick={applyBulkUpdate} className="mt-3 w-full py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
                 Update Prices + Stock
               </button>
@@ -6260,27 +7421,31 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-bold">Payout History</h3>
                 <button
-                  onClick={() => {
-                    onSellerBalanceChange(0);
-                    onSellerPayoutsChange([]);
-                  }}
+                  onClick={loadSellerRewards}
                   className="text-[10px] font-bold text-zinc-400"
+                  disabled={sellerRewardsLoading}
                 >
-                  Clear
+                  {sellerRewardsLoading ? 'Refreshing…' : 'Refresh'}
                 </button>
               </div>
               <div className="space-y-2">
-                {sellerPayouts.length === 0 && (
+                {sellerRewardsLedger.length === 0 && (
                   <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
                     No payouts yet.
                   </div>
                 )}
-                {sellerPayouts.map(p => (
-                  <div key={p.id} className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600 flex items-center justify-between">
-                    <span>{p.reason}</span>
-                    <span className="text-emerald-600">+KES {p.amount}</span>
-                  </div>
-                ))}
+                {sellerRewardsLedger.map(entry => {
+                  const amount = Number(entry.amount ?? 0);
+                  const label = entry.reason || entry.type || 'Reward';
+                  return (
+                    <div key={entry.id} className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600 flex items-center justify-between">
+                      <span>{label}</span>
+                      <span className="text-emerald-600">
+                        {sellerRewardsBalance?.currency ? `${sellerRewardsBalance.currency} ` : ''}{amount.toFixed(0)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -6289,11 +7454,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <Users className="w-5 h-5 text-indigo-600" />
                 <div>
                   <h3 className="text-sm font-bold">Referral Rewards</h3>
-                  <p className="text-[10px] text-zinc-400">KES 200 per shop • KES 500 per supplier</p>
+                  <p className="text-[10px] text-zinc-400">
+                    {referralRewards
+                      ? `${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralRewards.shop ?? 0} per shop • ${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralRewards.supplier ?? 0} per supplier`
+                      : 'Referral rewards not configured.'}
+                  </p>
                 </div>
               </div>
               <button
-                onClick={() => setShowReferralModal(true)}
+                onClick={() => {
+                  setReferralTarget('shop');
+                  setShowReferralModal(true);
+                }}
                 className="w-full py-3 bg-indigo-600 text-white rounded-xl text-[10px] font-black"
               >
                 Invite a Shop
@@ -6305,32 +7477,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         {activeTab === 'comms' && (
           <div className="space-y-6 pb-20">
             <h2 className="text-2xl font-black text-zinc-900">Communication & Engagement</h2>
-
-            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">WhatsApp Daily Summary</p>
-                  <p className="text-sm font-bold text-zinc-900">Morning report + evening receipt reminder</p>
-                </div>
-                <button
-                  onClick={() => {
-                    handleCommsWhatsAppSummary();
-                    setShowWhatsAppModal(true);
-                  }}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
-                >
-                  Preview Summary
-                </button>
-              </div>
-              <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
-                Alerts: demand spikes, stockouts, competitor price drops, weekly review.
-              </div>
-              {commsStatus && (
-                <div className="mt-2 text-[10px] font-bold text-emerald-700">
-                  {commsStatus}
-                </div>
-              )}
-            </div>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
@@ -6352,11 +7498,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Customer Chat</p>
-                <button className="w-full py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black">Open Customer Inbox</button>
+                <button
+                  onClick={onOpenSupportChat}
+                  disabled={!onOpenSupportChat}
+                  className="w-full py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black disabled:opacity-50"
+                >
+                  Open Customer Inbox
+                </button>
               </div>
               <div className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Supplier Chat</p>
-                <button className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black">Message Supplier</button>
+                <button
+                  onClick={onOpenSupplierChat}
+                  disabled={!onOpenSupplierChat}
+                  className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black disabled:opacity-50"
+                >
+                  Message Supplier
+                </button>
               </div>
             </div>
 
@@ -6372,7 +7530,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           </div>
         )}
 
-        {activeTab === 'offline' && (
+        {activeTab === 'offline' && offlineEnabled && (
           <div className="space-y-6 pb-20">
             <h2 className="text-2xl font-black text-zinc-900">Offline & Accessibility</h2>
 
@@ -6382,7 +7540,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">USSD Interface</h3>
               </div>
               <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
-                Dial `*384*123#` → 1. Views 2. Update price 3. Update stock 4. Alerts
+                {offlineUssdConfig?.code
+                  ? `Dial ${offlineUssdConfig.code}${offlineUssdConfig.menu ? ` → ${offlineUssdConfig.menu}` : ''}`
+                  : 'USSD config not available yet.'}
               </div>
             </div>
 
@@ -6392,7 +7552,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">SMS Alerts</h3>
               </div>
               <div className="p-3 bg-indigo-50 rounded-2xl text-[10px] font-bold text-indigo-700">
-                “Wateja 8 wanatafuta Sukari karibu nawe leo.”
+                {offlineSmsConfig?.sample || 'SMS config not available yet.'}
               </div>
             </div>
 
@@ -6402,7 +7562,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Voice Commands</h3>
               </div>
               <div className="p-3 bg-amber-50 rounded-2xl text-[10px] font-bold text-amber-700">
-                Call and say: “Stock Unga 25” or “Bei Sukari 150”
+                {offlineVoiceConfig?.sample || 'Voice config not available yet.'}
               </div>
             </div>
           </div>
@@ -6420,10 +7580,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             {/* Growth Snapshot */}
             <div className="grid grid-cols-2 gap-4">
               {[
-                { label: 'Est. Monthly Revenue', value: `KES ${Math.round(cashflowIn || estimatedMonthlyRevenue)}` },
-                { label: 'Avg Order Value', value: `KES ${averagePrice.toFixed(0)}` },
-                { label: 'Repeat Rate', value: `${Math.round(growthRetention)}%` },
-                { label: 'Stock Coverage', value: `${stockCoverageDays} days` }
+                { label: 'Monthly Revenue', value: cashflowIn ? `KES ${Math.round(cashflowIn)}` : (totalRevenue ? `KES ${Math.round(totalRevenue)}` : '—') },
+                { label: 'Avg Order Value', value: aovValue ? `KES ${Math.round(aovValue)}` : '—' },
+                { label: 'Repeat Rate', value: growthRetention !== null && Number.isFinite(growthRetention) ? `${Math.round(growthRetention)}%` : '—' },
+                { label: 'Stock Coverage', value: analyticsInventory?.days_cover ? `${analyticsInventory.days_cover.toFixed(1)} days` : '—' }
               ].map((stat) => (
                 <div key={stat.label} className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{stat.label}</p>
@@ -6440,15 +7600,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     <ShieldCheck className="w-5 h-5 text-emerald-200" />
                     <span className="text-xs font-black uppercase tracking-widest text-emerald-100">SokoScore</span>
                   </div>
-                  <div className="px-2 py-1 bg-white/20 rounded-lg text-[10px] font-bold">Excellent</div>
+                  <div className="px-2 py-1 bg-white/20 rounded-lg text-[10px] font-bold">
+                    {growthHealth?.repayment_risk || '—'}
+                  </div>
                 </div>
                 <div className="flex items-end gap-2 mb-2">
-                  <span className="text-5xl font-black">{Math.min(850, sokoscore)}</span>
+                  <span className="text-5xl font-black">{sokoscore !== null ? Math.min(850, sokoscore) : '—'}</span>
                   <span className="text-emerald-200 text-sm font-bold mb-1">/ 850</span>
                 </div>
                 <p className="text-xs text-emerald-100 mb-6">Based on transaction volume, consistency, verification, and reviews.</p>
                 <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-                  <div className="h-full bg-white rounded-full" style={{ width: `${(Math.min(850, sokoscore) / 850) * 100}%` }} />
+                  <div
+                    className="h-full bg-white rounded-full"
+                    style={{ width: `${sokoscore !== null ? (Math.min(850, sokoscore) / 850) * 100 : 0}%` }}
+                  />
                 </div>
               </div>
               <Sparkles className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10 rotate-12" />
@@ -6483,29 +7648,36 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Repeat Buyer Boost</h3>
-                <span className="text-[10px] text-emerald-600 font-bold">+{Math.round(growthRetention / 4)}% projected</span>
+                <span className="text-[10px] text-emerald-600 font-bold">
+                  Retention: {growthRetention !== null && Number.isFinite(growthRetention) ? `${Math.round(growthRetention)}%` : '—'}
+                </span>
               </div>
               <p className="text-xs text-zinc-500 mb-4">Offer a loyalty perk on top sellers to lift repeat rate and stabilize monthly revenue.</p>
               <div className="grid grid-cols-2 gap-3">
-                {myProducts.slice(0, 2).map(p => (
+                {retentionProducts.slice(0, 2).map(p => (
                   <div key={p.id} className="p-3 bg-zinc-50 rounded-2xl flex items-center gap-3">
                     <img src={p.mediaUrl} className="w-10 h-10 rounded-xl object-cover" alt={p.name} />
                     <div>
                       <p className="text-xs font-bold text-zinc-900 line-clamp-1">{p.name}</p>
-                      <p className="text-[10px] text-zinc-500">KES {p.price}</p>
+                      <p className="text-[10px] text-zinc-500">{p.price !== null ? `KES ${p.price}` : 'Price —'}</p>
                     </div>
                   </div>
                 ))}
+                {retentionProducts.length === 0 && (
+                  <div className="col-span-2 p-3 bg-zinc-50 rounded-2xl text-center text-[10px] text-zinc-500 font-bold">
+                    Top products will appear after orders are captured.
+                  </div>
+                )}
               </div>
               <button
                 onClick={async () => {
-                  const topProduct = myProducts[0];
                   try {
+                    const topProduct = retentionProducts[0];
                     const title = topProduct ? `Loyalty: ${topProduct.name}` : 'Loyalty Offer';
                     await createLoyaltyOffer({
                       title,
                       discount: '5%',
-                      rules: { product_id: topProduct?.id, min_orders: 3 }
+                      rules: topProduct?.productId ? { product_id: topProduct.productId, min_orders: 3 } : { min_orders: 3 }
                     });
                     setGrowthStatus('Loyalty offer created.');
                   } catch (err: any) {
@@ -6526,21 +7698,32 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold">Referral Program</h3>
-                  <p className="text-[10px] text-zinc-400">Earn KES 200 per shop referral</p>
+                  <p className="text-[10px] text-zinc-400">
+                    {referralRewards
+                      ? `Earn ${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralRewards.shop ?? 0} per shop referral`
+                      : 'Referral rewards not configured.'}
+                  </p>
                 </div>
               </div>
               <p className="text-xs text-zinc-500 mb-4">
-                When a seller you refer uploads their first 10 products, both of you receive a <span className="font-bold text-zinc-900">KES 200 M-PESA bonus</span>.
+                Earn a reward when your referral completes their onboarding steps.{' '}
+                <span className="font-bold text-zinc-900">
+                  {referralRewards ? `${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralRewards.shop ?? 0}` : 'a bonus'}
+                </span>.
               </p>
               <p className="text-[10px] text-zinc-500 mb-4 font-bold">
-                Referrals: {growthReferrals?.referrals ?? 0} • Conversions: {growthReferrals?.conversions ?? 0} • Paid: KES {growthReferrals?.reward_paid ?? '0'}
+                Referrals: {growthReferrals?.referrals ?? '—'} • Conversions: {growthReferrals?.conversions ?? '—'} • Paid:{' '}
+                {growthReferrals?.reward_paid !== undefined ? `KES ${growthReferrals.reward_paid}` : '—'}
               </p>
               <div className="flex gap-2">
                 <div className="flex-1 p-3 bg-zinc-50 rounded-xl text-xs font-mono font-bold text-zinc-400 truncate">
-                  SCON-REF-{seller.id.toUpperCase()}
+                  {sellerReferralCodes[0]?.code || 'No referral code yet.'}
                 </div>
                 <button 
-                  onClick={() => setShowReferralModal(true)}
+                  onClick={() => {
+                    setReferralTarget('shop');
+                    setShowReferralModal(true);
+                  }}
                   className="px-4 py-3 bg-zinc-900 text-white rounded-xl font-bold text-xs"
                 >
                   Invite Shop
@@ -6555,18 +7738,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold">Supplier Referral</h3>
-                  <p className="text-[10px] text-zinc-400">Earn KES 500 per supplier referral</p>
+                  <p className="text-[10px] text-zinc-400">
+                    {referralRewards
+                      ? `Earn ${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralRewards.supplier ?? 0} per supplier referral`
+                      : 'Referral rewards not configured.'}
+                  </p>
                 </div>
               </div>
               <button
                 onClick={() => {
-                  onSellerPayoutsChange([{ id: `pay_${Date.now()}`, amount: 500, reason: 'Supplier referral reward', timestamp: Date.now() }, ...sellerPayouts]);
-                  onSellerBalanceChange(sellerBalance + 500);
-                  onToast?.('Supplier referral reward added.');
+                  setReferralTarget('supplier');
+                  setShowReferralModal(true);
                 }}
                 className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
               >
-                Simulate Supplier Referral Reward
+                Invite Supplier
               </button>
             </div>
 
@@ -6587,12 +7773,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   : 'Start a bulk-buy group to unlock wholesale pricing.'}
               </p>
               <div className="flex items-center justify-between mb-4">
-                <div className="flex -space-x-2">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-zinc-200" />
-                  ))}
-                  <div className="w-8 h-8 rounded-full border-2 border-white bg-zinc-100 flex items-center justify-center text-[10px] font-bold text-zinc-400">+2</div>
-                </div>
+                <span className="text-[10px] font-bold text-zinc-500">
+                  Active groups: {bulkGroups.length}
+                </span>
                 <span className="text-[10px] font-bold text-emerald-600">
                   {bulkGroups.length > 0 ? 'Group active' : 'No active group'}
                 </span>
@@ -6601,13 +7784,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 onClick={async () => {
                   try {
                     if (bulkGroups.length === 0) {
-                      const created = await createBulkBuyGroup({
-                        title: 'Starter Bulk Buy',
-                        product_category: 'general',
-                        target_qty: 100
-                      });
-                      setBulkGroups([created, ...bulkGroups]);
-                      setGrowthStatus('Bulk-buy group created.');
+                      setGrowthStatus('No active groups available yet.');
                       return;
                     }
                     const groupId = bulkGroups[0]?.id;
@@ -6620,7 +7797,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 }}
                 className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-500/20"
               >
-                {bulkGroups.length > 0 ? 'Join Bulk Order' : 'Create Bulk Order'}
+                {bulkGroups.length > 0 ? 'Join Bulk Order' : 'Browse Groups'}
               </button>
             </div>
 
@@ -6631,11 +7808,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div className="p-4 bg-zinc-50 rounded-2xl flex items-center justify-between">
                   <div>
                     <p className="text-[10px] text-zinc-400 font-black uppercase">Working Capital Loan</p>
-                    <p className="text-lg font-black text-zinc-900">Up to KES {loanMaxAmount.toLocaleString()}</p>
+                    <p className="text-lg font-black text-zinc-900">
+                      {loanMaxAmount !== null ? `Up to KES ${loanMaxAmount.toLocaleString()}` : 'No offers yet'}
+                    </p>
                   </div>
                   <button
                     onClick={async () => {
-                      const amountRaw = window.prompt('Loan amount requested (KES):', String(Math.round(loanMaxAmount * 0.5)));
+                      if (loanMaxAmount === null) {
+                        setGrowthStatus('No loan offers available yet.');
+                        return;
+                      }
+                      const ratio = Number.isFinite(loanRequestRatio) && loanRequestRatio > 0 ? loanRequestRatio : 0.5;
+                      const amountRaw = window.prompt('Loan amount requested (KES):', String(Math.round(loanMaxAmount * ratio)));
                       if (!amountRaw) return;
                       const amount = Number(amountRaw);
                       if (!Number.isFinite(amount) || amount <= 0) {
@@ -6649,22 +7833,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                         setGrowthStatus(err?.message || 'Loan request failed.');
                       }
                     }}
+                    disabled={loanMaxAmount === null}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold"
                   >
                     Apply
                   </button>
                 </div>
-                <div className="p-4 bg-zinc-50 rounded-2xl flex items-center justify-between opacity-50">
-                  <div>
-                    <p className="text-[10px] text-zinc-400 font-black uppercase">Inventory Finance</p>
-                    <p className="text-lg font-black text-zinc-900">Up to KES {(loanMaxAmount * 1.6).toLocaleString()}</p>
-                  </div>
-                  <span className="text-[10px] font-bold text-zinc-400">Score 900+</span>
+              </div>
+              {growthLoan?.rejection_reasons?.length ? (
+                <div className="mt-3 p-3 bg-amber-50 rounded-2xl text-[10px] font-bold text-amber-700">
+                  {growthLoan.rejection_reasons.join(' • ')}
                 </div>
-              </div>
-              <div className="mt-3 p-3 bg-indigo-50 rounded-2xl text-[10px] font-bold text-indigo-700">
-                Eligibility range: KES {loanMinAmount.toLocaleString()} - {loanMaxAmount.toLocaleString()} based on SokoScore + recent sales.
-              </div>
+              ) : null}
             </div>
 
             {/* Transaction History Export */}
@@ -6899,103 +8079,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               </div>
             )}
 
-            {isAdmin && (
-              <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-sm font-bold">Supplier Applications</h3>
-                    <p className="text-[10px] text-zinc-500 font-bold">Admin review queue</p>
-                  </div>
-                  <button
-                    onClick={refreshAdminSupplierApps}
-                    className="px-3 py-2 rounded-xl text-[10px] font-bold bg-white border border-zinc-200 text-zinc-700"
-                  >
-                    Refresh
-                  </button>
-                </div>
-                {adminSupplierAppsStatus && (
-                  <div className="mb-3 p-3 bg-amber-50 border border-amber-100 rounded-2xl text-[10px] font-bold text-amber-700">
-                    {adminSupplierAppsStatus}
-                  </div>
-                )}
-                {adminSupplierAppsLoading && (
-                  <div className="text-[10px] font-bold text-zinc-500">Loading applications…</div>
-                )}
-                <div className="space-y-3">
-                  {adminSupplierApps.map((app) => (
-                    <div key={app.id || `${app.seller_id}-${app.created_at}`} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-bold text-zinc-900">{app.business_name || 'Business'}</p>
-                          <p className="text-[10px] text-zinc-500 font-bold">
-                            {app.category || 'Category'} • Seller {app.seller_id || '—'}
-                          </p>
-                          {app.address && (
-                            <p className="text-[10px] text-zinc-500 mt-1">{app.address}</p>
-                          )}
-                        </div>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                            app.status === 'approved'
-                              ? 'bg-emerald-50 text-emerald-600'
-                              : app.status === 'rejected'
-                                ? 'bg-red-50 text-red-600'
-                                : 'bg-amber-50 text-amber-600'
-                          }`}
-                        >
-                          {app.status || 'pending'}
-                        </span>
-                      </div>
-                      {app.notes && (
-                        <div className="mt-2 text-[10px] text-zinc-600 font-bold">
-                          Notes: {app.notes}
-                        </div>
-                      )}
-                      <div className="mt-3 flex flex-col gap-2">
-                        <input
-                          value={adminDecisionReasons[app.id || ''] || ''}
-                          onChange={(e) =>
-                            setAdminDecisionReasons((prev) => ({ ...prev, [app.id || '']: e.target.value }))
-                          }
-                          className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-[11px] font-semibold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          placeholder="Decision reason (optional)"
-                        />
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => app.id && handleApproveSupplierApp(app.id)}
-                            disabled={!app.id || app.status !== 'pending'}
-                            className={`px-3 py-2 rounded-lg text-[10px] font-bold ${
-                              !app.id || app.status !== 'pending'
-                                ? 'bg-zinc-200 text-zinc-500'
-                                : 'bg-emerald-600 text-white'
-                            }`}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => app.id && handleRejectSupplierApp(app.id)}
-                            disabled={!app.id || app.status !== 'pending'}
-                            className={`px-3 py-2 rounded-lg text-[10px] font-bold ${
-                              !app.id || app.status !== 'pending'
-                                ? 'bg-zinc-200 text-zinc-500'
-                                : 'bg-red-600 text-white'
-                            }`}
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {adminSupplierApps.length === 0 && !adminSupplierAppsLoading && (
-                    <div className="p-6 bg-zinc-50 rounded-2xl text-center text-[10px] text-zinc-500 font-bold">
-                      No supplier applications in the queue.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Find Suppliers */}
               <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
@@ -7088,10 +8171,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                         <span>Unit KES {bestOffer?.unit_cost ?? '—'}</span>
                         <span>{distance !== null ? `${distance.toFixed(1)} km` : 'Distance N/A'}</span>
                       </div>
-                      <div className="mt-3 flex gap-2">
-                        <button className="px-3 py-2 bg-zinc-900 text-white rounded-lg text-[10px] font-bold">Contact</button>
-                        <button className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-[10px] font-bold">Request Quote</button>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -7111,7 +8190,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     onChange={(e) => setSellerFilters(prev => ({ ...prev, category: e.target.value }))}
                   >
                     <option value="">All Categories</option>
-                    {Array.from(new Set(PRODUCTS.map(p => p.category))).map(cat => (
+                    {sellerDirectoryCategories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
@@ -7129,13 +8208,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     value={sellerFilters.minRating}
                     onChange={(e) => setSellerFilters(prev => ({ ...prev, minRating: Number(e.target.value) }))}
                   />
-                  <input
-                    type="number"
-                    placeholder="Min order value"
-                    className="w-full p-2.5 bg-zinc-50 border-none rounded-xl text-xs font-bold"
-                    value={sellerFilters.minOrderValue}
-                    onChange={(e) => setSellerFilters(prev => ({ ...prev, minOrderValue: Number(e.target.value) }))}
-                  />
                   <label className="flex items-center gap-2 text-[10px] font-bold text-zinc-500">
                     <input
                       type="checkbox"
@@ -7146,24 +8218,30 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   </label>
                 </div>
 
+                {sellerDirectoryStatus && (
+                  <div className="p-3 bg-red-50 text-red-600 rounded-xl text-[10px] font-bold">
+                    {sellerDirectoryStatus}
+                  </div>
+                )}
+                {sellerDirectoryLoading && (
+                  <div className="p-3 bg-zinc-50 rounded-xl text-[10px] font-bold text-zinc-500">
+                    Loading sellers...
+                  </div>
+                )}
                 <div className="space-y-3">
-                  {sellersWithMeta.map(({ seller: s, categories, avgOrderValue, distance, score }) => (
-                    <div key={s.id} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                  {sellersWithMeta.map(({ shop, distanceKm, score }) => (
+                    <div key={shop.id || shop.seller_id} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
                       <div className="flex items-center justify-between mb-2">
                         <div>
-                          <p className="text-sm font-bold text-zinc-900">{s.name}</p>
-                          <p className="text-[10px] text-zinc-500">{categories.join(', ') || 'No categories'}</p>
+                          <p className="text-sm font-bold text-zinc-900">{shop.name || 'Seller'}</p>
+                          <p className="text-[10px] text-zinc-500">{shop.category || 'General'}</p>
                         </div>
                         <span className="text-[10px] font-black text-emerald-600">{score.toFixed(0)} score</span>
                       </div>
                       <div className="flex flex-wrap gap-2 text-[10px] font-bold text-zinc-600">
-                        <span>Rating {s.rating}</span>
-                        <span>AOV KES {avgOrderValue.toFixed(0)}</span>
-                        <span>{distance !== null ? `${distance.toFixed(1)} km` : 'Distance N/A'}</span>
-                      </div>
-                      <div className="mt-3 flex gap-2">
-                        <button className="px-3 py-2 bg-zinc-900 text-white rounded-lg text-[10px] font-bold">Contact</button>
-                        <button className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-[10px] font-bold">Send Offer</button>
+                        <span>Rating {shop.rating ?? '—'}</span>
+                        <span>{distanceKm !== null ? `${distanceKm.toFixed(1)} km` : 'Distance N/A'}</span>
+                        <span>{shop.verified ? 'Verified' : 'Unverified'}</span>
                       </div>
                     </div>
                   ))}
@@ -7186,6 +8264,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 {settingsStatus}
               </div>
             )}
+            {sellerPreferencesStatus && (
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-2xl text-[10px] font-bold text-blue-700">
+                {sellerPreferencesStatus}
+              </div>
+            )}
             {profileLoading && (
               <div className="text-[10px] font-bold text-zinc-500">Loading profile…</div>
             )}
@@ -7201,7 +8284,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   disabled={seller.isVerified || verificationStatus?.status === 'verified' || verificationStatus?.verified}
                   className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
                 >
-                  {seller.isVerified || verificationStatus?.status === 'verified' || verificationStatus?.verified ? 'Verified' : 'Verify for KES 500'}
+                  {seller.isVerified || verificationStatus?.status === 'verified' || verificationStatus?.verified
+                    ? 'Verified'
+                    : verificationBonusLabel
+                      ? `Verify for ${verificationBonusLabel}`
+                      : 'Verify Seller'}
                 </button>
               </div>
               <div className="grid grid-cols-3 gap-2 text-[10px] font-bold text-zinc-600">
@@ -7228,7 +8315,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
                 <div>
                   <p className="text-[10px] text-zinc-400 font-black uppercase">Top Shop</p>
-                  <p className="text-xs font-black text-amber-600">March 2026</p>
+                  <p className="text-xs font-black text-amber-600">
+                    {rankScore !== undefined && rankScore !== null ? `Score ${Math.round(rankScore)}` : 'Awaiting rank'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -7238,46 +8327,297 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex items-center gap-3 mb-4">
                 <Heart className="w-5 h-5 text-pink-500" />
                 <div>
-                  <h3 className="text-sm font-bold">Follower Notifications</h3>
-                  <p className="text-[10px] text-zinc-500">Notify you when new customers follow your shop.</p>
+                  <h3 className="text-sm font-bold">Notification Preferences</h3>
+                  <p className="text-[10px] text-zinc-500">Choose which alerts you want and when you want them.</p>
                 </div>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-zinc-600">Choose channels</span>
-                <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { key: 'price_drops', label: 'Price Drops' },
+                  { key: 'back_in_stock', label: 'Back in Stock' },
+                  { key: 'trending', label: 'Trending' },
+                  { key: 'marketing', label: 'Marketing' },
+                  { key: 'rewards', label: 'Rewards' },
+                  { key: 'support', label: 'Support' },
+                  { key: 'system', label: 'System' },
+                  { key: 'watched_items', label: 'Watched Items' },
+                  { key: 'location_based', label: 'Location Based' }
+                ].map(({ key, label }) => (
                   <button
-                    onClick={handleAllNotificationsToggle}
+                    key={key}
+                    onClick={() => toggleNotificationPref(key as keyof SellerNotificationPreferences)}
                     disabled={notificationsUpdating}
                     className={`px-3 py-2 rounded-xl text-[10px] font-bold ${
-                      notificationPrefs.email || notificationPrefs.in_app || notificationPrefs.whatsapp || notificationPrefs.sms
-                        ? 'bg-zinc-100 text-zinc-600'
-                        : 'bg-zinc-900 text-white'
+                      notificationPrefs[key as keyof SellerNotificationPreferences]
+                        ? 'bg-zinc-900 text-white'
+                        : 'bg-zinc-100 text-zinc-500'
                     }`}
                   >
-                    {notificationsUpdating ? 'Saving…' : (notificationPrefs.email || notificationPrefs.in_app || notificationPrefs.whatsapp || notificationPrefs.sms ? 'Disable All' : 'Enable All')}
+                    {notificationsUpdating ? 'Saving…' : label}
                   </button>
-                  {[
-                    { key: 'email', label: 'Email' },
-                    { key: 'in_app', label: 'In-app' },
-                    { key: 'whatsapp', label: 'WhatsApp' },
-                    { key: 'sms', label: 'SMS' }
-                  ].map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => handleFollowerNotificationsToggle(key as keyof typeof notificationPrefs)}
-                      disabled={notificationsUpdating}
-                      className={`px-3 py-2 rounded-xl text-[10px] font-bold ${
-                        notificationPrefs[key as keyof typeof notificationPrefs]
-                          ? 'bg-zinc-900 text-white'
-                          : 'bg-zinc-100 text-zinc-500'
-                      }`}
-                    >
-                      {notificationsUpdating ? 'Saving…' : label}
-                    </button>
-                  ))}
-                </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Frequency</span>
+                  <select
+                    value={notificationPrefs.frequency || 'instant'}
+                    onChange={(e) => updateNotificationPrefField('frequency', e.target.value)}
+                    disabled={notificationsUpdating}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  >
+                    <option value="instant">Instant</option>
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Quiet Start</span>
+                  <input
+                    type="time"
+                    value={notificationPrefs.quiet_hours_start || ''}
+                    onChange={(e) => updateNotificationPrefField('quiet_hours_start', e.target.value)}
+                    disabled={notificationsUpdating}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Quiet End</span>
+                  <input
+                    type="time"
+                    value={notificationPrefs.quiet_hours_end || ''}
+                    onChange={(e) => updateNotificationPrefField('quiet_hours_end', e.target.value)}
+                    disabled={notificationsUpdating}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
               </div>
             </div>
+
+            <form onSubmit={handleSavePreferences} className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Seller Preferences</p>
+                  <p className="text-sm font-bold text-zinc-900">Your marketing and growth defaults</p>
+                </div>
+                <button
+                  type="submit"
+                  disabled={sellerPreferencesSaving}
+                  className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black"
+                >
+                  {sellerPreferencesSaving ? 'Saving…' : 'Save Preferences'}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Marketing KPI Range</span>
+                  <select
+                    value={sellerPreferencesDraft.marketing.kpi_range}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, marketing: { ...prev.marketing, kpi_range: e.target.value } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  >
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                    <option value="90d">Last 90 days</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Default Campaign Days</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.marketing.campaign_duration_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, marketing: { ...prev.marketing, campaign_duration_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Top Products Window</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.marketing.top_products_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, marketing: { ...prev.marketing, top_products_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Top Products Limit</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.marketing.top_products_limit}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, marketing: { ...prev.marketing, top_products_limit: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Quick Boost Budget</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.marketing.quick_boost_budget}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, marketing: { ...prev.marketing, quick_boost_budget: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Sales Series Days</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.analytics.sales_series_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, analytics: { ...prev.analytics, sales_series_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Sales Velocity Days</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.analytics.sales_velocity_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, analytics: { ...prev.analytics, sales_velocity_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Peak Hours Days</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.analytics.peak_hours_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, analytics: { ...prev.analytics, peak_hours_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Inventory Days</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.analytics.inventory_series_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, analytics: { ...prev.analytics, inventory_series_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Conversion Days</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.analytics.conversion_series_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, analytics: { ...prev.analytics, conversion_series_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Broadcast Limit</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellerPreferencesDraft.comms.broadcast_limit}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, comms: { ...prev.comms, broadcast_limit: Number(e.target.value) }, marketing: { ...prev.marketing, broadcast_limit: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Loan Prompt Ratio</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    value={sellerPreferencesDraft.growth.loan_request_ratio}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, growth: { ...prev.growth, loan_request_ratio: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Max Distance (km)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={sellerPreferencesDraft.procurement.max_distance_km}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, procurement: { ...prev.procurement, max_distance_km: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Max Unit Cost</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={sellerPreferencesDraft.procurement.max_unit_cost}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, procurement: { ...prev.procurement, max_unit_cost: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Max MOQ</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={sellerPreferencesDraft.procurement.max_moq}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, procurement: { ...prev.procurement, max_moq: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Max Lead Time</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={sellerPreferencesDraft.procurement.max_lead_time_days}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, procurement: { ...prev.procurement, max_lead_time_days: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Min Rating</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={sellerPreferencesDraft.procurement.min_rating}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, procurement: { ...prev.procurement, min_rating: Number(e.target.value) } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  />
+                </label>
+                <label className="flex items-center gap-2 mt-6 text-[10px] font-bold text-zinc-500">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(sellerPreferencesDraft.procurement.verified_only)}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, procurement: { ...prev.procurement, verified_only: e.target.checked } }))}
+                  />
+                  Verified suppliers only
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Growth Projection</span>
+                  <select
+                    value={sellerPreferencesDraft.growth.projection_type}
+                    onChange={(e) => setSellerPreferencesDraft(prev => ({ ...prev, growth: { ...prev.growth, projection_type: e.target.value } }))}
+                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs font-bold"
+                  >
+                    <option value="cashflow">Cashflow</option>
+                    <option value="revenue">Revenue</option>
+                    <option value="inventory">Inventory</option>
+                  </select>
+                </label>
+              </div>
+              <p className="text-[10px] text-zinc-500 font-bold">
+                These are your personal defaults. Admin still controls thresholds, incentives, and platform-wide limits.
+              </p>
+            </form>
 
             {/* Recent Reviews */}
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
@@ -7482,17 +8822,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <Users className="w-6 h-6 text-indigo-600" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-zinc-900">Invite a Shop</h3>
+                  <h3 className="text-xl font-black text-zinc-900">
+                    {referralTarget === 'supplier' ? 'Invite a Supplier' : 'Invite a Shop'}
+                  </h3>
                   <p className="text-xs text-zinc-500 font-bold">Grow the Sconnect community</p>
                 </div>
               </div>
               <div className="space-y-4 mb-8">
                 <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
                   <p className="text-xs font-bold text-emerald-800 mb-1">Referral Reward</p>
-                  <p className="text-[10px] text-emerald-600">You get KES 200. They get KES 200. Everyone wins!</p>
+                  <p className="text-[10px] text-emerald-600">
+                    {referralRewards
+                      ? `You get ${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralTarget === 'supplier' ? (referralRewards.supplier ?? 0) : (referralRewards.shop ?? 0)}. They get the same.`
+                      : 'Rewards not configured yet.'}
+                  </p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Shop Phone Number</label>
+                  <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Phone Number</label>
                   <input 
                     type="tel" 
                     placeholder="+254..." 
@@ -7527,141 +8873,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xs shadow-lg shadow-indigo-600/20"
                 >
                   Send Invite
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* WhatsApp Summary Modal */}
-      <AnimatePresence>
-        {showWhatsAppModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="bg-white rounded-3xl overflow-hidden max-w-sm w-full shadow-2xl"
-            >
-              <div className="bg-emerald-600 p-4 text-white flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                    <MessageSquare className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black">Sconnect Business</p>
-                    <p className="text-[10px] text-emerald-100">Daily Summary</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowWhatsAppModal(false)}>
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6 bg-zinc-50 space-y-4">
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 relative">
-                  <div className="absolute -left-2 top-4 w-4 h-4 bg-white rotate-45 border-l border-b border-zinc-100" />
-                  <p className="text-xs font-bold text-zinc-900 mb-2">Habari! Here is your daily summary for {now.toLocaleDateString()}:</p>
-                  <div className="space-y-2 text-[10px] text-zinc-600 font-medium">
-                    <p>• Yesterday: <span className="text-emerald-600 font-bold">{dailyViews} views</span>, <span className="text-indigo-600 font-bold">{dailyInquiries} inquiries</span>.</p>
-                    <p>• Today's demand alerts: <span className="text-amber-600 font-bold">{analyticsGodViewDemand.length} products</span> trending in your area.</p>
-                    <p>• Stock Alert: <span className="text-red-500 font-bold">{analyticsStockHealth.find(item => item.name === 'Low Stock')?.value || 0}%</span> low stock risk.</p>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 mt-4">8:00 AM</p>
-                </div>
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 relative">
-                  <div className="absolute -left-2 top-4 w-4 h-4 bg-white rotate-45 border-l border-b border-zinc-100" />
-                  <p className="text-xs font-bold text-zinc-900 mb-2">New Opportunity!</p>
-                  <p className="text-[10px] text-zinc-600 font-medium">People near you searched for "{analyticsTopSearched[0]?.name || 'Top item'}" today. You have them in stock! Reply "FEATURE" to boost them.</p>
-                  <p className="text-[10px] text-zinc-400 mt-1">8:05 AM</p>
-                </div>
-              </div>
-              <div className="p-4 bg-white border-t space-y-2">
-                {analyticsStatus && (
-                  <div className="text-[10px] font-bold text-emerald-700">
-                    {analyticsStatus}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Type a message..." 
-                    className="flex-1 bg-zinc-100 rounded-full px-4 py-2 text-xs outline-none"
-                    readOnly
-                  />
-                  <button className="p-2 bg-emerald-600 text-white rounded-full">
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* WhatsApp Onboarding Modal */}
-      <AnimatePresence>
-        {showOnboardingModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="bg-white rounded-3xl overflow-hidden max-w-sm w-full shadow-2xl"
-            >
-              <div className="bg-emerald-600 p-4 text-white flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                    <MessageSquare className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black">SokoConnect Onboarding</p>
-                    <p className="text-[10px] text-emerald-100">WhatsApp Flow</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowOnboardingModal(false)}>
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6 bg-zinc-50 space-y-4">
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 relative">
-                  <div className="absolute -left-2 top-4 w-4 h-4 bg-white rotate-45 border-l border-b border-zinc-100" />
-                  <p className="text-xs font-bold text-zinc-900 mb-2">Karibu SokoConnect kwa wafanyabiashara!</p>
-                  <div className="space-y-2 text-[10px] text-zinc-600 font-medium">
-                    <p>1. Jina la duka</p>
-                    <p>2. Eneo (mfano: Luthuli Avenue, Shop 45)</p>
-                    <p>3. Aina ya bidhaa</p>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 mt-4">8:00 AM</p>
-                </div>
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 relative">
-                  <div className="absolute -left-2 top-4 w-4 h-4 bg-white rotate-45 border-l border-b border-zinc-100" />
-                  <p className="text-xs font-bold text-zinc-900 mb-2">Tuma picha za bidhaa zako (hadi 10)</p>
-                  <p className="text-[10px] text-zinc-600 font-medium">Bei ya bidhaa ya kwanza?</p>
-                  <p className="text-[10px] text-zinc-400 mt-2">8:02 AM</p>
-                </div>
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 relative">
-                  <div className="absolute -left-2 top-4 w-4 h-4 bg-white rotate-45 border-l border-b border-zinc-100" />
-                  <p className="text-xs font-bold text-zinc-900 mb-2">Hongera! Duka lako sasa liko kwenye SokoConnect.</p>
-                  <p className="text-[10px] text-zinc-600 font-medium">Wateja wataweza kukupata wakitafuta bidhaa karibu nao.</p>
-                  <p className="text-[10px] text-zinc-400 mt-2">8:05 AM</p>
-                </div>
-              </div>
-              <div className="p-4 bg-white border-t flex gap-3">
-                <button
-                  onClick={() => setShowOnboardingModal(false)}
-                  className="flex-1 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-bold text-xs"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={async () => {
-                    await handleStartWhatsAppOnboarding();
-                    setShowOnboardingModal(false);
-                  }}
-                  className="flex-1 py-3 bg-emerald-600 text-white rounded-2xl font-bold text-xs"
-                >
-                  Start Now
                 </button>
               </div>
             </motion.div>
@@ -8333,6 +9544,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 {!mapboxToken && (
                   <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
                     Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                  </div>
+                )}
+                {mapboxToken && !sellerLocations[0]?.lat && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-zinc-600 bg-white/80">
+                    Set your shop location to enable path recording.
                   </div>
                 )}
                 <div className="absolute top-3 right-3 flex flex-col gap-2">

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Zap, Loader2 } from 'lucide-react';
 import { listGroupBuyInstances, joinGroupBuyInstance, createBuyerGroupRequest, type GroupBuyInstance } from '../lib/groupBuyApi';
+import { getOpsConfig } from '../lib/opsConfigApi';
 
 type Filters = {
   market_name: string;
@@ -32,6 +33,27 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [createSku, setCreateSku] = useState('');
   const [createQty, setCreateQty] = useState('5');
   const [createPrice, setCreatePrice] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      getOpsConfig('groupbuy.search_defaults').catch(() => null),
+      getOpsConfig('groupbuy.request_defaults').catch(() => null),
+    ]).then(([searchDefaults, requestDefaults]) => {
+      if (!alive) return;
+      const radius = Number((searchDefaults as any)?.value?.radius_km ?? 5);
+      if (Number.isFinite(radius) && radius > 0) {
+        setFilters((prev) => ({ ...prev, radius_km: String(radius) }));
+      }
+      const targetQuantity = Number((requestDefaults as any)?.value?.target_quantity ?? 5);
+      if (Number.isFinite(targetQuantity) && targetQuantity > 0) {
+        setCreateQty(String(targetQuantity));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const load = async () => {
     setLoading(true);

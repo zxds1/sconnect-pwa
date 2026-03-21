@@ -29,12 +29,10 @@ const setStored = (key: string, value: string) => {
 };
 
 const getBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
-const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001';
+const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
 const getUserId = () => getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
 const getAuthToken = () => getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
 const getRole = () => getStored('soko:role') ?? getEnv('VITE_ROLE') ?? '';
-const getLLMModel = () => getStored('soko:llm_model') ?? getEnv('VITE_LLM_MODEL') ?? '';
-const getLLMProvider = () => getStored('soko:llm_provider') ?? getEnv('VITE_LLM_PROVIDER') ?? '';
 const getCorrelationId = () => {
   const stored = getStored('soko:correlation_id');
   if (stored) return stored;
@@ -55,8 +53,6 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   const userId = getUserId();
   const token = getAuthToken();
   const role = getRole();
-  const llmModel = getLLMModel();
-  const llmProvider = getLLMProvider();
   const correlationId = getCorrelationId();
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
@@ -64,9 +60,6 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   if (correlationId) headers['X-Correlation-Id'] = correlationId;
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (role) headers['X-Role'] = role;
-  if (llmModel) headers['X-LLM-Model'] = llmModel;
-  if (llmProvider) headers['X-LLM-Provider'] = llmProvider;
-
   return {
     ...headers,
     ...(extra ?? {}),
@@ -94,6 +87,10 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
   if (!baseUrl) {
     throw new Error('Service unavailable. Please try again later.');
   }
+  const tenantId = getTenantId();
+  if (!tenantId) {
+    throw new Error('Tenant ID is required. Please select your tenant.');
+  }
 
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -115,6 +112,10 @@ export const apiFetchRaw = async (path: string, options: RequestInit = {}): Prom
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
     throw new Error('Service unavailable. Please try again later.');
+  }
+  const tenantId = getTenantId();
+  if (!tenantId) {
+    throw new Error('Tenant ID is required. Please select your tenant.');
   }
   return fetch(`${baseUrl}${path}`, {
     ...options,

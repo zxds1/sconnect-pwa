@@ -36,7 +36,6 @@ const DEFAULT_CONFIG: RouteMultipliersConfig = {
   },
 };
 
-const STORAGE_KEY = 'soko:route_multipliers';
 const OPS_CONFIG_KEY = 'route_multipliers';
 
 export const getDefaultRouteMultipliers = () => DEFAULT_CONFIG;
@@ -50,35 +49,13 @@ const mergeConfig = (base: RouteMultipliersConfig, override?: RouteMultipliersCo
 });
 
 export const loadRouteMultipliers = async (): Promise<RouteMultipliersConfig> => {
-  if (typeof window === 'undefined') {
-    return DEFAULT_CONFIG;
-  }
-  try {
-    const cached = localStorage.getItem(STORAGE_KEY);
-    if (cached) {
-      return mergeConfig(DEFAULT_CONFIG, JSON.parse(cached) as RouteMultipliersConfig);
-    }
-  } catch {}
   try {
     const configResp = await apiFetch<{ config_key?: string; value?: RouteMultipliersConfig }>(`/v1/ops/configs/${OPS_CONFIG_KEY}`);
     if (configResp?.value) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(configResp.value));
-      } catch {}
       return mergeConfig(DEFAULT_CONFIG, configResp.value);
     }
   } catch {}
-  try {
-    const res = await fetch('/route-multipliers.json', { cache: 'no-store' });
-    if (!res.ok) return DEFAULT_CONFIG;
-    const data = (await res.json()) as RouteMultipliersConfig;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {}
-    return mergeConfig(DEFAULT_CONFIG, data);
-  } catch {
-    return DEFAULT_CONFIG;
-  }
+  return DEFAULT_CONFIG;
 };
 
 export const detectCityKey = (address?: string) => {
