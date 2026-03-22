@@ -27,7 +27,8 @@ import {
   unsaveFeedItem
 } from '../lib/feedApi';
 import { buildWsUrl } from '../lib/realtime';
-import { uploadMediaFile } from '../lib/mediaUpload';
+import { getVideoDurationSeconds, uploadMediaFile } from '../lib/mediaUpload';
+import { VideoTrimModal } from './VideoTrimModal';
 
 interface FeedProps {
   onChatOpen: (product: Product) => void;
@@ -135,6 +136,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   });
   const postMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [postMediaUploading, setPostMediaUploading] = useState(false);
+  const [postTrimFile, setPostTrimFile] = useState<File | null>(null);
   const [items, setItems] = useState<FeedItem[]>([]);
   const [trending, setTrending] = useState<FeedItem[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveItem[]>([]);
@@ -387,9 +389,32 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   };
 
   const handlePostMediaUpload = async (file: File) => {
+    if (file.type.startsWith('video/')) {
+      const duration = await getVideoDurationSeconds(file);
+      if (duration > 60) {
+        setPostTrimFile(file);
+        return;
+      }
+    }
     setPostMediaUploading(true);
     try {
-      const uploaded = await uploadMediaFile(file, 'feed_post_media', { maxVideoDurationSeconds: 60 });
+      const uploaded = await uploadMediaFile(file, 'feed_post_media');
+      setPostForm((prev) => ({ ...prev, mediaUrl: uploaded.url }));
+    } catch (err: any) {
+      setError(err?.message || 'Unable to upload media.');
+    } finally {
+      setPostMediaUploading(false);
+      if (postMediaInputRef.current) {
+        postMediaInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleTrimmedPostMedia = async (file: File) => {
+    setPostTrimFile(null);
+    setPostMediaUploading(true);
+    try {
+      const uploaded = await uploadMediaFile(file, 'feed_post_media');
       setPostForm((prev) => ({ ...prev, mediaUrl: uploaded.url }));
     } catch (err: any) {
       setError(err?.message || 'Unable to upload media.');
@@ -1276,6 +1301,16 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
           </div>
         )}
       </AnimatePresence>
+
+      <VideoTrimModal
+        open={!!postTrimFile}
+        file={postTrimFile}
+        onCancel={() => {
+          setPostTrimFile(null);
+          setPostMediaUploading(false);
+        }}
+        onConfirm={handleTrimmedPostMedia}
+      />
 
       <AnimatePresence>
         {activeIndex === 0 && !loading && items.length > 0 && (

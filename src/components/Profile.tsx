@@ -36,7 +36,8 @@ import {
   streamSupplierApplications,
   SupplierApplication
 } from '../lib/suppliersApi';
-import { uploadMediaFile } from '../lib/mediaUpload';
+import { getVideoDurationSeconds, uploadMediaFile } from '../lib/mediaUpload';
+import { VideoTrimModal } from './VideoTrimModal';
 
 interface ProfileProps {
   onBack?: () => void;
@@ -100,6 +101,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const postMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [postMediaUploading, setPostMediaUploading] = useState(false);
+  const [postTrimFile, setPostTrimFile] = useState<File | null>(null);
   const [creatingSellerAccount, setCreatingSellerAccount] = useState(false);
   const [sellerAccountStatus, setSellerAccountStatus] = useState<string | null>(null);
   const [autoSellerRequested, setAutoSellerRequested] = useState(false);
@@ -463,9 +465,32 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleProfilePostMediaUpload = async (file: File) => {
+    if (file.type.startsWith('video/')) {
+      const duration = await getVideoDurationSeconds(file);
+      if (duration > 60) {
+        setPostTrimFile(file);
+        return;
+      }
+    }
     setPostMediaUploading(true);
     try {
-      const uploaded = await uploadMediaFile(file, 'profile_post_media', { maxVideoDurationSeconds: 60 });
+      const uploaded = await uploadMediaFile(file, 'profile_post_media');
+      setNewPost((prev) => ({ ...prev, media_url: uploaded.url }));
+    } catch (err: any) {
+      setError(err?.message || 'Unable to upload media.');
+    } finally {
+      setPostMediaUploading(false);
+      if (postMediaInputRef.current) {
+        postMediaInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleTrimmedProfilePostMedia = async (file: File) => {
+    setPostTrimFile(null);
+    setPostMediaUploading(true);
+    try {
+      const uploaded = await uploadMediaFile(file, 'profile_post_media');
       setNewPost((prev) => ({ ...prev, media_url: uploaded.url }));
     } catch (err: any) {
       setError(err?.message || 'Unable to upload media.');
@@ -1431,6 +1456,16 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           </div>
         </div>
       )}
+
+      <VideoTrimModal
+        open={!!postTrimFile}
+        file={postTrimFile}
+        onCancel={() => {
+          setPostTrimFile(null);
+          setPostMediaUploading(false);
+        }}
+        onConfirm={handleTrimmedProfilePostMedia}
+      />
     </div>
   );
 };
