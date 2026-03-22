@@ -294,6 +294,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     evidenceKeys: '',
   });
   const [counterfeitErrors, setCounterfeitErrors] = React.useState<{ reason?: string }>({});
+  const [counterfeitEvidenceStatus, setCounterfeitEvidenceStatus] = React.useState<string | null>(null);
+  const [counterfeitUploading, setCounterfeitUploading] = React.useState(false);
   const [disputeForm, setDisputeForm] = React.useState({
     orderId: '',
     reason: '',
@@ -319,6 +321,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [uploading, setUploading] = React.useState(false);
   const [routeConfig, setRouteConfig] = React.useState<RouteMultipliersConfig>(() => getDefaultRouteMultipliers());
   const routeTelemetry = React.useMemo(() => createRouteTelemetryTracker('product_detail'), []);
+  const evidenceAccept = '.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.mp4,.webm,.mov,.m4v,.pdf,.doc,.docx,.txt,image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
 
   React.useEffect(() => {
     let active = true;
@@ -751,6 +754,39 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     }
   };
 
+  const uploadEvidenceAttachment = async (file: File, context: 'dispute' | 'counterfeit') => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to upload evidence.');
+      return null;
+    }
+    const presign = await requestUploadPresign({
+      file_name: file.name,
+      mime_type: file.type,
+      content_length: file.size,
+      context: context === 'dispute' ? 'dispute_evidence' : 'counterfeit_evidence',
+    });
+    const uploadUrl = presign.upload_url || presign.url;
+    if (!uploadUrl) {
+      throw new Error('Upload URL missing.');
+    }
+    const method = (presign.method || (presign.fields ? 'POST' : 'PUT')).toUpperCase();
+    if (presign.fields) {
+      const form = new FormData();
+      Object.entries(presign.fields).forEach(([key, value]) => form.append(key, value));
+      form.append('file', file);
+      await fetch(uploadUrl, { method: 'POST', body: form });
+    } else {
+      const headers: Record<string, string> = { ...(presign.headers || {}) };
+      if (!headers['Content-Type'] && file.type) headers['Content-Type'] = file.type;
+      await fetch(uploadUrl, { method, body: file, headers });
+    }
+    return {
+      s3Key: presign.fields?.key || presign.s3_key || presign.key || '',
+      fileName: file.name,
+      mimeType: file.type,
+    };
+  };
+
   const handleEvidenceUpload = async () => {
     if (!getAuthItem('soko:auth_token')) {
       onRequireLogin?.('Sign in to upload dispute evidence.');
@@ -796,42 +832,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     setUploading(true);
     setUploadStatus('Requesting upload link...');
     try {
-      const presign = await requestUploadPresign({
-        file_name: file.name,
-        mime_type: file.type,
-        content_length: file.size,
-        context: 'dispute_evidence',
-      });
-      const uploadUrl = presign.upload_url || presign.url;
-      if (!uploadUrl) {
-        setUploadStatus('Upload URL missing.');
-        setUploading(false);
-        return;
-      }
-      const method = (presign.method || (presign.fields ? 'POST' : 'PUT')).toUpperCase();
-      if (presign.fields) {
-        const form = new FormData();
-        Object.entries(presign.fields).forEach(([key, value]) => form.append(key, value));
-        form.append('file', file);
-        setUploadStatus('Uploading file...');
-        await fetch(uploadUrl, { method: 'POST', body: form });
-        const inferredKey = presign.fields.key || presign.s3_key || presign.key || '';
+      setUploadStatus('Uploading file...');
+      const next = await uploadEvidenceAttachment(file, 'dispute');
+      if (next) {
         setEvidenceForm(prev => ({
           ...prev,
-          s3Key: inferredKey || prev.s3Key,
-          fileName: file.name,
-          mimeType: file.type,
-        }));
-      } else {
-        const headers: Record<string, string> = { ...(presign.headers || {}) };
-        if (!headers['Content-Type'] && file.type) headers['Content-Type'] = file.type;
-        setUploadStatus('Uploading file...');
-        await fetch(uploadUrl, { method, body: file, headers });
-        setEvidenceForm(prev => ({
-          ...prev,
-          s3Key: presign.s3_key || presign.key || prev.s3Key,
-          fileName: file.name,
-          mimeType: file.type,
+          s3Key: next.s3Key || prev.s3Key,
+          fileName: next.fileName,
+          mimeType: next.mimeType,
         }));
       }
       setUploadStatus('Upload complete. Add evidence details and submit.');
@@ -839,6 +847,30 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       setUploadStatus(err?.message || 'Upload failed.');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleCounterfeitEvidenceFileSelect = async (file?: File) => {
+    if (!file) return;
+    setCounterfeitUploading(true);
+    setCounterfeitEvidenceStatus('Uploading evidence...');
+    try {
+      const next = await uploadEvidenceAttachment(file, 'counterfeit');
+      if (next?.s3Key) {
+        setCounterfeitForm((prev) => ({
+          ...prev,
+          evidenceKeys: prev.evidenceKeys
+            ? `${prev.evidenceKeys}, ${next.s3Key}`
+            : next.s3Key
+        }));
+        setCounterfeitEvidenceStatus(`Attached ${next.fileName}.`);
+      } else {
+        setCounterfeitEvidenceStatus(`Attached ${file.name}.`);
+      }
+    } catch (err: any) {
+      setCounterfeitEvidenceStatus(err?.message || 'Upload failed.');
+    } finally {
+      setCounterfeitUploading(false);
     }
   };
 
@@ -2106,6 +2138,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   onClick={() => {
                     setModal('counterfeit', false);
                     setCounterfeitErrors({});
+                    setCounterfeitEvidenceStatus(null);
+                    setCounterfeitUploading(false);
                   }}
                   className="rounded-full px-2 py-1 text-[10px] font-black text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
                   aria-label="Close counterfeit report"
@@ -2142,6 +2176,31 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   onChange={(e) => setCounterfeitForm(prev => ({ ...prev, evidenceKeys: e.target.value }))}
                   aria-label="Evidence keys comma separated"
                 />
+                <div className="rounded-2xl border border-dashed border-zinc-200 p-3 space-y-2">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Evidence Upload</p>
+                  <input
+                    type="file"
+                    accept={evidenceAccept}
+                    className="w-full text-[10px] font-bold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 rounded-xl"
+                    onChange={(e) => {
+                      void handleCounterfeitEvidenceFileSelect(e.target.files?.[0]);
+                      e.currentTarget.value = '';
+                    }}
+                    aria-label="Upload counterfeit evidence file"
+                    disabled={counterfeitUploading}
+                  />
+                  {counterfeitUploading && (
+                    <p className="text-[10px] font-bold text-indigo-600">Uploading...</p>
+                  )}
+                  {counterfeitEvidenceStatus && (
+                    <p className={`text-[10px] font-bold ${counterfeitEvidenceStatus.includes('Attached') ? 'text-emerald-600' : counterfeitEvidenceStatus.includes('failed') || counterfeitEvidenceStatus.includes('Upload') ? 'text-amber-600' : 'text-zinc-500'}`}>
+                      {counterfeitEvidenceStatus}
+                    </p>
+                  )}
+                  <p className="text-[9px] text-zinc-400 font-bold">
+                    Attach images, video, or documents to support the report.
+                  </p>
+                </div>
               </div>
               <div className="mt-4 flex gap-2">
                 <button onClick={handleCounterfeitReport} className="flex-1 py-2 bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase focus:outline-none focus:ring-2 focus:ring-amber-200" aria-label="Submit counterfeit report">
@@ -2151,6 +2210,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   onClick={() => {
                     setModal('counterfeit', false);
                     setCounterfeitErrors({});
+                    setCounterfeitEvidenceStatus(null);
+                    setCounterfeitUploading(false);
                   }}
                   className="flex-1 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black uppercase focus:outline-none focus:ring-2 focus:ring-zinc-300"
                   aria-label="Cancel counterfeit report"
@@ -2193,6 +2254,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     setEvidenceStatus(null);
                     setDisputeStatus(null);
                     setDisputeId('');
+                    setUploadStatus(null);
+                    setUploading(false);
                   }}
                   className="rounded-full px-2 py-1 text-[10px] font-black text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
                   aria-label="Close dispute modal"
@@ -2278,9 +2341,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <div className="space-y-2">
                   <input
                     type="file"
+                    accept={evidenceAccept}
                     className="w-full text-[10px] font-bold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30 rounded-xl"
-                    onChange={(e) => handleEvidenceFileSelect(e.target.files?.[0])}
+                    onChange={(e) => {
+                      void handleEvidenceFileSelect(e.target.files?.[0]);
+                      e.currentTarget.value = '';
+                    }}
                     aria-label="Upload evidence file"
+                    disabled={uploading}
                   />
                   {uploadStatus && (
                     <p className={`text-[10px] font-bold ${uploadStatus.includes('failed') ? 'text-red-600' : 'text-zinc-500'}`}>
@@ -2368,6 +2436,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     setEvidenceStatus(null);
                     setDisputeStatus(null);
                     setDisputeId('');
+                    setUploadStatus(null);
+                    setUploading(false);
                   }}
                   className="flex-1 py-2 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-black uppercase"
                 >
