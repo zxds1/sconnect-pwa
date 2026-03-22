@@ -510,10 +510,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleBuyNow = async () => {
-    if (!getAuthItem('soko:auth_token')) {
-      onRequireLogin?.('Sign in to buy this item and continue checkout.');
-      return;
-    }
+    const hasSession = Boolean(getAuthItem('soko:auth_token'));
     if (onBuyNow) {
       onBuyNow(activeProduct);
       return;
@@ -529,6 +526,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         quantity,
         unit_price: activeProduct.price,
       });
+      if (!hasSession) {
+        onAddToBag?.(activeProduct);
+        setError('Added to bag. Open your bag to checkout.');
+        return;
+      }
       await checkoutCart();
       void createAuditEvent({ action: 'buy_now', entity_type: 'product', entity_id: productId }).catch(() => {});
     } catch (err: any) {
@@ -537,10 +539,6 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleAddToBagClick = async () => {
-    if (!getAuthItem('soko:auth_token')) {
-      onRequireLogin?.('Sign in to add this item to your bag.');
-      return;
-    }
     try {
       if (!sellerId) {
         setError('Seller unavailable for this product.');

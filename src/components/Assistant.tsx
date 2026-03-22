@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users, MapPin, ExternalLink } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users, MapPin, ExternalLink, SlidersHorizontal } from 'lucide-react';
 import { Product } from '../types';
 import {
   createMessage,
@@ -2681,7 +2681,7 @@ useEffect(() => {
               className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center"
               aria-label="Choose AI model"
             >
-              <Sparkles className="w-5 h-5" />
+              <SlidersHorizontal className="w-5 h-5" />
             </button>
             <button
               onClick={onOpenProfile}

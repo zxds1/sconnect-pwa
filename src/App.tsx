@@ -632,10 +632,6 @@ export default function App() {
   };
 
   const handleAddToBag = async (product: Product) => {
-    if (!hasSession()) {
-      promptForLogin('Sign in to add items to your bag and checkout.', 'assistant');
-      return;
-    }
     try {
       const sellerId = product.sellerId || (product as any).seller_id;
       const price = product.price;
@@ -651,12 +647,13 @@ export default function App() {
   };
 
   const handleBuyNow = async (product: Product) => {
-    if (!hasSession()) {
-      promptForLogin('Sign in to buy items and manage your bag.', 'assistant');
-      return;
-    }
     try {
       await handleAddToBag(product);
+      if (!hasSession()) {
+        setView('bag');
+        setToast(`${product.name} added to bag.`);
+        return;
+      }
       await checkoutCart();
       setToast(`Checkout started for ${product.name}.`);
     } catch (err: any) {
@@ -1104,6 +1101,7 @@ export default function App() {
                 onOpenPayments={handleOpenSubscriptions}
                 onOpenSupport={() => openSupportChat('duka')}
                 onOpenPolicies={() => openSupportChat('duka')}
+                onRequireLogin={(message) => promptForLogin(message, 'settings')}
               />
             </motion.div>
           )}

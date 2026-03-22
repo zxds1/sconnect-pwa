@@ -685,22 +685,24 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
             <div className="text-white/70 text-sm font-bold">Loading live sessions...</div>
           )}
           {!loading && liveSessions.length === 0 && (
-            <div className="bg-white/10 border border-white/10 rounded-3xl p-6 text-white">
-              <p className="text-lg font-black">No live sessions right now</p>
-              <p className="text-[11px] text-white/70 mt-2">Start one to showcase your products in real time.</p>
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={() => setShowCreatePost(true)}
-                  className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-bold"
-                >
-                  Create Post
-                </button>
-                <button
-                  onClick={() => setTab('for_you')}
-                  className="px-4 py-2 bg-white/10 text-white rounded-xl text-[10px] font-bold"
-                >
-                  Explore Feed
-                </button>
+            <div className="min-h-[calc(100dvh-10rem)] flex items-center justify-center px-4 pb-8">
+              <div className="w-full max-w-md bg-white/10 border border-white/10 rounded-3xl p-6 sm:p-8 text-white text-center shadow-2xl backdrop-blur-md">
+                <p className="text-lg font-black tracking-tight">No live sessions right now</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-white/70">Start one to showcase your products in real time.</p>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => setShowCreatePost(true)}
+                    className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-semibold tracking-[0.08em]"
+                  >
+                    Create Post
+                  </button>
+                  <button
+                    onClick={() => setTab('for_you')}
+                    className="flex-1 px-4 py-2 bg-white/10 text-white rounded-xl text-[10px] font-semibold tracking-[0.08em]"
+                  >
+                    Explore Feed
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -742,32 +744,34 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
         style={{ scrollSnapStop: 'always' }}
       >
         {loading && (
-          <div className="h-full w-full flex items-center justify-center text-white/70 text-sm font-bold">Loading feed...</div>
+          <div className="min-h-[100dvh] w-full flex items-center justify-center px-4 pt-24 pb-28 text-white/70 text-sm font-bold">
+            Loading feed...
+          </div>
         )}
 
         {!loading && items.length === 0 && (
-          <div className="h-full w-full flex items-center justify-center">
-          <div className="w-full max-w-md bg-white/10 border border-white/10 rounded-3xl p-8 sm:p-10 text-white text-center shadow-2xl">
-              <p className="text-2xl font-black">Welcome to Sconnect Feed</p>
-              <p className="text-sm text-white/70 mt-3 leading-relaxed">
+          <div className="min-h-[100dvh] w-full flex items-center justify-center px-4 pt-24 pb-28">
+            <div className="w-full max-w-md bg-white/10 border border-white/10 rounded-3xl p-8 sm:p-10 text-white text-center shadow-2xl backdrop-blur-md">
+              <p className="text-2xl font-black tracking-tight">Welcome to Sconnect Feed</p>
+              <p className="mt-3 text-sm leading-relaxed text-white/70">
                 Follow sellers, discover new drops, or create your first post.
               </p>
               <div className="mt-6 flex flex-col gap-2">
                 <button
                   onClick={() => setShowCreatePost(true)}
-                  className="w-full py-3 bg-emerald-500 text-white rounded-2xl text-[11px] font-bold"
+                  className="w-full py-3 bg-emerald-500 text-white rounded-2xl text-[11px] font-semibold tracking-[0.08em]"
                 >
                   Create Post
                 </button>
                 <button
                   onClick={() => setTab('following')}
-                  className="w-full py-3 bg-white/10 text-white rounded-2xl text-[11px] font-bold"
+                  className="w-full py-3 bg-white/10 text-white rounded-2xl text-[11px] font-semibold tracking-[0.08em]"
                 >
                   View Following
                 </button>
                 <button
                   onClick={() => setTab('for_you')}
-                  className="w-full py-3 bg-white/10 text-white rounded-2xl text-[11px] font-bold"
+                  className="w-full py-3 bg-white/10 text-white rounded-2xl text-[11px] font-semibold tracking-[0.08em]"
                 >
                   Explore For You
                 </button>

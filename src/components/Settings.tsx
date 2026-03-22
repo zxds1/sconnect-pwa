@@ -32,17 +32,20 @@ import {
   getComparisonPreferences,
   updateComparisonPreferences,
   getUiPreferences,
-  updateUiPreferences
+  updateUiPreferences,
+  type ComparisonPreferences
 } from '../lib/settingsApi';
 import {
   createUserLocation,
   deleteUserLocation,
   listRegions,
   listUserLocations,
-  type Region,
   type UserLocation,
+  type Region,
   updateUserLocation
 } from '../lib/searchApi';
+import type { NotificationPreferences } from '../lib/notificationsApi';
+import { getAuthItem } from '../lib/authStorage';
 
 interface SettingsProps {
   onOpenDataDashboard?: () => void;
@@ -52,9 +55,28 @@ interface SettingsProps {
   onOpenPayments?: () => void;
   onOpenSupport?: () => void;
   onOpenPolicies?: () => void;
+  onRequireLogin?: (message: string) => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenNotifications, onOpenProfile, onOpenSecurity, onOpenPayments, onOpenSupport, onOpenPolicies }) => {
+export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenNotifications, onOpenProfile, onOpenSecurity, onOpenPayments, onOpenSupport, onOpenPolicies, onRequireLogin }) => {
+  const hasSession = Boolean(getAuthItem('soko:auth_token'));
+  const guestStorageKey = (suffix: string) => `soko:guest_settings:${suffix}`;
+  const readGuestJson = <T,>(suffix: string, fallback: T): T => {
+    if (typeof window === 'undefined') return fallback;
+    try {
+      const raw = window.localStorage.getItem(guestStorageKey(suffix));
+      if (!raw) return fallback;
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  const writeGuestJson = (suffix: string, value: any) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(guestStorageKey(suffix), JSON.stringify(value));
+    } catch {}
+  };
   const [consents, setConsents] = React.useState({
     location: false,
     receipts: false,
@@ -131,6 +153,63 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     let ignore = false;
     const load = async () => {
       try {
+        if (!hasSession) {
+          const savedUi = readGuestJson<{ theme?: 'light' | 'dark' | 'system'; voiceFeedback?: boolean; voiceDirections?: boolean }>('ui', {});
+          const savedComparison = readGuestJson<ComparisonPreferences>('comparison', {});
+          const savedNotifications = readGuestJson<NotificationPreferences>('notifications', {});
+          const savedConsents = readGuestJson<{ location?: boolean; receipts?: boolean; personalization?: boolean; marketing?: boolean }>('consents', {});
+          const savedLocationsGuest = readGuestJson<UserLocation[]>('locations', []);
+          const savedSummary = readGuestJson<{ searches: number; receipts: number; purchases: number; reviews: number }>('summary', { searches: 0, receipts: 0, purchases: 0, reviews: 0 });
+          setDataSummary({
+            searches: Number(savedSummary.searches || 0),
+            receipts: Number(savedSummary.receipts || 0),
+            purchases: Number(savedSummary.purchases || 0),
+            reviews: Number(savedSummary.reviews || 0)
+          });
+          setConsents({
+            location: Boolean(savedConsents.location),
+            receipts: Boolean(savedConsents.receipts),
+            personalization: Boolean(savedConsents.personalization),
+            marketing: Boolean(savedConsents.marketing)
+          });
+          setConsentHistory([]);
+          setNotificationPrefs({
+            price_drops: Boolean(savedNotifications.price_drops),
+            back_in_stock: Boolean(savedNotifications.back_in_stock),
+            trending: Boolean(savedNotifications.trending),
+            watched_items: Boolean(savedNotifications.watched_items)
+          });
+          setLocationRegions([]);
+          setSavedLocations(Array.isArray(savedLocationsGuest) ? savedLocationsGuest : []);
+          if (savedUi?.theme === 'light' || savedUi?.theme === 'dark' || savedUi?.theme === 'system') {
+            setTheme(savedUi.theme);
+          }
+          setVoiceFeedback(Boolean((savedUi as any)?.voiceFeedback));
+          setVoiceDirections(Boolean((savedUi as any)?.voiceDirections));
+          if (savedComparison?.comparison_weights) {
+            setComparisonWeights({
+              price: Number(savedComparison.comparison_weights.price ?? 30),
+              convenience: Number(savedComparison.comparison_weights.convenience ?? 25),
+              trust: Number(savedComparison.comparison_weights.trust ?? 20),
+              quality: Number(savedComparison.comparison_weights.quality ?? 15),
+              ownership: Number(savedComparison.comparison_weights.ownership ?? 10)
+            });
+          }
+          if (savedComparison?.deal_thresholds) {
+            setDealThresholds({
+              best_value: Number(savedComparison.deal_thresholds.best_value ?? 85),
+              fastest_pickup: Number(savedComparison.deal_thresholds.fastest_pickup ?? 30),
+              trusted_seller: Number(savedComparison.deal_thresholds.trusted_seller ?? 80),
+              nearby: Number(savedComparison.deal_thresholds.nearby ?? 3)
+            });
+          }
+          if (savedComparison?.comparison_profile) {
+            setComparisonProfile(savedComparison.comparison_profile);
+          }
+          setUiPrefsLoaded(true);
+          return;
+        }
+
         const [summary, consentsResp, prefs, regionsResp, locationsResp] = await Promise.all([
           getSettingsSummary(),
           getConsents(),
@@ -230,6 +309,12 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     const nextValue = !consents[key];
     setConsentLoading((prev) => ({ ...prev, [key]: true }));
     try {
+      if (!hasSession) {
+        const nextConsents = { ...consents, [key]: nextValue };
+        setConsents(nextConsents);
+        writeGuestJson('consents', nextConsents);
+        return;
+      }
       await updateConsentByType(key, { consent_given: nextValue });
       setConsents((prev) => ({ ...prev, [key]: nextValue }));
       const refreshed = await getConsents();
@@ -247,6 +332,12 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
   const handlePrefToggle = async (field: keyof typeof notificationPrefs) => {
     const nextValue = !notificationPrefs[field];
     try {
+      if (!hasSession) {
+        const nextPrefs = { ...notificationPrefs, [field]: nextValue };
+        setNotificationPrefs(nextPrefs);
+        writeGuestJson('notifications', nextPrefs);
+        return;
+      }
       await updateNotificationPreferences({ [field]: nextValue } as any);
       setNotificationPrefs((prev) => ({ ...prev, [field]: nextValue }));
     } catch {}
@@ -254,6 +345,18 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
 
   const persistUiPrefs = async (next: Partial<{ theme: 'light' | 'dark' | 'system'; voiceFeedback: boolean; voiceDirections: boolean }>) => {
     try {
+      if (!hasSession) {
+        const nextState = {
+          theme: next.theme ?? theme,
+          voiceFeedback: next.voiceFeedback ?? voiceFeedback,
+          voiceDirections: next.voiceDirections ?? voiceDirections
+        };
+        if (next.theme) setTheme(next.theme);
+        if (typeof next.voiceFeedback === 'boolean') setVoiceFeedback(next.voiceFeedback);
+        if (typeof next.voiceDirections === 'boolean') setVoiceDirections(next.voiceDirections);
+        writeGuestJson('ui', nextState);
+        return;
+      }
       const saved = await updateUiPreferences({
         theme: next.theme ?? theme,
         voice_feedback_enabled: next.voiceFeedback ?? voiceFeedback,
@@ -363,6 +466,34 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       is_default: Boolean(locationForm.is_default)
     };
     try {
+      if (!hasSession) {
+        const nextLocation: UserLocation = {
+          id: locationForm.id || `guest_location_${Date.now()}`,
+          label: payload.label,
+          address_line: payload.address_line,
+          region_id: payload.region_id,
+          lat: payload.lat,
+          lng: payload.lng,
+          is_default: payload.is_default
+        } as UserLocation;
+        const nextLocations = (() => {
+          const base = Array.isArray(savedLocations) ? [...savedLocations] : [];
+          const idx = base.findIndex((item) => item.id === nextLocation.id);
+          const normalized = payload.is_default
+            ? base.map((item) => ({ ...item, is_default: false }))
+            : base;
+          if (idx >= 0) {
+            normalized[idx] = nextLocation;
+            return normalized;
+          }
+          return [nextLocation, ...normalized];
+        })();
+        setSavedLocations(nextLocations);
+        writeGuestJson('locations', nextLocations);
+        setLocationStatus(locationForm.id ? 'Saved location updated.' : 'Saved location added.');
+        resetLocationForm();
+        return;
+      }
       if (locationForm.id) {
         await updateUserLocation(locationForm.id, { id: locationForm.id, ...payload } as UserLocation);
         setLocationStatus('Saved location updated.');
@@ -383,6 +514,16 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     setLocationLoading(true);
     setLocationStatus(null);
     try {
+      if (!hasSession) {
+        const nextLocations = savedLocations.filter((item) => item.id !== id);
+        setSavedLocations(nextLocations);
+        writeGuestJson('locations', nextLocations);
+        if (locationForm.id === id) {
+          resetLocationForm();
+        }
+        setLocationStatus('Saved location removed.');
+        return;
+      }
       await deleteUserLocation(id);
       await loadSavedLocations();
       if (locationForm.id === id) {
@@ -417,6 +558,16 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       return;
     }
     try {
+      if (!hasSession) {
+        const payload = {
+          comparison_weights: comparisonWeights,
+          deal_thresholds: dealThresholds,
+          comparison_profile: comparisonProfile || 'custom'
+        };
+        writeGuestJson('comparison', payload);
+        setComparisonStatus('Comparison preferences saved.');
+        return;
+      }
       const payload = {
         comparison_weights: comparisonWeights,
         deal_thresholds: dealThresholds,
@@ -432,6 +583,11 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
 
   const handleExport = async () => {
     setExportStatus(null);
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to export your data.');
+      setExportStatus('Sign in to export your data.');
+      return;
+    }
     if (!exportForm.exportType.trim()) {
       setExportStatus('export_type is required');
       return;
@@ -457,6 +613,11 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
 
   const handleDelete = async () => {
     setDeleteStatus(null);
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to request account deletion.');
+      setDeleteStatus('Sign in to request account deletion.');
+      return;
+    }
     if (!deleteForm.supportTicketId.trim()) {
       setDeleteStatus('support_ticket_id is required');
       return;
@@ -575,7 +736,16 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           </div>
         ))}
 
-        <button className="w-full flex items-center justify-center gap-2 p-4 bg-white text-red-500 rounded-2xl border border-red-100 font-bold text-sm shadow-sm hover:bg-red-50 transition-colors">
+        <button
+          onClick={() => {
+            if (!hasSession) {
+              onRequireLogin?.('Sign in to use account actions.');
+              return;
+            }
+            setLocationStatus('Signed out of this device.');
+          }}
+          className="w-full flex items-center justify-center gap-2 p-4 bg-white text-red-500 rounded-2xl border border-red-100 font-bold text-sm shadow-sm hover:bg-red-50 transition-colors"
+        >
           <LogOut className="w-5 h-5" />
           Log Out
         </button>
@@ -585,7 +755,14 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           <div className="flex items-center gap-3 mb-3">
             <Download className="w-5 h-5 text-indigo-500" />
             <div>
-              <p className="text-sm font-bold text-zinc-900">Download Your Data</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-zinc-900">Download Your Data</p>
+                {!hasSession && (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-amber-700">
+                    Account only
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-zinc-500">Export your activity and contributions.</p>
             </div>
           </div>
@@ -629,8 +806,17 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           <div className="flex items-center gap-3 mb-3">
             <Database className="w-5 h-5 text-emerald-500" />
             <div>
-              <p className="text-sm font-bold text-zinc-900">View My Data</p>
-              <p className="text-[10px] text-zinc-500">Transparent summary of your activity.</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-zinc-900">View My Data</p>
+                {!hasSession && (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-amber-700">
+                    Account only
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-zinc-500">
+                {hasSession ? 'Transparent summary of your activity.' : 'Sign in to view your account data.'}
+              </p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-zinc-600">
@@ -640,10 +826,16 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
             <div className="p-3 bg-zinc-50 rounded-2xl">Reviews: {dataSummary.reviews}</div>
           </div>
           <button
-            onClick={onOpenDataDashboard}
+            onClick={() => {
+              if (!hasSession) {
+                onRequireLogin?.('Sign in to open your data dashboard.');
+                return;
+              }
+              onOpenDataDashboard?.();
+            }}
             className="mt-3 w-full py-3 bg-emerald-600 text-white rounded-xl text-xs font-bold"
           >
-            Open Data Dashboard
+            {hasSession ? 'Open Data Dashboard' : 'Sign in to view data'}
           </button>
         </div>
 
@@ -652,7 +844,14 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           <div className="flex items-center gap-3 mb-4">
             <MapPin className="w-5 h-5 text-indigo-500" />
             <div>
-              <p className="text-sm font-bold text-zinc-900">Saved Locations</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-zinc-900">Saved Locations</p>
+                {!hasSession && (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-emerald-700">
+                    Local only
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-zinc-500">Keep home, work, and pickup spots ready for search and delivery.</p>
             </div>
           </div>
@@ -768,6 +967,16 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
                     {!location.is_default && (
                       <button
                         onClick={async () => {
+                          if (!hasSession) {
+                            const nextLocations = savedLocations.map((item) => ({
+                              ...item,
+                              is_default: item.id === location.id
+                            }));
+                            setSavedLocations(nextLocations);
+                            writeGuestJson('locations', nextLocations);
+                            setLocationStatus('Default location updated.');
+                            return;
+                          }
                           setLocationLoading(true);
                           try {
                             await updateUserLocation(location.id, { ...location, is_default: true } as UserLocation);
@@ -827,7 +1036,14 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           <div className="flex items-center gap-3 mb-3">
             <Bell className="w-5 h-5 text-amber-500" />
             <div>
-              <p className="text-sm font-bold text-zinc-900">Alert Preferences</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-zinc-900">Alert Preferences</p>
+                {!hasSession && (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-emerald-700">
+                    Local only
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-zinc-500">Choose which alerts you want to receive.</p>
             </div>
           </div>
@@ -857,7 +1073,14 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           <div className="flex items-center gap-3 mb-4">
             <ShieldCheck className="w-5 h-5 text-emerald-500" />
             <div>
-              <p className="text-sm font-bold text-zinc-900">Data Sharing Consents</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-zinc-900">Data Sharing Consents</p>
+                {!hasSession && (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-emerald-700">
+                    Local only
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-zinc-500">Opt-in control for each data type.</p>
             </div>
           </div>
@@ -923,7 +1146,14 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
             <div className="flex items-center gap-3">
               <Database className="w-5 h-5 text-indigo-500" />
               <div>
-                <p className="text-sm font-bold text-zinc-900">My Comparison Preferences</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold text-zinc-900">My Comparison Preferences</p>
+                  {!hasSession && (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-emerald-700">
+                      Local only
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px] text-zinc-500">Control how Value Score ranks sellers.</p>
               </div>
             </div>

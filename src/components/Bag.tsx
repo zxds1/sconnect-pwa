@@ -352,7 +352,14 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct, onRequireLogin 
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <p className="text-sm font-black">Your Bag</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-black">Your Bag</p>
+              {!hasSession && (
+                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.24em] text-amber-700">
+                  Guest bag
+                </span>
+              )}
+            </div>
             <p className="text-[10px] text-zinc-500">{items.length} items</p>
           </div>
         </div>
@@ -379,7 +386,9 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct, onRequireLogin 
           <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-zinc-200">
             <ShoppingBag className="w-10 h-10 text-zinc-200 mx-auto mb-3" />
             <p className="text-sm font-bold text-zinc-900">Your bag is empty</p>
-            <p className="text-[10px] text-zinc-500">Add items to see smart swaps and analytics.</p>
+            <p className="text-[10px] text-zinc-500">
+              Add items to keep shopping. Guests can checkout after signing in.
+            </p>
           </div>
         )}
 
@@ -601,7 +610,7 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct, onRequireLogin 
                 }}
                 className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-bold"
               >
-                Checkout
+                {hasSession ? 'Checkout' : 'Sign in to checkout'}
               </button>
               <button
                 onClick={async () => {
@@ -618,7 +627,7 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct, onRequireLogin 
                 }}
                 className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl text-[10px] font-bold"
               >
-                Split Checkout
+                {hasSession ? 'Split Checkout' : 'Sign in to split checkout'}
               </button>
             </div>
           </div>
