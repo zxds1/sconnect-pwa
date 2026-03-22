@@ -758,6 +758,8 @@ export default function App() {
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenFeed={() => setView('feed')}
                 onOpenGroupBuys={() => setView('group-buys')}
+                onOpenLogin={() => setView('login')}
+                onOpenRegister={() => setView('register')}
                 onToast={setToast}
               />
             </motion.div>

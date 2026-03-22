@@ -53,6 +53,7 @@ import { getCompareList } from '../lib/compareApi';
 import { getComparisonPreferences } from '../lib/settingsApi';
 import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
 import { listNotifications, type NotificationListResponse } from '../lib/notificationsApi';
+import { getAuthItem } from '../lib/authStorage';
 
 type AssistantAction = {
   label: string;
@@ -111,6 +112,8 @@ interface AssistantProps {
   onOpenPartnerships: () => void;
   onOpenFeed: () => void;
   onOpenGroupBuys: () => void;
+  onOpenLogin: () => void;
+  onOpenRegister: () => void;
 }
 
 export const Assistant: React.FC<AssistantProps> = ({
@@ -132,6 +135,8 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenPartnerships,
   onOpenFeed,
   onOpenGroupBuys,
+  onOpenLogin,
+  onOpenRegister,
   onToast
 }) => {
   const [chats, setChats] = useState<AssistantChat[]>([]);
@@ -215,6 +220,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [messageFeedbackUseInPlanner, setMessageFeedbackUseInPlanner] = useState(true);
   const [messageFeedbackSaving, setMessageFeedbackSaving] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const isVisitor = !getAuthItem('soko:auth_token');
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
@@ -1835,6 +1841,28 @@ useEffect(() => {
 
         {isSidebarOpen && (
           <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+            {isVisitor && (
+              <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Guest access</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-white/75">
+                  Browse the platform normally. Sign in only when you want to post, save, buy, or manage seller tools.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={onOpenLogin}
+                    className="flex-1 rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Log in
+                  </button>
+                  <button
+                    onClick={onOpenRegister}
+                    className="flex-1 rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Sign up
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               {chats
                 .sort((a, b) => {
@@ -1945,6 +1973,28 @@ useEffect(() => {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+              {isVisitor && (
+                <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Guest access</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-white/75">
+                    Browse the platform normally. Sign in only when you want to post, save, buy, or manage seller tools.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={onOpenLogin}
+                      className="flex-1 rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
+                    >
+                      Log in
+                    </button>
+                    <button
+                      onClick={onOpenRegister}
+                      className="flex-1 rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                    >
+                      Sign up
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 {chats
                   .sort((a, b) => {
