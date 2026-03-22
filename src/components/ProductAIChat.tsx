@@ -354,29 +354,29 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
             />
             <input
               type="text"
-            className="w-full pl-12 pr-12 py-3 bg-[#f1f6ff] rounded-xl text-xs font-medium text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
+              className="w-full pl-12 pr-12 py-3 bg-[#f1f6ff] rounded-xl text-xs font-medium text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Ask about this product..."
               aria-label="Message input"
             />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || !threadId}
-            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-[#eaf2ff] text-[#1976D2] rounded-lg disabled:opacity-50 transition-opacity focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
-            aria-label="Attach a file"
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading || !threadId}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-zinc-900 text-white rounded-lg disabled:opacity-50 transition-opacity focus:outline-none focus:ring-2 focus:ring-zinc-400"
-            aria-label="Send message"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || !threadId}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-[#eaf2ff] text-[#1976D2] rounded-full disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+              aria-label="Attach a file"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isLoading || !threadId}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-zinc-900 text-white rounded-full disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              aria-label="Send message"
+            >
+              <Send className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </motion.div>
