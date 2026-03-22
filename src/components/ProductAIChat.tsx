@@ -378,6 +378,9 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
               <Send className="w-4 h-4" />
             </button>
           </div>
+          <p className="mt-2 text-[10px] font-bold text-zinc-400">
+            Attach images, video, or documents.
+          </p>
         </div>
       </motion.div>
     </>
