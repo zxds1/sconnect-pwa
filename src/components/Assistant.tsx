@@ -111,6 +111,7 @@ interface AssistantProps {
   onOpenSubscriptions: () => void;
   onOpenPartnerships: () => void;
   onOpenFeed: () => void;
+  onOpenShops: () => void;
   onOpenGroupBuys: () => void;
   onOpenLogin: () => void;
   onOpenRegister: () => void;
@@ -134,6 +135,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenSubscriptions,
   onOpenPartnerships,
   onOpenFeed,
+  onOpenShops,
   onOpenGroupBuys,
   onOpenLogin,
   onOpenRegister,
@@ -1849,6 +1851,24 @@ useEffect(() => {
                 </p>
                 <div className="mt-3 flex flex-col gap-2">
                   <button
+                    onClick={onOpenFeed}
+                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Browse feed
+                  </button>
+                  <button
+                    onClick={onOpenShops}
+                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Browse shops
+                  </button>
+                  <button
+                    onClick={() => onOpenSearch('')}
+                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Search products
+                  </button>
+                  <button
                     onClick={onOpenLogin}
                     className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
                   >
@@ -1979,10 +1999,28 @@ useEffect(() => {
                   <p className="mt-1 text-[11px] leading-relaxed text-white/75">
                     Browse public content first. Log in to post, save, chat, and use seller tools.
                   </p>
-                  <div className="mt-3 flex flex-col gap-2">
-                    <button
-                      onClick={onOpenLogin}
-                      className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
+                <div className="mt-3 flex flex-col gap-2">
+                  <button
+                    onClick={onOpenFeed}
+                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Browse feed
+                  </button>
+                  <button
+                    onClick={onOpenShops}
+                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Browse shops
+                  </button>
+                  <button
+                    onClick={() => onOpenSearch('')}
+                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                  >
+                    Search products
+                  </button>
+                  <button
+                    onClick={onOpenLogin}
+                    className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
                     >
                       Log in
                     </button>

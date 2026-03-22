@@ -758,6 +758,7 @@ export default function App() {
                 onOpenSubscriptions={() => setView('subscriptions')}
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenFeed={() => setView('feed')}
+                onOpenShops={() => setView('shops')}
                 onOpenGroupBuys={() => setView('group-buys')}
                 onOpenLogin={() => setView('login')}
                 onOpenRegister={() => setView('register')}
@@ -779,6 +780,9 @@ export default function App() {
                 onRegisterOpen={() => setView('register')}
                 onResetOpen={() => setView('password-reset')}
                 onAuthenticated={() => setView('assistant')}
+                onBrowseFeed={() => setView('feed')}
+                onBrowseSearch={() => setView('search')}
+                onBrowseShops={() => setView('shops')}
               />
             </motion.div>
           )}
@@ -795,6 +799,9 @@ export default function App() {
                 onBack={goBack}
                 onLoginOpen={() => setView('login')}
                 onAuthenticated={() => setView('auth-onboarding')}
+                onBrowseFeed={() => setView('feed')}
+                onBrowseSearch={() => setView('search')}
+                onBrowseShops={() => setView('shops')}
               />
             </motion.div>
           )}
