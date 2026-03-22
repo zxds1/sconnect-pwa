@@ -2002,7 +2002,11 @@ export const Assistant: React.FC<AssistantProps> = ({
           }
         }
         if (suggestions && suggestions.length) {
-          setSuggestionChips(suggestions.map((s: any) => ({
+          const filteredSuggestions = suggestions.filter((s: any) => {
+            const text = String([s?.label, s?.title, s?.name, s?.payload, s?.value].filter(Boolean).join(' ')).toLowerCase();
+            return !/(scan\s*qr|\bqr\b)/i.test(text);
+          });
+          setSuggestionChips(filteredSuggestions.map((s: any) => ({
             label: s.label || s.title || s.name || 'Suggestion',
             value: s.payload || s.value || s.label || ''
           })));
@@ -2659,7 +2663,7 @@ useEffect(() => {
               className="lg:hidden h-11 w-11 rounded-2xl bg-white/10 flex items-center justify-center"
               aria-label="Open navigation"
             >
-              <Sparkles className="w-5 h-5" />
+              <span className="text-lg font-black leading-none text-white">&gt;</span>
             </button>
             <img
               src="/logo-header.jpg"

@@ -686,10 +686,6 @@ export default function App() {
   };
 
   const handleOpenBag = () => {
-    if (!hasSession()) {
-      promptForLogin('Sign in to view your bag and checkout.', 'bag');
-      return;
-    }
     setView('bag');
   };
 
@@ -994,6 +990,7 @@ export default function App() {
               <Bag
                 onBack={goBack}
                 onOpenProduct={handleProductOpen}
+                onRequireLogin={(message) => promptForLogin(message, 'bag')}
               />
             </motion.div>
           )}

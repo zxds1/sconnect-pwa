@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, ShoppingBag, Sparkles, MapPin, Truck, AlertTriangle, Route, BarChart3 } from 'lucide-react';
 import { Product } from '../types';
 import { getProduct } from '../lib/catalogApi';
+import { getAuthItem } from '../lib/authStorage';
 import {
   getCart,
   getCartInsights,
@@ -36,6 +37,7 @@ import {
 interface BagProps {
   onBack: () => void;
   onOpenProduct: (product: Product) => void;
+  onRequireLogin?: (message: string) => void;
 }
 
 type ProductView = {
@@ -56,7 +58,7 @@ type RecommendationView = {
   candidateMediaUrl?: string;
 };
 
-export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
+export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct, onRequireLogin }) => {
   const [cart, setCart] = useState<Cart | null>(null);
   const [items, setItems] = useState<CartItem[]>([]);
   const [productsById, setProductsById] = useState<Record<string, ProductView>>({});
@@ -92,6 +94,7 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
   const [routeLookupId, setRouteLookupId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasSession = Boolean(getAuthItem('soko:auth_token'));
 
   const recommendationKey = useMemo(
     () => recommendations.map(r => `${r.original_product_id}:${r.candidate_product_id}`).join('|'),
@@ -585,6 +588,10 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
             <div className="flex items-center gap-2">
               <button
                 onClick={async () => {
+                  if (!hasSession) {
+                    onRequireLogin?.('Sign in to checkout your bag.');
+                    return;
+                  }
                   try {
                     await checkoutCart({ client_total: total });
                     await refreshCart();
@@ -598,6 +605,10 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct }) => {
               </button>
               <button
                 onClick={async () => {
+                  if (!hasSession) {
+                    onRequireLogin?.('Sign in to split checkout your bag.');
+                    return;
+                  }
                   try {
                     await checkoutCartSplit({ client_total: total });
                     await refreshCart();
