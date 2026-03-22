@@ -465,7 +465,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const handleProfilePostMediaUpload = async (file: File) => {
     setPostMediaUploading(true);
     try {
-      const uploaded = await uploadMediaFile(file, 'profile_post_media');
+      const uploaded = await uploadMediaFile(file, 'profile_post_media', { maxVideoDurationSeconds: 60 });
       setNewPost((prev) => ({ ...prev, media_url: uploaded.url }));
     } catch (err: any) {
       setError(err?.message || 'Unable to upload media.');
@@ -1229,7 +1229,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                     className="flex-1 py-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-[10px] font-bold"
                     disabled={postMediaUploading}
                   >
-                    {postMediaUploading ? 'Uploading…' : 'Upload Media'}
+                    {postMediaUploading ? 'Uploading…' : 'Upload Media (60s max)'}
                   </button>
                   <button
                     type="button"

@@ -1,6 +1,52 @@
 import { requestUploadPresign } from './uploadsApi';
 
-export const uploadMediaFile = async (file: File, context: string) => {
+type UploadMediaOptions = {
+  maxVideoDurationSeconds?: number;
+};
+
+const getVideoDurationSeconds = async (file: File) => {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const video = document.createElement('video');
+      const cleanup = () => {
+        video.src = '';
+        video.removeAttribute('src');
+        video.load();
+        URL.revokeObjectURL(url);
+      };
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        const duration = Number.isFinite(video.duration) ? video.duration : NaN;
+        cleanup();
+        if (!Number.isFinite(duration) || duration <= 0) {
+          reject(new Error('Unable to determine video duration.'));
+          return;
+        }
+        resolve(duration);
+      };
+      video.onerror = () => {
+        cleanup();
+        reject(new Error('Unable to read video metadata.'));
+      };
+      video.src = url;
+    });
+  } catch (err) {
+    URL.revokeObjectURL(url);
+    throw err;
+  }
+};
+
+const assertVideoLength = async (file: File, maxVideoDurationSeconds?: number) => {
+  if (!maxVideoDurationSeconds || !file.type.startsWith('video/')) return;
+  const duration = await getVideoDurationSeconds(file);
+  if (duration > maxVideoDurationSeconds) {
+    throw new Error(`Videos must be ${maxVideoDurationSeconds} seconds or shorter.`);
+  }
+};
+
+export const uploadMediaFile = async (file: File, context: string, options: UploadMediaOptions = {}) => {
+  await assertVideoLength(file, options.maxVideoDurationSeconds);
   const presign = await requestUploadPresign({
     file_name: file.name,
     mime_type: file.type,

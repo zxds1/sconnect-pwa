@@ -389,7 +389,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   const handlePostMediaUpload = async (file: File) => {
     setPostMediaUploading(true);
     try {
-      const uploaded = await uploadMediaFile(file, 'feed_post_media');
+      const uploaded = await uploadMediaFile(file, 'feed_post_media', { maxVideoDurationSeconds: 60 });
       setPostForm((prev) => ({ ...prev, mediaUrl: uploaded.url }));
     } catch (err: any) {
       setError(err?.message || 'Unable to upload media.');
@@ -1247,7 +1247,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                     className="flex-1 py-3 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold"
                     disabled={postMediaUploading}
                   >
-                    {postMediaUploading ? 'Uploading…' : 'Upload Media'}
+                    {postMediaUploading ? 'Uploading…' : 'Upload Media (60s max)'}
                   </button>
                   <button
                     type="button"
