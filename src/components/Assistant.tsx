@@ -2447,7 +2447,7 @@ useEffect(() => {
               <button
                 onClick={() => mediaInputRef.current?.click()}
                 className="h-11 w-11 rounded-full flex items-center justify-center bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
-                aria-label="Add media"
+                aria-label="Add media (60s max)"
               >
                 <Plus className="w-5 h-5" />
               </button>

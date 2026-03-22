@@ -1937,7 +1937,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
               <button
                 onClick={() => mediaInputRef.current?.click()}
                 className="p-1.5 text-zinc-400 hover:text-indigo-600 transition-colors"
-                title="Add media"
+                title="Add media (60s max)"
               >
                 <Sparkles className="w-4 h-4" />
               </button>
