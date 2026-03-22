@@ -35,7 +35,7 @@ import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
-import { setAuthItem } from './lib/authStorage';
+import { getAuthItem, setAuthItem } from './lib/authStorage';
 
 type AppView =
   | 'feed'
@@ -175,6 +175,8 @@ export default function App() {
   const [supportChatMode, setSupportChatMode] = useState<'duka' | 'seller-ai' | 'brand' | null>(null);
   const [isSellerAccount, setIsSellerAccount] = useState<boolean | null>(null);
   const [verifiedSellerIds, setVerifiedSellerIds] = useState<string[]>([]);
+  const [authPromptMessage, setAuthPromptMessage] = useState<string | null>(null);
+  const [authReturnView, setAuthReturnView] = useState<AppView>('assistant');
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 1500);
@@ -244,6 +246,20 @@ export default function App() {
     if (typeof window === 'undefined') return;
     const nextUrl = `${window.location.pathname}${window.location.search}#${nextView}`;
     window.history.pushState({ view: nextView, overlay }, '', nextUrl);
+  };
+
+  const hasSession = () => {
+    try {
+      return Boolean(getAuthItem('soko:auth_token'));
+    } catch {
+      return false;
+    }
+  };
+
+  const promptForLogin = (message: string, returnView: AppView = 'assistant') => {
+    setAuthPromptMessage(message);
+    setAuthReturnView(returnView);
+    setView('login');
   };
 
   useEffect(() => {
@@ -431,6 +447,10 @@ export default function App() {
   }, [view]);
 
   const handleOpenSellerStudio = () => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to access Seller Studio and seller tools.', 'assistant');
+      return;
+    }
     if (isSellerAccount === null) {
       setToast('Checking seller account...');
       return;
@@ -444,6 +464,10 @@ export default function App() {
   };
 
   const handleOpenRFQ = () => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to create RFQs and manage supplier requests.', 'assistant');
+      return;
+    }
     if (isSellerAccount === null) {
       setToast('Checking seller account...');
       return;
@@ -598,6 +622,10 @@ export default function App() {
   };
 
   const handleAddToBag = async (product: Product) => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to add items to your bag and checkout.', 'assistant');
+      return;
+    }
     try {
       const sellerId = product.sellerId || (product as any).seller_id;
       const price = product.price;
@@ -613,6 +641,10 @@ export default function App() {
   };
 
   const handleBuyNow = async (product: Product) => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to buy items and manage your bag.', 'assistant');
+      return;
+    }
     try {
       await handleAddToBag(product);
       await checkoutCart();
@@ -623,11 +655,32 @@ export default function App() {
   };
 
   const handleToggleFollow = (sellerId: string) => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to follow sellers and save your preferences.', 'profile');
+      return;
+    }
     setFollowedSellerIds(prev => prev.includes(sellerId) ? prev.filter(id => id !== sellerId) : [...prev, sellerId]);
   };
 
   const handleShopClick = (sellerId: string) => {
     setSelectedSellerId(sellerId);
+    setView('profile');
+  };
+
+  const handleOpenRewards = () => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to view rewards and your QR code.', 'rewards');
+      return;
+    }
+    setView('rewards');
+  };
+
+  const handleOpenProfile = () => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to open your profile and manage account settings.', 'profile');
+      return;
+    }
+    setSelectedSellerId(null);
     setView('profile');
   };
 
@@ -741,11 +794,8 @@ export default function App() {
                 onAddToComparison={handleAddToComparison}
                 onOpenSeller={handleShopClick}
                 onStartNavigation={handleStartNavigation}
-                onOpenRewards={() => setView('rewards')}
-                onOpenProfile={() => {
-                  setSelectedSellerId(null);
-                  setView('profile');
-                }}
+                onOpenRewards={handleOpenRewards}
+                onOpenProfile={handleOpenProfile}
                 onOpenSellerStudio={handleOpenSellerStudio}
                 onOpenRFQ={handleOpenRFQ}
                 onOpenOnboarding={() => setShowOnboarding(true)}
@@ -760,6 +810,7 @@ export default function App() {
                 onOpenGroupBuys={() => setView('group-buys')}
                 onOpenLogin={() => setView('login')}
                 onOpenRegister={() => setView('register')}
+                authPromptMessage={authPromptMessage}
                 onToast={setToast}
               />
             </motion.div>
@@ -777,7 +828,11 @@ export default function App() {
                 onBack={goBack}
                 onRegisterOpen={() => setView('register')}
                 onResetOpen={() => setView('password-reset')}
-                onAuthenticated={() => setView('assistant')}
+                onAuthenticated={() => {
+                  setAuthPromptMessage(null);
+                  setView(authReturnView);
+                }}
+                contextMessage={authPromptMessage}
               />
             </motion.div>
           )}
@@ -793,7 +848,11 @@ export default function App() {
               <Register
                 onBack={goBack}
                 onLoginOpen={() => setView('login')}
-                onAuthenticated={() => setView('auth-onboarding')}
+                onAuthenticated={() => {
+                  setAuthPromptMessage(null);
+                  setView('auth-onboarding');
+                }}
+                contextMessage={authPromptMessage}
               />
             </motion.div>
           )}

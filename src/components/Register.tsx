@@ -10,9 +10,10 @@ interface RegisterProps {
   onBack?: () => void;
   onLoginOpen?: () => void;
   onAuthenticated?: () => void;
+  contextMessage?: string | null;
 }
 
-export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthenticated }) => {
+export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthenticated, contextMessage }) => {
   const [form, setForm] = React.useState({
     phone: '',
     pin: '',
@@ -105,6 +106,12 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
               <p className="text-xs text-zinc-500">Phone + 4-digit PIN to start.</p>
             </div>
           </div>
+
+          {contextMessage && (
+            <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-[11px] font-bold text-amber-800">
+              {contextMessage}
+            </div>
+          )}
 
           {status && (
             <div className="mb-4 text-[11px] font-bold rounded-2xl px-4 py-3 bg-zinc-50 text-zinc-700 border border-zinc-100">

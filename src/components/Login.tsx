@@ -11,9 +11,10 @@ interface LoginProps {
   onRegisterOpen?: () => void;
   onResetOpen?: () => void;
   onAuthenticated?: () => void;
+  contextMessage?: string | null;
 }
 
-export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpen, onAuthenticated }) => {
+export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpen, onAuthenticated, contextMessage }) => {
   const [form, setForm] = React.useState({
     phone: '',
     pin: '',
@@ -104,6 +105,12 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
               <p className="text-xs text-zinc-500">Use your phone and 4-digit PIN.</p>
             </div>
           </div>
+
+          {contextMessage && (
+            <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-[11px] font-bold text-amber-800">
+              {contextMessage}
+            </div>
+          )}
 
           {status && (
             <div className="mb-4 text-[11px] font-bold rounded-2xl px-4 py-3 bg-zinc-50 text-zinc-700 border border-zinc-100">

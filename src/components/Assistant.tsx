@@ -114,6 +114,7 @@ interface AssistantProps {
   onOpenGroupBuys: () => void;
   onOpenLogin: () => void;
   onOpenRegister: () => void;
+  authPromptMessage?: string | null;
 }
 
 export const Assistant: React.FC<AssistantProps> = ({
@@ -137,6 +138,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenGroupBuys,
   onOpenLogin,
   onOpenRegister,
+  authPromptMessage,
   onToast
 }) => {
   const [chats, setChats] = useState<AssistantChat[]>([]);
@@ -1845,7 +1847,7 @@ useEffect(() => {
               <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Guest access</p>
                 <p className="mt-1 text-[11px] leading-relaxed text-white/75">
-                  Browse the platform normally. Sign in only when you want to post, save, buy, or manage seller tools.
+                  {authPromptMessage || 'Browse the platform normally. Sign in only when you want to post, save, buy, or manage seller tools.'}
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -1973,12 +1975,12 @@ useEffect(() => {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-              {isVisitor && (
-                <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Guest access</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-white/75">
-                    Browse the platform normally. Sign in only when you want to post, save, buy, or manage seller tools.
-                  </p>
+            {isVisitor && (
+              <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Guest access</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-white/75">
+                  {authPromptMessage || 'Browse the platform normally. Sign in only when you want to post, save, buy, or manage seller tools.'}
+                </p>
                   <div className="mt-3 flex gap-2">
                     <button
                       onClick={onOpenLogin}
