@@ -148,9 +148,9 @@ export default function App() {
     if (hashViews.includes(hashView)) return hashView;
     try {
       const token = getAuthItem('soko:auth_token');
-      return token ? 'assistant' : 'login';
+      return token ? 'assistant' : 'feed';
     } catch {
-      return 'assistant';
+      return 'feed';
     }
   };
 
@@ -759,6 +759,8 @@ export default function App() {
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenFeed={() => setView('feed')}
                 onOpenGroupBuys={() => setView('group-buys')}
+                onOpenLogin={() => setView('login')}
+                onOpenRegister={() => setView('register')}
                 onToast={setToast}
               />
             </motion.div>
