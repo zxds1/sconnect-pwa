@@ -4,6 +4,7 @@ import { ArrowLeft, Lock, Phone, ShieldCheck } from 'lucide-react';
 import { getSessionInfo } from '../lib/identityApi';
 import { getDevicePayload, login } from '../lib/authApi';
 import { postAnalyticsEvent } from '../lib/analyticsApi';
+import { getAuthItem, setAuthItem } from '../lib/authStorage';
 
 interface LoginProps {
   onBack?: () => void;
@@ -23,7 +24,7 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
   const [loading, setLoading] = React.useState(false);
   React.useEffect(() => {
     try {
-      const tenant = localStorage.getItem('soko:tenant_id') || '';
+      const tenant = getAuthItem('soko:tenant_id') || '';
       setForm(prev => ({ ...prev, tenant_id: tenant }));
     } catch {}
   }, []);
@@ -41,17 +42,17 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
       });
       try {
         if (form.remember) {
-          localStorage.setItem('soko:auth_token', tokens.access_token);
-          localStorage.setItem('soko:refresh_token', tokens.refresh_token);
-          localStorage.setItem('soko:tenant_id', form.tenant_id.trim());
+          setAuthItem('soko:auth_token', tokens.access_token);
+          setAuthItem('soko:refresh_token', tokens.refresh_token);
+          setAuthItem('soko:tenant_id', form.tenant_id.trim());
         }
       } catch {}
       try {
         const session = await getSessionInfo();
-        if (session?.user_id) localStorage.setItem('soko:user_id', session.user_id);
-        if (session?.tenant_id) localStorage.setItem('soko:tenant_id', session.tenant_id);
-        if (session?.role) localStorage.setItem('soko:role', String(session.role).toLowerCase());
-        if (session?.session_id) localStorage.setItem('soko:session_id', session.session_id);
+        if (session?.user_id) setAuthItem('soko:user_id', session.user_id);
+        if (session?.tenant_id) setAuthItem('soko:tenant_id', session.tenant_id);
+        if (session?.role) setAuthItem('soko:role', String(session.role).toLowerCase());
+        if (session?.session_id) setAuthItem('soko:session_id', session.session_id);
       } catch {}
       try {
         const phone = form.phone.trim();

@@ -32,6 +32,7 @@ import { requestUploadPresign } from '../lib/uploadsApi';
 import { getOCRStatus, runOCR } from '../lib/assistantApi';
 import { listSellerProducts, SellerProduct } from '../lib/sellerProductsApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
+import { getAuthItem } from '../lib/authStorage';
 
 interface RewardsProps {
   openQrOnMount?: boolean;
@@ -594,7 +595,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
 
   const currentUserId = useMemo(() => {
     try {
-      return localStorage.getItem('soko:user_id') || '';
+      return getAuthItem('soko:user_id') || '';
     } catch {
       return '';
     }

@@ -35,6 +35,7 @@ import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
+import { getAuthItem, setAuthItem } from './lib/authStorage';
 
 type AppView =
   | 'feed'
@@ -146,7 +147,7 @@ export default function App() {
     ];
     if (hashViews.includes(hashView)) return hashView;
     try {
-      const token = localStorage.getItem('soko:auth_token');
+      const token = getAuthItem('soko:auth_token');
       return token ? 'assistant' : 'login';
     } catch {
       return 'assistant';
@@ -308,9 +309,9 @@ export default function App() {
         const role = String(session?.role || '').toLowerCase();
         if (!alive || !role) return;
         try {
-          localStorage.setItem('soko:role', role);
+          setAuthItem('soko:role', role);
           if (session?.session_id) {
-            localStorage.setItem('soko:session_id', session.session_id);
+            setAuthItem('soko:session_id', session.session_id);
           }
         } catch {}
       } catch {}

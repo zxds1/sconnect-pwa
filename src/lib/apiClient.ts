@@ -4,6 +4,7 @@ import {
   invalidateCachedJson,
   setCachedJson,
 } from './apiCache';
+import { getAuthItem, setAuthItem } from './authStorage';
 
 export type ApiError = {
   status: number;
@@ -44,10 +45,10 @@ const getHeaderValue = (headers: HeadersInit | undefined, key: string) => {
 };
 
 const getBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
-const getTenantId = () => getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
-const getUserId = () => getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
-const getAuthToken = () => getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
-const getRole = () => getStored('soko:role') ?? getEnv('VITE_ROLE') ?? '';
+const getTenantId = () => getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
+const getUserId = () => getAuthItem('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
+const getAuthToken = () => getAuthItem('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
+const getRole = () => getAuthItem('soko:role') ?? getEnv('VITE_ROLE') ?? '';
 const getCorrelationId = () => {
   const stored = getStored('soko:correlation_id');
   if (stored) return stored;
@@ -254,4 +255,48 @@ export const setApiBaseUrl = (url: string) => {
       localStorage.removeItem('soko:api_base_url');
     }
   } catch {}
+};
+
+export const setAuthContext = (payload: {
+  authToken?: string;
+  tenantId?: string;
+  userId?: string;
+  role?: string;
+  sessionId?: string;
+}) => {
+  if (payload.authToken !== undefined) {
+    if (payload.authToken) {
+      setAuthItem('soko:auth_token', payload.authToken);
+    } else {
+      setAuthItem('soko:auth_token', '');
+    }
+  }
+  if (payload.tenantId !== undefined) {
+    if (payload.tenantId) {
+      setAuthItem('soko:tenant_id', payload.tenantId);
+    } else {
+      setAuthItem('soko:tenant_id', '');
+    }
+  }
+  if (payload.userId !== undefined) {
+    if (payload.userId) {
+      setAuthItem('soko:user_id', payload.userId);
+    } else {
+      setAuthItem('soko:user_id', '');
+    }
+  }
+  if (payload.role !== undefined) {
+    if (payload.role) {
+      setAuthItem('soko:role', payload.role);
+    } else {
+      setAuthItem('soko:role', '');
+    }
+  }
+  if (payload.sessionId !== undefined) {
+    if (payload.sessionId) {
+      setAuthItem('soko:session_id', payload.sessionId);
+    } else {
+      setAuthItem('soko:session_id', '');
+    }
+  }
 };

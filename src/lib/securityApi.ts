@@ -1,4 +1,5 @@
 import { apiFetch } from './apiClient';
+import { getAuthItem } from './authStorage';
 
 const getEnv = (key: string) => {
   try {
@@ -11,7 +12,7 @@ const getEnv = (key: string) => {
 const getStored = (key: string) => {
   if (typeof window === 'undefined') return undefined;
   try {
-    return localStorage.getItem(key) ?? undefined;
+    return getAuthItem(key) ?? undefined;
   } catch {
     return undefined;
   }

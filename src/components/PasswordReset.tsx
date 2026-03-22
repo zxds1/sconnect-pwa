@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, KeyRound, Phone } from 'lucide-react';
 import { confirmPasswordReset, requestPasswordReset } from '../lib/authApi';
+import { getAuthItem } from '../lib/authStorage';
 
 interface PasswordResetProps {
   onBack?: () => void;
@@ -22,7 +23,7 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
 
   React.useEffect(() => {
     try {
-      const tenant = localStorage.getItem('soko:tenant_id') || '';
+      const tenant = getAuthItem('soko:tenant_id') || '';
       setForm(prev => ({ ...prev, tenant_id: tenant }));
     } catch {}
   }, []);

@@ -1,8 +1,12 @@
+import { getAuthItem } from './authStorage';
+
 type WsAuthParams = {
   tenantId?: string;
   userId?: string;
   role?: string;
-  token?: string;
+};
+type WsOptions = {
+  includeAuth?: boolean;
 };
 
 const getEnv = (key: string) => {
@@ -25,13 +29,16 @@ const getStored = (key: string) => {
 const resolveBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
 
 const resolveAuth = (): WsAuthParams => ({
-  tenantId: getStored('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001',
-  userId: getStored('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '',
-  role: getStored('soko:role') ?? getEnv('VITE_ROLE') ?? '',
-  token: getStored('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? ''
+  tenantId: getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001',
+  userId: getAuthItem('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '',
+  role: getAuthItem('soko:role') ?? getEnv('VITE_ROLE') ?? '',
 });
 
-export const buildWsUrl = (path: string, params?: Record<string, string | number | boolean | undefined>) => {
+export const buildWsUrl = (
+  path: string,
+  params?: Record<string, string | number | boolean | undefined>,
+  options?: WsOptions,
+) => {
   const base = resolveBaseUrl();
   let origin = base;
   if (!origin) {
@@ -46,10 +53,11 @@ export const buildWsUrl = (path: string, params?: Record<string, string | number
   }
   const auth = resolveAuth();
   const query = new URLSearchParams();
-  if (auth.tenantId) query.set('tenant_id', auth.tenantId);
-  if (auth.userId) query.set('user_id', auth.userId);
-  if (auth.role) query.set('role', auth.role);
-  if (auth.token) query.set('token', auth.token);
+  if (options?.includeAuth !== false) {
+    if (auth.tenantId) query.set('tenant_id', auth.tenantId);
+    if (auth.userId) query.set('user_id', auth.userId);
+    if (auth.role) query.set('role', auth.role);
+  }
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== '') query.set(key, String(value));

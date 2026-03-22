@@ -1,5 +1,6 @@
 import { apiFetch } from './apiClient';
 import { getOpsConfig } from './opsConfigApi';
+import { setAuthItem } from './authStorage';
 
 export type AuthTokens = {
   access_token: string;
@@ -86,10 +87,10 @@ export const login = async (payload: {
     const offlineEnabled = import.meta.env.DEV && await isOfflineLoginEnabled();
     if (offlineEnabled && matchesOfflineLogin(payload)) {
       try {
-        localStorage.setItem('soko:role', OFFLINE_LOGIN.role);
-        localStorage.setItem('soko:user_id', OFFLINE_LOGIN.user_id);
-        localStorage.setItem('soko:tenant_id', OFFLINE_LOGIN.tenant_id);
-        localStorage.setItem('soko:session_id', `offline_${Date.now().toString(16)}`);
+        setAuthItem('soko:role', OFFLINE_LOGIN.role);
+        setAuthItem('soko:user_id', OFFLINE_LOGIN.user_id);
+        setAuthItem('soko:tenant_id', OFFLINE_LOGIN.tenant_id);
+        setAuthItem('soko:session_id', `offline_${Date.now().toString(16)}`);
       } catch {}
       return createOfflineTokens();
     }

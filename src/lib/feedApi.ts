@@ -105,7 +105,7 @@ export const listLiveSessions = async (params: { cursor?: string; limit?: number
   return items.map((item: any) => item?.live || item);
 };
 
-export const joinLiveSession = async (id: string) =>
+export const joinLiveSession = async (id: string): Promise<{ viewer_count?: number; ws_ticket?: string }> =>
   apiFetch(`/v1/live/${id}/join`, { method: 'POST' });
 
 export const leaveLiveSession = async (id: string) =>

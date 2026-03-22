@@ -485,18 +485,24 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
     setLiveViewerCount(session.viewerCount ?? null);
     setLiveTypingUsers([]);
     setLiveModeration(null);
+    let wsTicket = '';
     try {
       const resp = await joinLiveSession(session.id);
       if (resp?.viewer_count !== undefined) {
         setLiveViewerCount(resp.viewer_count);
         setLiveSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, viewerCount: resp.viewer_count } : s)));
       }
+      wsTicket = resp?.ws_ticket || '';
     } catch {}
     fetchLiveComments(session.id);
     if (liveSocketRef.current) {
       liveSocketRef.current.close();
     }
-    const ws = new WebSocket(buildWsUrl(`/v1/live/${session.id}/ws`));
+    if (!wsTicket) {
+      setLiveModeration('Live chat could not be secured. Refresh the session.');
+      return;
+    }
+    const ws = new WebSocket(buildWsUrl(`/v1/live/${session.id}/ws`, wsTicket ? { ticket: wsTicket } : undefined, { includeAuth: false }));
     liveSocketRef.current = ws;
     ws.onmessage = (event) => {
       try {
