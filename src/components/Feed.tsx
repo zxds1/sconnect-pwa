@@ -27,6 +27,7 @@ import {
   unsaveFeedItem
 } from '../lib/feedApi';
 import { buildWsUrl } from '../lib/realtime';
+import { uploadMediaFile } from '../lib/mediaUpload';
 
 interface FeedProps {
   onChatOpen: (product: Product) => void;
@@ -85,7 +86,7 @@ const normalizeFeedItem = (item: any): FeedItem | null => {
     description: content || live?.title || '',
     price: 0,
     mediaUrl: primaryMedia?.media_url || '',
-    mediaType: (primaryMedia?.media_type as 'video' | 'image') || 'image',
+    mediaType: (primaryMedia?.media_type as 'video' | 'image') || guessMediaType(primaryMedia?.media_url || ''),
     tags: [],
     category: item.category_id || live?.category_id || 'general',
     stockLevel: 0,
@@ -109,6 +110,14 @@ const toProduct = (item: FeedItem): Product => ({
   stockLevel: item.stockLevel
 });
 
+const guessMediaType = (url: string): 'video' | 'image' => {
+  const lower = url.toLowerCase();
+  if (lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm') || lower.endsWith('.m4v')) {
+    return 'video';
+  }
+  return 'image';
+};
+
 export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerOpen }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isMuted, setIsMuted] = useState(true);
@@ -124,6 +133,8 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
     productId: '',
     neighborhoodId: ''
   });
+  const postMediaInputRef = useRef<HTMLInputElement | null>(null);
+  const [postMediaUploading, setPostMediaUploading] = useState(false);
   const [items, setItems] = useState<FeedItem[]>([]);
   const [trending, setTrending] = useState<FeedItem[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveItem[]>([]);
@@ -276,12 +287,12 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
         description: product?.description || item.description,
         price: typeof price === 'number' ? price : item.price,
         mediaUrl,
-        mediaType: (product?.media_type as 'video' | 'image') || item.mediaType,
+        mediaType: (product?.media_type as 'video' | 'image') || item.mediaType || guessMediaType(mediaUrl),
         tags: Array.isArray(product?.tags) ? product.tags : item.tags,
         category: product?.category || product?.category_id || item.category,
         stockLevel: Number(product?.stock_level ?? product?.stockLevel ?? item.stockLevel ?? 0),
         sellerName: seller?.name || item.sellerName,
-        sellerAvatar: seller?.logo_url || item.sellerAvatar,
+        sellerAvatar: seller?.avatar_url || seller?.avatar || seller?.logo_url || item.sellerAvatar,
         sellerRating: seller?.rating || item.sellerRating
       };
     });
@@ -372,6 +383,21 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
       loadFeed(tab);
     } catch (err: any) {
       setError(err?.message || 'Unable to create post.');
+    }
+  };
+
+  const handlePostMediaUpload = async (file: File) => {
+    setPostMediaUploading(true);
+    try {
+      const uploaded = await uploadMediaFile(file, 'feed_post_media');
+      setPostForm((prev) => ({ ...prev, mediaUrl: uploaded.url }));
+    } catch (err: any) {
+      setError(err?.message || 'Unable to upload media.');
+    } finally {
+      setPostMediaUploading(false);
+      if (postMediaInputRef.current) {
+        postMediaInputRef.current.value = '';
+      }
     }
   };
 
@@ -727,12 +753,24 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
           <div key={item.id} className="h-full w-full snap-start relative flex items-center justify-center overflow-hidden">
             <div className="absolute inset-0 z-0">
               {item.mediaUrl ? (
-                <img 
-                  src={item.mediaUrl} 
-                  alt={item.name}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
+                item.mediaType === 'video' ? (
+                  <video
+                    src={item.mediaUrl}
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    controls={false}
+                  />
+                ) : (
+                  <img 
+                    src={item.mediaUrl} 
+                    alt={item.name}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                )
               ) : (
                 <div className="w-full h-full bg-zinc-900" />
               )}
@@ -923,7 +961,11 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
 
               <div className="mt-4 w-10 h-10 rounded-full bg-zinc-800 border-4 border-zinc-700 flex items-center justify-center animate-spin overflow-hidden" style={{ animationDuration: '3s' }}>
                 {item.mediaUrl ? (
-                  <img src={item.mediaUrl} className="w-full h-full object-cover opacity-50" alt="record" />
+                  item.mediaType === 'video' ? (
+                    <video src={item.mediaUrl} className="w-full h-full object-cover opacity-50" autoPlay muted loop playsInline />
+                  ) : (
+                    <img src={item.mediaUrl} className="w-full h-full object-cover opacity-50" alt="record" />
+                  )
                 ) : (
                   <div className="w-full h-full bg-zinc-700" />
                 )}
@@ -962,12 +1004,23 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 >
                   <div className="aspect-[3/4] relative">
                     {product.mediaUrl ? (
-                      <img 
-                        src={product.mediaUrl} 
-                        className="w-full h-full object-cover" 
-                        alt={product.name}
-                        referrerPolicy="no-referrer"
-                      />
+                      product.mediaType === 'video' ? (
+                        <video
+                          src={product.mediaUrl}
+                          className="w-full h-full object-cover"
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                        />
+                      ) : (
+                        <img 
+                          src={product.mediaUrl} 
+                          className="w-full h-full object-cover" 
+                          alt={product.name}
+                          referrerPolicy="no-referrer"
+                        />
+                      )
                     ) : (
                       <div className="w-full h-full bg-zinc-700" />
                     )}
@@ -1175,7 +1228,45 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                   <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Price" value={postForm.price} onChange={(e) => setPostForm(prev => ({ ...prev, price: e.target.value }))} />
                   <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Category" value={postForm.category} onChange={(e) => setPostForm(prev => ({ ...prev, category: e.target.value }))} />
                 </div>
-                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Media URL (optional)" value={postForm.mediaUrl} onChange={(e) => setPostForm(prev => ({ ...prev, mediaUrl: e.target.value }))} />
+                <input
+                  ref={postMediaInputRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      void handlePostMediaUpload(file);
+                    }
+                  }}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => postMediaInputRef.current?.click()}
+                    className="flex-1 py-3 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold"
+                    disabled={postMediaUploading}
+                  >
+                    {postMediaUploading ? 'Uploading…' : 'Upload Media'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPostForm(prev => ({ ...prev, mediaUrl: '' }))}
+                    className="px-4 py-3 bg-zinc-100 text-zinc-700 rounded-xl text-xs font-bold"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Media URL (optional fallback)" value={postForm.mediaUrl} onChange={(e) => setPostForm(prev => ({ ...prev, mediaUrl: e.target.value }))} />
+                {postForm.mediaUrl && (
+                  <div className="rounded-2xl overflow-hidden border border-zinc-100 bg-zinc-50">
+                    {guessMediaType(postForm.mediaUrl) === 'video' ? (
+                      <video src={postForm.mediaUrl} className="w-full h-40 object-cover" controls />
+                    ) : (
+                      <img src={postForm.mediaUrl} className="w-full h-40 object-cover" alt="preview" />
+                    )}
+                  </div>
+                )}
                 <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Product ID (optional)" value={postForm.productId} onChange={(e) => setPostForm(prev => ({ ...prev, productId: e.target.value }))} />
                 <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Neighborhood ID (optional)" value={postForm.neighborhoodId} onChange={(e) => setPostForm(prev => ({ ...prev, neighborhoodId: e.target.value }))} />
                 <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Tags (comma separated)" value={postForm.tags} onChange={(e) => setPostForm(prev => ({ ...prev, tags: e.target.value }))} />

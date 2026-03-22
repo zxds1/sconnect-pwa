@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp, Linkedin, Globe } from 'lucide-react';
 import { Product } from '../types';
@@ -36,6 +36,7 @@ import {
   streamSupplierApplications,
   SupplierApplication
 } from '../lib/suppliersApi';
+import { uploadMediaFile } from '../lib/mediaUpload';
 
 interface ProfileProps {
   onBack?: () => void;
@@ -63,6 +64,14 @@ type ProfileData = {
   is_public?: boolean;
 };
 
+const guessMediaType = (url: string): 'video' | 'image' => {
+  const lower = url.toLowerCase();
+  if (lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm') || lower.endsWith('.m4v')) {
+    return 'video';
+  }
+  return 'image';
+};
+
 export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpenSellerStudio, onSellerAccountCreated, sellerFastTrack, onSellerFastTrackConsumed, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
   const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -87,6 +96,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const [socialForm, setSocialForm] = useState({ facebook: '', twitter: '', instagram: '', tiktok: '', linkedin: '', website: '' });
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [newPost, setNewPost] = useState({ content: '', media_url: '' });
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const postMediaInputRef = useRef<HTMLInputElement | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [postMediaUploading, setPostMediaUploading] = useState(false);
   const [creatingSellerAccount, setCreatingSellerAccount] = useState(false);
   const [sellerAccountStatus, setSellerAccountStatus] = useState<string | null>(null);
   const [autoSellerRequested, setAutoSellerRequested] = useState(false);
@@ -449,6 +462,37 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     }
   };
 
+  const handleProfilePostMediaUpload = async (file: File) => {
+    setPostMediaUploading(true);
+    try {
+      const uploaded = await uploadMediaFile(file, 'profile_post_media');
+      setNewPost((prev) => ({ ...prev, media_url: uploaded.url }));
+    } catch (err: any) {
+      setError(err?.message || 'Unable to upload media.');
+    } finally {
+      setPostMediaUploading(false);
+      if (postMediaInputRef.current) {
+        postMediaInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleAvatarUpload = async (file: File) => {
+    setAvatarUploading(true);
+    try {
+      const uploaded = await uploadMediaFile(file, 'profile_avatar');
+      setEditForm((prev) => ({ ...prev, avatar_url: uploaded.url }));
+      setProfile((prev) => prev ? { ...prev, avatar_url: uploaded.url, avatar: uploaded.url } : prev);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to upload avatar.');
+    } finally {
+      setAvatarUploading(false);
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleDeletePost = async (id: string) => {
     try {
       await deleteProfilePost(id);
@@ -746,11 +790,32 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
             alt="profile"
           />
           {isOwnProfile && (
-            <button onClick={() => setShowEdit(true)} className="absolute bottom-0 right-0 bg-indigo-600 rounded-full p-1.5 border-2 border-white shadow-lg hover:bg-indigo-700 transition-colors">
-              <Edit2 className="w-3 h-3 text-white" />
-            </button>
+            <>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    void handleAvatarUpload(file);
+                  }
+                }}
+              />
+              <button
+                onClick={() => avatarInputRef.current?.click()}
+                className="absolute bottom-0 right-0 bg-indigo-600 rounded-full p-1.5 border-2 border-white shadow-lg hover:bg-indigo-700 transition-colors"
+                disabled={avatarUploading}
+              >
+                <Edit2 className="w-3 h-3 text-white" />
+              </button>
+            </>
           )}
         </div>
+        {isOwnProfile && avatarUploading && (
+          <p className="mb-3 text-[10px] font-bold text-zinc-500">Uploading avatar…</p>
+        )}
         <div className="flex items-center gap-2 mb-1">
           <h1 className="text-xl font-black text-zinc-900">{profileData.name}</h1>
           {profileData.is_verified && (
@@ -1023,7 +1088,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                     onClick={() => onProductOpen(product)}
                   >
                     <div className="aspect-video relative">
-                      <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
+                      {product.mediaType === 'video' ? (
+                        <video src={product.mediaUrl} className="w-full h-full object-cover" autoPlay muted loop playsInline />
+                      ) : (
+                        <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
+                      )}
                       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg shadow-sm">
                         <span className="text-xs font-black text-zinc-900">KES {product.price}</span>
                       </div>
@@ -1117,7 +1186,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
             {likedProducts.map((product) => (
               <div key={product.id} className="bg-white rounded-2xl border border-zinc-100 overflow-hidden shadow-sm" onClick={() => onProductOpen(product)}>
                 <div className="aspect-square">
-                  <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
+                  {product.mediaType === 'video' ? (
+                    <video src={product.mediaUrl} className="w-full h-full object-cover" autoPlay muted loop playsInline />
+                  ) : (
+                    <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
+                  )}
                 </div>
                 <div className="p-3">
                   <p className="text-xs font-bold text-zinc-900 line-clamp-1">{product.name}</p>
@@ -1138,11 +1211,49 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                   onChange={(e) => setNewPost(prev => ({ ...prev, content: e.target.value }))}
                 />
                 <input
-                  className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold mb-3"
-                  placeholder="Media URL (optional)"
+                  ref={postMediaInputRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      void handleProfilePostMediaUpload(file);
+                    }
+                  }}
+                />
+                <div className="flex gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => postMediaInputRef.current?.click()}
+                    className="flex-1 py-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-[10px] font-bold"
+                    disabled={postMediaUploading}
+                  >
+                    {postMediaUploading ? 'Uploading…' : 'Upload Media'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPost((prev) => ({ ...prev, media_url: '' }))}
+                    className="px-3 py-2.5 bg-zinc-100 text-zinc-700 rounded-xl text-[10px] font-bold"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <input
+                  className="w-full p-2.5 bg-zinc-50 rounded-xl text-[10px] font-bold mb-2"
+                  placeholder="Media URL (optional fallback)"
                   value={newPost.media_url}
                   onChange={(e) => setNewPost(prev => ({ ...prev, media_url: e.target.value }))}
                 />
+                {newPost.media_url && (
+                  <div className="mb-3 rounded-2xl overflow-hidden border border-zinc-100">
+                    {guessMediaType(newPost.media_url) === 'video' ? (
+                      <video src={newPost.media_url} className="w-full h-40 object-cover" controls />
+                    ) : (
+                      <img src={newPost.media_url} className="w-full h-40 object-cover" alt="preview" />
+                    )}
+                  </div>
+                )}
                 <button onClick={handleCreatePost} className="w-full py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
                   Post
                 </button>
@@ -1163,11 +1274,23 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                   className="aspect-[3/4] bg-zinc-100 relative group overflow-hidden cursor-pointer"
                 >
                   {post.media_url ? (
-                    <img
-                      src={post.media_url}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                      alt="post"
-                    />
+                    guessMediaType(post.media_url) === 'video' ? (
+                      <video
+                        src={post.media_url}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        controls={false}
+                      />
+                    ) : (
+                      <img
+                        src={post.media_url}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        alt="post"
+                      />
+                    )
                   ) : (
                     <div className="w-full h-full flex items-center justify-center p-3 text-[10px] font-bold text-zinc-600">
                       {post.content || 'Post'}
@@ -1225,10 +1348,18 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
               />
               <input
                 className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
-                placeholder="Avatar URL"
+                placeholder="Avatar URL (optional fallback)"
                 value={editForm.avatar_url}
                 onChange={(e) => setEditForm(prev => ({ ...prev, avatar_url: e.target.value }))}
               />
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                className="w-full p-3 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold"
+                disabled={avatarUploading}
+              >
+                {avatarUploading ? 'Uploading avatar…' : 'Upload Avatar'}
+              </button>
               <div className="pt-2">
                 <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Social Links</p>
                 <div className="mt-2 grid grid-cols-1 gap-2">
