@@ -145,6 +145,7 @@ import { listPlans, getSubscriptionView, type Plan, type SubscriptionView } from
 import { createGroupBuyOffer } from '../lib/groupBuyApi';
 import { createProduct, listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { getVideoDurationSeconds } from '../lib/mediaUpload';
 import { addPathLandmark, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, type PathPoint, type RecordedPath } from '../lib/searchApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 import {
@@ -162,6 +163,7 @@ import { getSellerPreferences, updateSellerPreferences, type SellerPreferences a
 import { listShopReviews, replyShopReview, type ShopReview } from '../lib/sellerShopApi';
 import { getSellerNotificationPreferences, updateSellerNotificationPreferences, type SellerNotificationPreferences } from '../lib/sellerNotificationsApi';
 import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
+import { VideoTrimModal } from './VideoTrimModal';
 import {
   acceptRFQResponse,
   createRFQ,
@@ -462,6 +464,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [campaignStatus, setCampaignStatus] = useState<string | null>(null);
   const [campaignLoading, setCampaignLoading] = useState(false);
   const [referralPhone, setReferralPhone] = useState('');
+  const [pendingVideoTrim, setPendingVideoTrim] = useState<{
+    file: File;
+    kind: 'product' | 'avatar' | 'landmark';
+    targetProduct?: Product | null;
+    landmarkIndex?: number | null;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1282,10 +1290,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
   const handleLandmarkFile = async (index: number, file?: File | null) => {
     if (!file) return;
-    setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: true } : item));
     try {
-      const url = await uploadMediaFile(file, 'path_landmark');
-      setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, imageUrl: url, uploading: false } : item));
+      if (await shouldTrimVideo(file)) {
+        queueVideoTrim(file, 'landmark', { landmarkIndex: index });
+        return;
+      }
+      await uploadLandmarkMedia(file, index);
     } catch {
       setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: false } : item));
     }
@@ -3088,6 +3098,84 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     return presign.url || uploadUrl;
   };
 
+  const uploadProductMedia = async (file: File, targetProduct?: Product) => {
+    setProductsStatus(null);
+    setMediaUploading(true);
+    try {
+      const url = await uploadMediaFile(file);
+      setFormData(prev => ({ ...prev, mediaUrl: url }));
+      const activeProduct = targetProduct || editingProduct;
+      if (activeProduct) {
+        const mediaType: 'video' | 'image' = file.type.startsWith('video') ? 'video' : 'image';
+        await addSellerProductMedia(activeProduct.id, {
+          url,
+          media_type: mediaType
+        });
+        if (activeProduct.productId) {
+          const media = await listProductMedia(activeProduct.productId);
+          setProductMediaByProductId(prev => ({ ...prev, [activeProduct.productId!]: media }));
+        }
+        setMyProducts(prev => {
+          const next = prev.map(p => (p.id === activeProduct.id ? { ...p, mediaUrl: url, mediaType } : p));
+          pushProducts(next);
+          return next;
+        });
+      }
+      setProductsStatus('Media uploaded.');
+    } catch (err: any) {
+      setProductsStatus(err?.message || 'Unable to upload media.');
+    } finally {
+      setMediaUploading(false);
+      if (mediaInputRef.current) mediaInputRef.current.value = '';
+      if (mediaDrawerInputRef.current) mediaDrawerInputRef.current.value = '';
+    }
+  };
+
+  const uploadAvatar = async (file: File) => {
+    setSettingsStatus(null);
+    setAvatarUploading(true);
+    try {
+      const url = await uploadMediaFile(file);
+      await updateSellerProfile({ logo_url: url });
+      setSeller(prev => ({ ...prev, avatar: url }));
+      setSettingsStatus('Logo updated.');
+    } catch (err: any) {
+      setSettingsStatus(err?.message || 'Unable to upload logo.');
+    } finally {
+      setAvatarUploading(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  const uploadLandmarkMedia = async (file: File, index: number) => {
+    setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: true } : item));
+    try {
+      const url = await uploadMediaFile(file, 'path_landmark');
+      setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, imageUrl: url, uploading: false } : item));
+    } catch {
+      setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: false } : item));
+    }
+  };
+
+  const shouldTrimVideo = async (file: File) => {
+    if (!file.type.startsWith('video/')) return false;
+    const duration = await getVideoDurationSeconds(file);
+    return duration > 60;
+  };
+
+  const queueVideoTrim = (
+    file: File,
+    kind: 'product' | 'avatar' | 'landmark',
+    options: { targetProduct?: Product | null; landmarkIndex?: number | null } = {}
+  ) => {
+    setPendingVideoTrim({
+      file,
+      kind,
+      targetProduct: options.targetProduct ?? null,
+      landmarkIndex: options.landmarkIndex ?? null
+    });
+  };
+
   const uploadReceiptFile = async (file: File) => {
     const presign = await requestUploadPresign({
       file_name: file.name,
@@ -3125,50 +3213,58 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const handleProductMediaUpload = async (file: File, targetProduct?: Product) => {
-    setProductsStatus(null);
-    setMediaUploading(true);
     try {
-      const url = await uploadMediaFile(file);
-      setFormData(prev => ({ ...prev, mediaUrl: url }));
-      const activeProduct = targetProduct || editingProduct;
-      if (activeProduct) {
-        const mediaType: 'video' | 'image' = file.type.startsWith('video') ? 'video' : 'image';
-        await addSellerProductMedia(activeProduct.id, {
-          url,
-          media_type: mediaType
-        });
-        if (activeProduct.productId) {
-          const media = await listProductMedia(activeProduct.productId);
-          setProductMediaByProductId(prev => ({ ...prev, [activeProduct.productId!]: media }));
-        }
-        setMyProducts(prev => {
-          const next = prev.map(p => (p.id === activeProduct.id ? { ...p, mediaUrl: url, mediaType } : p));
-          pushProducts(next);
-          return next;
-        });
+      if (await shouldTrimVideo(file)) {
+        queueVideoTrim(file, 'product', { targetProduct: targetProduct ?? editingProduct });
+        return;
       }
-      setProductsStatus('Media uploaded.');
+      await uploadProductMedia(file, targetProduct);
     } catch (err: any) {
       setProductsStatus(err?.message || 'Unable to upload media.');
     } finally {
-      setMediaUploading(false);
       if (mediaInputRef.current) mediaInputRef.current.value = '';
+      if (mediaDrawerInputRef.current) mediaDrawerInputRef.current.value = '';
     }
   };
 
   const handleAvatarUpload = async (file: File) => {
-    setSettingsStatus(null);
-    setAvatarUploading(true);
     try {
-      const url = await uploadMediaFile(file);
-      await updateSellerProfile({ logo_url: url });
-      setSeller(prev => ({ ...prev, avatar: url }));
-      setSettingsStatus('Logo updated.');
+      if (await shouldTrimVideo(file)) {
+        queueVideoTrim(file, 'avatar');
+        return;
+      }
+      await uploadAvatar(file);
     } catch (err: any) {
       setSettingsStatus(err?.message || 'Unable to upload logo.');
     } finally {
-      setAvatarUploading(false);
       if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  const handleTrimmedVideoConfirm = async (trimmedFile: File) => {
+    const pending = pendingVideoTrim;
+    setPendingVideoTrim(null);
+    if (!pending) return;
+    if (pending.kind === 'product') {
+      await uploadProductMedia(trimmedFile, pending.targetProduct ?? undefined);
+      return;
+    }
+    if (pending.kind === 'landmark' && typeof pending.landmarkIndex === 'number') {
+      await uploadLandmarkMedia(trimmedFile, pending.landmarkIndex);
+      return;
+    }
+    await uploadAvatar(trimmedFile);
+  };
+
+  const handleTrimmedVideoCancel = () => {
+    const pending = pendingVideoTrim;
+    setPendingVideoTrim(null);
+    if (pending?.kind === 'product' || pending?.kind === 'landmark') {
+      if (mediaInputRef.current) mediaInputRef.current.value = '';
+      if (mediaDrawerInputRef.current) mediaDrawerInputRef.current.value = '';
+    }
+    if (pending?.kind === 'avatar' && avatarInputRef.current) {
+      avatarInputRef.current.value = '';
     }
   };
 
@@ -9730,7 +9826,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => handleLandmarkFile(idx, e.target.files?.[0])}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                handleLandmarkFile(idx, file);
+                              }
+                              e.currentTarget.value = '';
+                            }}
                           />
                         </label>
                       </div>
@@ -9797,6 +9899,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           </div>
         )}
       </AnimatePresence>
+      <VideoTrimModal
+        open={Boolean(pendingVideoTrim)}
+        file={pendingVideoTrim?.file || null}
+        maxDurationSeconds={60}
+        onCancel={handleTrimmedVideoCancel}
+        onConfirm={handleTrimmedVideoConfirm}
+      />
       {/* AI Listing Optimizer Overlay */}
       <AnimatePresence>
         {showListingOptimizer && (
