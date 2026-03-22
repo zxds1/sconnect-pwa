@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Send, Bot, User, X, Sparkles, Loader2, PhoneCall } from 'lucide-react';
+import { Send, Bot, User, X, Sparkles, Loader2, PhoneCall, Paperclip } from 'lucide-react';
 import { Product } from '../types';
-import { createChatThread, listChatMessages, createChatMessage, escalateChatThread } from '../lib/supportApi';
+import { createChatThread, listChatMessages, createChatMessage, escalateChatThread, createSupportTicketAttachment } from '../lib/supportApi';
 import { createThread, listMessages, streamThreadMessage } from '../lib/assistantApi';
+import { requestUploadPresign } from '../lib/uploadsApi';
 
 interface Message {
   role: 'user' | 'model';
@@ -29,11 +30,16 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [ticketId, setTicketId] = useState<string | null>(null);
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [assistantMetaByContent, setAssistantMetaByContent] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
   const [isEscalating, setIsEscalating] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentStatus, setAttachmentStatus] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentAccept = 'image/*,video/*,.pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
 
   const refreshMessages = async (id: string) => {
     const items = await listChatMessages(id);
@@ -131,12 +137,73 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
     if (!threadId) return;
     setIsEscalating(true);
     try {
-      await escalateChatThread(threadId);
+      const ticket = await escalateChatThread(threadId);
+      const id = ticket?.id || ticket?.ticket_id || ticket?.ticketId || null;
+      setTicketId(id);
     } catch (err: any) {
       setError(err?.message || 'Unable to escalate chat.');
     } finally {
       setIsEscalating(false);
     }
+  };
+
+  const uploadToPresignedUrl = async (file: File, presign: any) => {
+    const uploadUrl = presign?.upload_url || presign?.url;
+    if (!uploadUrl) throw new Error('Missing upload URL');
+    const method = (presign?.method || 'PUT').toUpperCase();
+    const headers: Record<string, string> = { ...(presign?.headers || {}) };
+    if (!headers['Content-Type'] && file.type) {
+      headers['Content-Type'] = file.type;
+    }
+    const res = await fetch(uploadUrl, { method, headers, body: file });
+    if (!res.ok) {
+      throw new Error(`Upload failed (${res.status})`);
+    }
+    return presign?.s3_key || presign?.key;
+  };
+
+  const uploadAttachmentFile = async (file: File) => {
+    if (!file || !threadId) return;
+    setUploading(true);
+    setError(null);
+    setAttachmentStatus(null);
+    try {
+      let currentTicketId = ticketId;
+      if (!currentTicketId) {
+        const ticket = await escalateChatThread(threadId);
+        currentTicketId = ticket?.id ?? ticket?.ticket_id ?? ticket?.ticketId ?? null;
+        setTicketId(currentTicketId);
+      }
+      if (!currentTicketId) {
+        throw new Error('Unable to create support ticket for attachment.');
+      }
+      const presign = await requestUploadPresign({
+        file_name: file.name,
+        mime_type: file.type || 'application/octet-stream',
+        content_length: file.size,
+        context: 'support'
+      });
+      const s3Key = await uploadToPresignedUrl(file, presign);
+      await createSupportTicketAttachment(currentTicketId, {
+        s3_key: s3Key,
+        file_name: file.name,
+        mime_type: file.type || 'application/octet-stream'
+      });
+      await createChatMessage(threadId, { role: 'user', content: `Uploaded attachment: ${file.name}` });
+      await refreshMessages(threadId);
+      setAttachmentStatus('Attachment uploaded.');
+    } catch (err: any) {
+      setAttachmentStatus(err?.message || 'Attachment upload failed.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleAttachmentSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await uploadAttachmentFile(file);
   };
 
   return (
@@ -272,16 +339,36 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
         </div>
 
         <div className="p-4 bg-white border-t">
+          {attachmentStatus && (
+            <div className={`mb-2 text-[10px] font-bold ${attachmentStatus.includes('uploaded') ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {attachmentStatus}
+            </div>
+          )}
           <div className="relative">
             <input
+              ref={fileInputRef}
+              type="file"
+              accept={attachmentAccept}
+              className="hidden"
+              onChange={handleAttachmentSelected}
+            />
+            <input
               type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask about this product..."
-            aria-label="Message input"
-            className="w-full pl-4 pr-12 py-3 bg-[#f1f6ff] rounded-xl text-xs font-medium text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
-          />
+            className="w-full pl-12 pr-12 py-3 bg-[#f1f6ff] rounded-xl text-xs font-medium text-zinc-900 placeholder:text-zinc-500 caret-[#1976D2] focus:outline-none focus:ring-2 focus:ring-[#1976D2]/40"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              placeholder="Ask about this product..."
+              aria-label="Message input"
+            />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || !threadId}
+            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-[#eaf2ff] text-[#1976D2] rounded-lg disabled:opacity-50 transition-opacity focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+            aria-label="Attach a file"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
           <button
             onClick={handleSend}
             disabled={!input.trim() || isLoading || !threadId}
