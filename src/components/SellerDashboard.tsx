@@ -3228,11 +3228,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const handleAvatarUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setSettingsStatus('Avatar must be an image.');
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+      return;
+    }
     try {
-      if (await shouldTrimVideo(file)) {
-        queueVideoTrim(file, 'avatar');
-        return;
-      }
       await uploadAvatar(file);
     } catch (err: any) {
       setSettingsStatus(err?.message || 'Unable to upload logo.');
@@ -9220,7 +9221,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Media URL (Image/Video)</label>
+                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Media Upload (video clips must be 60s max)</label>
                 <div className="flex gap-2">
                   <input 
                     type="text" 
@@ -9232,7 +9233,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <input
                     ref={mediaInputRef}
                     type="file"
-                    accept="image/*,video/*"
+                  accept="image/*,video/*"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];

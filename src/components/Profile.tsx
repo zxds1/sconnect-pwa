@@ -503,6 +503,13 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleAvatarUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('Avatar must be an image.');
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+      return;
+    }
     setAvatarUploading(true);
     try {
       const uploaded = await uploadMediaFile(file, 'profile_avatar');
