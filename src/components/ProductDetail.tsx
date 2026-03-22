@@ -58,6 +58,7 @@ import { requestUploadPresign } from '../lib/uploadsApi';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
 import { getOpsConfig } from '../lib/opsConfigApi';
 import { getUiPreferences, updateUiPreferences } from '../lib/settingsApi';
+import { getAuthItem } from '../lib/authStorage';
 import {
   detectCityKey,
   getCityMultiplier,
@@ -74,6 +75,7 @@ interface ProductDetailProps {
   onClose: () => void;
   onChatOpen: (product: Product) => void;
   onOpenSupportChat?: () => void;
+  onRequireLogin?: (message: string) => void;
   onAddToComparison: (product: Product) => void;
   isCompared: boolean;
   onBuyNow?: (product: Product) => void;
@@ -153,6 +155,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   onClose,
   onChatOpen,
   onOpenSupportChat,
+  onRequireLogin,
   onAddToComparison,
   isCompared,
   onBuyNow,
@@ -487,6 +490,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleBuyNow = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to buy this item and continue checkout.');
+      return;
+    }
     if (onBuyNow) {
       onBuyNow(activeProduct);
       return;
@@ -510,6 +517,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleAddToBagClick = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to add this item to your bag.');
+      return;
+    }
     try {
       if (!sellerId) {
         setError('Seller unavailable for this product.');
@@ -529,6 +540,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleSubmitReview = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to leave a product review.');
+      return;
+    }
     if (!reviewForm.comment.trim()) return;
     try {
       const created = await createProductReview(productId, {
@@ -553,6 +568,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleFlagReview = async (reviewId: string) => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to flag a review.');
+      return;
+    }
     try {
       await createModerationReview({
         source_type: 'product_review',
@@ -567,6 +586,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleAskQuestion = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to ask a product question.');
+      return;
+    }
     if (!qaInput.trim()) return;
     try {
       const created = await createProductQuestion(productId, { question: qaInput.trim() });
@@ -580,6 +603,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleAnswerQuestion = async (questionId: string) => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to answer product questions.');
+      return;
+    }
     const answer = window.prompt('Answer this question:');
     if (!answer?.trim()) return;
     try {
@@ -591,6 +618,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleToggleWatch = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to watch this product and receive alerts.');
+      return;
+    }
     try {
       if (!isWatched) {
         const targetInput = window.prompt('Target price for alert (KES):', String(activeProduct.price));
@@ -623,6 +654,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleShareReward = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to earn share rewards.');
+      return;
+    }
     try {
       const channel = typeof navigator !== 'undefined' && 'share' in navigator ? 'native' : 'link';
       await shareProduct(productId, { channel });
@@ -642,6 +677,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleCounterfeitReport = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to report counterfeit products.');
+      return;
+    }
     const reason = counterfeitForm.reason.trim();
     if (!reason) {
       setCounterfeitErrors({ reason: 'Reason is required.' });
@@ -671,6 +710,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleDispute = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to open a dispute.');
+      return;
+    }
     if (!disputeForm.orderId.trim()) {
       setDisputeErrors({ orderId: 'Order ID is required.' });
       return;
@@ -709,6 +752,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const handleEvidenceUpload = async () => {
+    if (!getAuthItem('soko:auth_token')) {
+      onRequireLogin?.('Sign in to upload dispute evidence.');
+      return;
+    }
     if (!disputeId) {
       setEvidenceStatus('Create the dispute first to add evidence.');
       return;

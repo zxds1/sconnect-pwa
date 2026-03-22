@@ -1174,6 +1174,7 @@ export default function App() {
               isCompared={comparisonList.some(p => p.id === selectedProduct.id)}
               onBuyNow={handleBuyNow}
               onAddToBag={handleAddToBag}
+              onRequireLogin={(message) => promptForLogin(message, view)}
               initialShowMap={Boolean(navigationPreset?.autoOpen)}
               initialPreferredPathId={navigationPreset?.pathId || null}
               initialRouteProfile={navigationPreset?.profile}
