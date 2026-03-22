@@ -675,6 +675,22 @@ export default function App() {
     setView('rewards');
   };
 
+  const handleOpenBag = () => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to view your bag and checkout.', 'bag');
+      return;
+    }
+    setView('bag');
+  };
+
+  const handleOpenSubscriptions = () => {
+    if (!hasSession()) {
+      promptForLogin('Sign in to manage payments and subscriptions.', 'subscriptions');
+      return;
+    }
+    setView('subscriptions');
+  };
+
   const handleOpenProfile = () => {
     if (!hasSession()) {
       promptForLogin('Sign in to open your profile and manage account settings.', 'profile');
@@ -799,12 +815,12 @@ export default function App() {
                 onOpenSellerStudio={handleOpenSellerStudio}
                 onOpenRFQ={handleOpenRFQ}
                 onOpenOnboarding={() => setShowOnboarding(true)}
-                onOpenBag={() => setView('bag')}
+                onOpenBag={handleOpenBag}
                 onOpenQrScan={() => {
                   setOpenRewardsQrOnMount(true);
                   setView('rewards');
                 }}
-                onOpenSubscriptions={() => setView('subscriptions')}
+                onOpenSubscriptions={handleOpenSubscriptions}
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenFeed={() => setView('feed')}
                 onOpenGroupBuys={() => setView('group-buys')}
@@ -1059,11 +1075,29 @@ export default function App() {
                 <h1 className="ml-3 text-xl font-bold">Settings</h1>
               </div>
               <Settings
-                onOpenDataDashboard={() => setView('data')}
-                onOpenNotifications={() => setView('notifications')}
-                onOpenProfile={() => setView('profile')}
-                onOpenSecurity={() => setView('password-reset')}
-                onOpenPayments={() => setView('subscriptions')}
+                onOpenDataDashboard={() => {
+                  if (!hasSession()) {
+                    promptForLogin('Sign in to open your data dashboard.', 'data');
+                    return;
+                  }
+                  setView('data');
+                }}
+                onOpenNotifications={() => {
+                  if (!hasSession()) {
+                    promptForLogin('Sign in to view your notifications.', 'notifications');
+                    return;
+                  }
+                  setView('notifications');
+                }}
+                onOpenProfile={handleOpenProfile}
+                onOpenSecurity={() => {
+                  if (!hasSession()) {
+                    promptForLogin('Sign in to change security settings.', 'password-reset');
+                    return;
+                  }
+                  setView('password-reset');
+                }}
+                onOpenPayments={handleOpenSubscriptions}
                 onOpenSupport={() => openSupportChat('duka')}
                 onOpenPolicies={() => openSupportChat('duka')}
               />
