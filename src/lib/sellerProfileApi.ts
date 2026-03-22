@@ -9,13 +9,32 @@ export type SellerProfile = {
   hours?: Record<string, any>;
   service_area?: Record<string, any>;
   seller_mode?: string;
+  place_id?: string;
+  default_region_id?: string;
+  default_lat?: number;
+  default_lng?: number;
+  location_mode?: string;
+  service_regions?: string[];
   market_name?: string;
   visual_marker?: string;
   delivery_radius_km?: number;
   whatsapp_number?: string;
+  shop_front_image_url?: string;
+  directions_note?: string;
+  landmarks?: ShopLandmark[];
   daily_lat?: number;
   daily_lng?: number;
   delivery_details?: DeliveryDetails;
+};
+
+export type ShopLandmark = {
+  id?: string;
+  label: string;
+  type?: string;
+  image_url: string;
+  lat?: number;
+  lng?: number;
+  sequence?: number;
 };
 
 export type DeliveryDetails = {
@@ -46,6 +65,9 @@ export type SellerLocation = {
   address?: string;
   lat?: number;
   lng?: number;
+  region_id?: string;
+  place_id?: string;
+  source?: string;
 };
 
 export type SellerRank = {
@@ -80,10 +102,17 @@ export const updateSellerProfile = async (payload: {
   hours?: Record<string, any>;
   service_area?: Record<string, any>;
   seller_mode?: string;
+  place_id?: string;
+  default_region_id?: string;
+  location_mode?: string;
+  service_regions?: string[];
   market_name?: string;
   visual_marker?: string;
   delivery_radius_km?: number;
   whatsapp_number?: string;
+  shop_front_image_url?: string;
+  directions_note?: string;
+  landmarks?: ShopLandmark[];
   daily_lat?: number;
   daily_lng?: number;
   delivery_details?: DeliveryDetails;
@@ -96,19 +125,30 @@ export const updateSellerProfile = async (payload: {
 export const listSellerLocations = async (): Promise<SellerLocation[]> =>
   unwrapList(await apiFetch('/v1/seller/locations'));
 
-export const createSellerLocation = async (payload: { address: string; lat?: number; lng?: number }) =>
+export const createSellerLocation = async (payload: { address: string; lat?: number; lng?: number; region_id?: string; place_id?: string; source?: string }) =>
   apiFetch('/v1/seller/locations', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 
-export const updateSellerLocation = async (id: string, payload: { address: string; lat?: number; lng?: number }) =>
+export const updateSellerLocation = async (id: string, payload: { address: string; lat?: number; lng?: number; region_id?: string; place_id?: string; source?: string }) =>
   apiFetch(`/v1/seller/locations/${id}`,
     {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }
   );
+
+export const listSellerLocationHistory = async (): Promise<Array<{
+  id: string;
+  lat: number;
+  lng: number;
+  region_id?: string;
+  place_id?: string;
+  source?: string;
+  created_at?: string;
+}>> =>
+  unwrapList(await apiFetch('/v1/seller/locations/history'));
 
 export const getSellerRank = async (): Promise<SellerRank> =>
   apiFetch('/v1/seller/rank');

@@ -123,33 +123,47 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <div className="p-4 border-b bg-white sticky top-0 z-10 flex items-center gap-3">
-        {onBack && (
-          <button onClick={onBack} className="px-3 py-1 rounded-full bg-zinc-100 text-xs font-bold">Back</button>
-        )}
-        <div>
-          <h2 className="text-lg font-black">Group Buys</h2>
-          <p className="text-[11px] text-zinc-500 font-medium">Seller opt-in only • Live tiers • Location aware</p>
+    <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-zinc-100">
+      <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950/90 backdrop-blur px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-4">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {onBack && (
+              <button onClick={onBack} className="px-3 py-2 rounded-full bg-white/10 text-xs font-bold text-white">
+                Back
+              </button>
+            )}
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">Shared deals</p>
+              <h2 className="text-2xl font-black text-white">Group Buys</h2>
+            </div>
+          </div>
+          <div className="hidden sm:block text-right">
+            <p className="text-[11px] text-white/70 font-medium">Join nearby shoppers for better prices.</p>
+            <p className="text-[10px] text-white/50 font-bold">Seller participation is optional and location-aware.</p>
+          </div>
         </div>
       </div>
 
-      <div className="p-4 grid gap-4">
-        <div className="bg-white border rounded-2xl p-4 grid gap-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-zinc-500 uppercase tracking-widest">
-            <Filter className="w-4 h-4" /> Filters
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+      <div className="px-4 py-5">
+        <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/95 p-5 shadow-2xl shadow-black/10">
+            <div className="flex items-center gap-2 text-xs font-bold text-zinc-500 uppercase tracking-widest">
+              <Filter className="w-4 h-4" /> Find deals
+            </div>
+            <p className="mt-2 text-sm text-zinc-600">
+              Filter by market, category, price, and distance to see the best shared orders nearby.
+            </p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
               value={filters.market_name}
               onChange={(e) => setFilters((prev) => ({ ...prev, market_name: e.target.value }))}
-              placeholder="Market name"
+              placeholder="Market or area"
               className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
             />
             <input
               value={filters.category_id}
               onChange={(e) => setFilters((prev) => ({ ...prev, category_id: e.target.value }))}
-              placeholder="Category"
+              placeholder="Category or product"
               className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
             />
             <select
@@ -174,66 +188,70 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             <input
               value={filters.price_max}
               onChange={(e) => setFilters((prev) => ({ ...prev, price_max: e.target.value }))}
-              placeholder="Max price"
+              placeholder="Max price you want"
               type="number"
               className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
             />
             <input
               value={filters.radius_km}
               onChange={(e) => setFilters((prev) => ({ ...prev, radius_km: e.target.value }))}
-              placeholder="Radius (km)"
+              placeholder="Distance radius (km)"
               type="number"
               className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
             />
+            </div>
+            <button
+              onClick={handleUseMyLocation}
+              className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-indigo-600"
+            >
+              <MapPin className="w-4 h-4" /> Use my current location
+            </button>
           </div>
-          <button
-            onClick={handleUseMyLocation}
-            className="inline-flex items-center gap-2 text-xs font-bold text-indigo-600"
-          >
-            <MapPin className="w-4 h-4" /> Use my location
-          </button>
+
+          <div className="rounded-3xl border border-white/10 bg-zinc-950 p-5 text-white shadow-2xl shadow-black/20">
+            <div className="text-xs font-black text-emerald-300 uppercase tracking-widest">Request a group deal</div>
+            <p className="mt-2 text-sm text-white/70">
+              Tell nearby sellers what you want, how many you need, and the price that works for you.
+            </p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                value={createSku}
+                onChange={(e) => setCreateSku(e.target.value)}
+                placeholder="Product SKU or name"
+                className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white placeholder:text-white/40"
+              />
+              <input
+                value={createQty}
+                onChange={(e) => setCreateQty(e.target.value)}
+                placeholder="How many units"
+                type="number"
+                className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white placeholder:text-white/40"
+              />
+              <input
+                value={createPrice}
+                onChange={(e) => setCreatePrice(e.target.value)}
+                placeholder="Target price"
+                type="number"
+                className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white placeholder:text-white/40"
+              />
+            </div>
+            <button
+              onClick={handleCreateRequest}
+              className="mt-4 px-4 py-3 rounded-2xl bg-emerald-500 text-white text-xs font-black inline-flex items-center gap-2"
+            >
+              <ShoppingCart className="w-4 h-4" /> Request deal
+            </button>
+          </div>
         </div>
 
-        <div className="bg-white border rounded-2xl p-4 grid gap-3">
-          <div className="text-xs font-black text-zinc-500 uppercase tracking-widest">Create Buyer Request</div>
-          <div className="grid grid-cols-3 gap-2">
-            <input
-              value={createSku}
-              onChange={(e) => setCreateSku(e.target.value)}
-              placeholder="Product SKU"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-            <input
-              value={createQty}
-              onChange={(e) => setCreateQty(e.target.value)}
-              placeholder="Qty"
-              type="number"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-            <input
-              value={createPrice}
-              onChange={(e) => setCreatePrice(e.target.value)}
-              placeholder="Target price"
-              type="number"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-          </div>
-          <button
-            onClick={handleCreateRequest}
-            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold inline-flex items-center gap-2"
-          >
-            <ShoppingCart className="w-4 h-4" /> Create Request
-          </button>
-        </div>
-
-        {error && <div className="text-sm text-red-600 font-semibold">{error}</div>}
+        {error && <div className="mx-auto mt-4 w-full max-w-6xl text-sm text-rose-200 font-semibold">{error}</div>}
         {loading && (
-          <div className="flex items-center gap-2 text-sm text-zinc-500">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading group buys...
+          <div className="mx-auto mt-4 w-full max-w-6xl flex items-center gap-2 text-sm text-white/70">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading shared deals...
           </div>
         )}
 
-        <div className="grid gap-4">
+        <div className="mx-auto mt-4 grid w-full max-w-6xl gap-4 xl:grid-cols-2">
           {items.map((item) => {
             const target = Math.max(1, item.target_tier_qty || item.min_group_size || 1);
             const current = item.current_size || 0;
@@ -251,11 +269,11 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 key={item.id}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white border rounded-2xl p-4 shadow-sm"
+                className="rounded-3xl border border-white/10 bg-white/95 p-5 shadow-2xl shadow-black/10"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-black">{item.product_sku || 'Group Buy'}</div>
+                    <div className="text-sm font-black text-zinc-900">{item.product_sku || 'Shared deal'}</div>
                     <div className="text-[11px] text-zinc-500">
                       {item.market_name || item.seller_name || 'Market'} • {item.distance_km ? `${item.distance_km.toFixed(1)}km` : 'Nearby'}{etaMin ? ` • ${etaMin} min` : ''}
                     </div>
@@ -264,14 +282,14 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-black">KSh {tierPrice || '-'}</div>
+                    <div className="text-sm font-black text-zinc-900">KSh {tierPrice || '-'}</div>
                     {tierDiscount && <div className="text-[10px] text-emerald-600 font-bold">{tierDiscount} off</div>}
                   </div>
                 </div>
 
                 <div className="mt-3">
                   <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase">
-                    <span>{current}/{target} filled</span>
+                    <span>{current}/{target} joined</span>
                     <span>{progress}%</span>
                   </div>
                   <div className="h-2 rounded-full bg-zinc-100 overflow-hidden mt-1">
@@ -284,14 +302,14 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                     onClick={() => handleJoin(item)}
                     className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold inline-flex items-center gap-2"
                   >
-                    <Users className="w-4 h-4" /> Join Chat
+                    <Users className="w-4 h-4" /> Join deal
                   </button>
                   {shareLink && (
                     <button
                       onClick={() => window.open(shareLink, '_blank', 'noopener')}
                       className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-xs font-bold inline-flex items-center gap-2"
                     >
-                      <MessageCircle className="w-4 h-4" /> Open Chat
+                      <MessageCircle className="w-4 h-4" /> Open discussion
                     </button>
                   )}
                   {item.whatsapp_number && (
@@ -299,7 +317,7 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                       href={`https://wa.me/${item.whatsapp_number}`}
                       className="px-3 py-2 rounded-xl bg-zinc-100 text-xs font-bold inline-flex items-center gap-2"
                     >
-                      <MessageCircle className="w-4 h-4" /> WhatsApp
+                      <MessageCircle className="w-4 h-4" /> Contact seller
                     </a>
                   )}
                   {item.expires_at && (

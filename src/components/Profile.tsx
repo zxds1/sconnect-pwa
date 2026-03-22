@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp, Linkedin, Globe } from 'lucide-react';
+import { Settings as SettingsIcon, Grid, Heart, ShoppingBag, Edit2, Share2, ChevronLeft, BarChart3, Star, MapPin, BadgeCheck, Facebook, Twitter, Instagram, ExternalLink, Sparkles, TrendingUp, Linkedin, Globe, X } from 'lucide-react';
 import { Product } from '../types';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, Tooltip
@@ -27,9 +27,11 @@ import {
   removeProfileFavorite,
   updateProfile
 } from '../lib/profileApi';
+import { getAuthItem, getVisitorId } from '../lib/authStorage';
 import { getShopProfile, getShopStats } from '../lib/shopDirectoryApi';
 import { updateSellerProfile } from '../lib/sellerProfileApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
+import { postAnalyticsEvent } from '../lib/analyticsApi';
 import {
   createSupplierApplication,
   listSupplierApplications,
@@ -42,6 +44,7 @@ import { VideoTrimModal } from './VideoTrimModal';
 interface ProfileProps {
   onBack?: () => void;
   onSettingsOpen?: () => void;
+  onRequireLogin?: (message: string) => void;
   onOpenSellerStudio?: () => void;
   onSellerAccountCreated?: () => void;
   sellerFastTrack?: boolean;
@@ -73,7 +76,8 @@ const guessMediaType = (url: string): 'video' | 'image' => {
   return 'image';
 };
 
-export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpenSellerStudio, onSellerAccountCreated, sellerFastTrack, onSellerFastTrackConsumed, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
+export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequireLogin, onOpenSellerStudio, onSellerAccountCreated, sellerFastTrack, onSellerFastTrackConsumed, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
+  const hasSession = Boolean(getAuthItem('soko:auth_token'));
   const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [shopProfile, setShopProfile] = useState<Record<string, any> | null>(null);
@@ -96,6 +100,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const [editForm, setEditForm] = useState({ display_name: '', bio: '', description: '', avatar_url: '', is_public: true });
   const [socialForm, setSocialForm] = useState({ facebook: '', twitter: '', instagram: '', tiktok: '', linkedin: '', website: '' });
   const [showFullDescription, setShowFullDescription] = useState(false);
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false);
   const [newPost, setNewPost] = useState({ content: '', media_url: '' });
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const postMediaInputRef = useRef<HTMLInputElement | null>(null);
@@ -119,6 +124,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   const [showSupplierForm, setShowSupplierForm] = useState(false);
 
   const isOwnProfile = !sellerId;
+  const isGuestOwnProfile = isOwnProfile && !hasSession;
+  const canManageOwnProfile = isOwnProfile && hasSession;
+  const visitorId = useMemo(() => (isGuestOwnProfile ? getVisitorId() : ''), [isGuestOwnProfile]);
+  const visitorLabel = visitorId ? `Visitor ${visitorId.slice(-6).toUpperCase()}` : 'Visitor';
 
   const profileData = useMemo(() => {
     if (!isOwnProfile && shopProfile) {
@@ -131,13 +140,13 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
       } as any;
     }
     return {
-      name: profile?.display_name || profile?.name || 'Profile',
+      name: profile?.display_name || profile?.name || (isGuestOwnProfile ? visitorLabel : 'Profile'),
       avatar: profile?.avatar_url || profile?.avatar || '/logo.jpg',
       bio: profile?.bio || '',
       description: profile?.description || '',
       is_verified: false,
     } as any;
-  }, [isOwnProfile, profile, shopProfile]);
+  }, [isOwnProfile, isGuestOwnProfile, visitorLabel, profile, shopProfile]);
 
   const sellerProducts = sellerId ? products.filter(p => p.sellerId === sellerId) : [];
 
@@ -215,6 +224,20 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           if (!alive) return;
           setShopProfile(shop || null);
           setShopStats(statsResp || null);
+        } else if (!hasSession) {
+          if (!alive) return;
+          setProfile(null);
+          setPosts([]);
+          setLikes([]);
+          setFavorites([]);
+          setReviews([]);
+          setInsights(null);
+          setInsightsHistory([]);
+          setInsightsTrending(null);
+          setInsightsReach(null);
+          setInsightsEngagement(null);
+          setSocialConnections([]);
+          setShareLink('');
         } else {
           const [profileResp, postsResp, likesResp, favResp, reviewsResp, insightsResp, insightsHistResp, trendResp, reachResp, engagementResp, socialResp, shareResp] = await Promise.all([
             getProfile(),
@@ -269,7 +292,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
         }
       } catch (err: any) {
         if (!alive) return;
-        setError(err?.message || 'Unable to load profile.');
+        setError(isGuestOwnProfile ? null : (err?.message || 'Unable to load profile.'));
       } finally {
         if (alive) setLoading(false);
       }
@@ -278,7 +301,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     return () => {
       alive = false;
     };
-  }, [sellerId]);
+  }, [sellerId, hasSession, isGuestOwnProfile]);
 
   useEffect(() => {
     let active = true;
@@ -348,7 +371,26 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
     };
   }, [isOwnProfile, isSellerAccount]);
 
+  const recordGuestAction = async (action: string) => {
+    try {
+      await postAnalyticsEvent({
+        name: 'guest_profile_action',
+        action,
+        source: 'profile',
+        properties: {
+          profile_id: sellerId || profile?.id || undefined,
+          profile_name: profileData.name,
+        },
+      });
+    } catch {}
+  };
+
   const handleShare = async () => {
+    if (!hasSession) {
+      await recordGuestAction('share_prompt');
+      onRequireLogin?.('Sign in to share and follow profiles.');
+      return;
+    }
     try {
       const created = isOwnProfile ? await createProfileShare() : null;
       const shareToken = created?.share_token || shareLink || '';
@@ -402,6 +444,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   }, [socialConnections]);
 
   const handleSocialAction = async (platform: string) => {
+    if (!hasSession) {
+      await recordGuestAction(`social_${platform}`);
+      onRequireLogin?.('Sign in to open social links and interact with profiles.');
+      return;
+    }
     const raw = getSocialLink(platform);
     const url = buildSocialUrl(platform, raw);
     if (url) {
@@ -415,6 +462,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
 
   const handleFollow = async () => {
     if (!sellerId) return;
+    if (!hasSession) {
+      await recordGuestAction(isFollowingSeller ? 'follow_prompt_unfollow' : 'follow_prompt_follow');
+      onRequireLogin?.('Sign in to follow sellers and manage profile interactions.');
+      return;
+    }
     try {
       if (isFollowingSeller) {
         await removeProfileFavorite(sellerId);
@@ -430,6 +482,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleProfileUpdate = async () => {
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to edit your profile.');
+      return;
+    }
     try {
       const updated = await updateProfile(editForm);
       setProfile((prev) => ({ ...prev, ...(updated || editForm) }));
@@ -454,6 +510,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleCreatePost = async () => {
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to create posts.');
+      return;
+    }
     if (!newPost.content.trim() && !newPost.media_url.trim()) return;
     try {
       const created = await createProfilePost({ content: newPost.content.trim(), media_url: newPost.media_url.trim() || undefined });
@@ -503,6 +563,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleAvatarUpload = async (file: File) => {
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to update your profile photo.');
+      return;
+    }
     if (!file.type.startsWith('image/')) {
       setError('Avatar must be an image.');
       if (avatarInputRef.current) {
@@ -526,6 +590,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleDeletePost = async (id: string) => {
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to manage your posts.');
+      return;
+    }
     try {
       await deleteProfilePost(id);
       setPosts(prev => prev.filter(p => (p.id || p.post_id) !== id));
@@ -535,6 +603,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   const handleCreateSellerAccount = async () => {
+    if (!hasSession) {
+      onRequireLogin?.('Sign in to create a seller account.');
+      return;
+    }
     setSellerAccountStatus(null);
     setCreatingSellerAccount(true);
     try {
@@ -630,7 +702,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
   };
 
   return (
-    <div className="h-full bg-white flex flex-col overflow-y-auto no-scrollbar">
+    <div className="h-full bg-white flex flex-col overflow-y-auto no-scrollbar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <div className="p-4 flex items-center justify-between sticky top-0 bg-white z-20 border-b border-zinc-100">
         <div className="flex items-center gap-3">
           {onBack && (
@@ -652,7 +724,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           <button onClick={handleShare} className="p-1 hover:bg-zinc-100 rounded-full transition-colors">
             <Share2 className="w-6 h-6 text-zinc-800" />
           </button>
-          {isOwnProfile && onSettingsOpen && (
+          {canManageOwnProfile && onSettingsOpen && (
             <button onClick={onSettingsOpen} className="p-1 hover:bg-zinc-100 rounded-full transition-colors">
               <SettingsIcon className="w-6 h-6 text-zinc-800" />
             </button>
@@ -671,7 +743,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
         </div>
       )}
 
-      {isOwnProfile && (
+      {canManageOwnProfile && (
         <div className="mx-4 mt-2 mb-4 bg-white rounded-2xl border border-zinc-100 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -705,7 +777,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
         </div>
       )}
 
-      {isOwnProfile && isSellerAccount && (
+      {canManageOwnProfile && isSellerAccount && (
         <div className="mx-4 mb-4 bg-white rounded-2xl border border-zinc-100 p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -814,14 +886,23 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
         </div>
       )}
 
-      <div className="p-6 flex flex-col items-center">
-        <div className="relative mb-4">
+      <div className="px-4 pt-6 pb-8 flex flex-col items-center">
+        <div
+          className="relative mb-4 rounded-full focus-within:ring-2 focus-within:ring-indigo-500/40"
+        >
+          <button
+            type="button"
+            onClick={() => setShowAvatarViewer(true)}
+            className="block rounded-full"
+            aria-label="View profile photo"
+          >
           <img
             src={profileData.avatar}
-            className="w-24 h-24 rounded-full border-2 border-zinc-100 p-1 object-cover shadow-xl"
+            className="w-24 h-24 rounded-full border-2 border-zinc-100 p-1 object-cover shadow-xl cursor-zoom-in"
             alt="profile"
           />
-          {isOwnProfile && (
+          </button>
+          {canManageOwnProfile && (
             <>
               <input
                 ref={avatarInputRef}
@@ -836,16 +917,21 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                 }}
               />
               <button
-                onClick={() => avatarInputRef.current?.click()}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  avatarInputRef.current?.click();
+                }}
                 className="absolute bottom-0 right-0 bg-indigo-600 rounded-full p-1.5 border-2 border-white shadow-lg hover:bg-indigo-700 transition-colors"
                 disabled={avatarUploading}
+                aria-label="Change profile photo"
               >
                 <Edit2 className="w-3 h-3 text-white" />
               </button>
             </>
           )}
         </div>
-        {isOwnProfile && avatarUploading && (
+        {canManageOwnProfile && avatarUploading && (
           <p className="mb-3 text-[10px] font-bold text-zinc-500">Uploading avatar…</p>
         )}
         <div className="flex items-center gap-2 mb-1">
@@ -877,7 +963,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
             {profileData.bio}
           </p>
         ) : (
-          isOwnProfile && (
+          canManageOwnProfile && (
             <p className="text-xs text-zinc-400 mb-2 text-center max-w-xs leading-relaxed">
               Add a short bio so people know you.
             </p>
@@ -912,6 +998,15 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           );
         })()}
 
+        {isGuestOwnProfile && (
+          <div className="mb-6 w-full max-w-sm rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-center">
+            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Guest profile</p>
+            <p className="mt-1 text-xs font-semibold text-indigo-700">
+              Your visitor ID is {visitorLabel}. Sign in to edit, post, or manage seller tools.
+            </p>
+          </div>
+        )}
+
         {(isOwnProfile || hasSocialLinks) && (
           <div className="flex gap-4 mb-8">
             <button onClick={() => handleSocialAction('facebook')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
@@ -923,7 +1018,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
             <button onClick={() => handleSocialAction('instagram')} className="p-2 bg-zinc-50 rounded-full hover:bg-zinc-100 transition-colors text-zinc-600">
               <Instagram className="w-5 h-5" />
             </button>
-            {isOwnProfile && (
+            {canManageOwnProfile && (
               <button onClick={() => setShowEdit(true)} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors text-white">
                 <ExternalLink className="w-5 h-5" />
               </button>
@@ -947,13 +1042,28 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
         </div>
 
         <div className="flex w-full gap-3 px-4 max-w-sm">
-          {isOwnProfile ? (
+          {canManageOwnProfile ? (
             <>
               <button onClick={() => setShowEdit(true)} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-xl font-bold text-sm shadow-lg shadow-zinc-900/20 active:scale-95 transition-transform">
                 Edit Profile
               </button>
               <button onClick={handleShare} className="flex-1 py-2.5 bg-zinc-100 text-zinc-900 rounded-xl font-bold text-sm active:scale-95 transition-transform">
                 Share Profile
+              </button>
+            </>
+          ) : isGuestOwnProfile ? (
+            <>
+              <button
+                onClick={() => onRequireLogin?.('Sign in to edit your profile.')}
+                className="flex-1 py-2.5 bg-zinc-900 text-white rounded-xl font-bold text-sm shadow-lg shadow-zinc-900/20 active:scale-95 transition-transform"
+              >
+                Sign in to edit
+              </button>
+              <button
+                onClick={() => onRequireLogin?.('Sign in to manage your profile and seller tools.')}
+                className="flex-1 py-2.5 bg-zinc-100 text-zinc-900 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+              >
+                Sign in to continue
               </button>
             </>
           ) : (
@@ -974,7 +1084,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
       <div className="flex border-b border-zinc-100 sticky top-[60px] bg-white z-10">
         {[
           { id: 'grid', icon: Grid, label: 'Posts' },
-          ...(isOwnProfile ? [{ id: 'intelligence', icon: BarChart3, label: 'Intelligence' }] : [{ id: 'stats', icon: BarChart3, label: 'Stats' }]),
+          { id: 'intelligence', icon: BarChart3, label: 'Intelligence' },
           { id: 'likes', icon: Heart, label: 'Likes' },
           { id: 'shop', icon: ShoppingBag, label: 'Shop' }
         ].map(tab => (
@@ -1000,7 +1110,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           <div className="p-6 space-y-6 bg-zinc-50 h-full">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">
-                {activeTab === 'intelligence' ? 'Shop Intelligence' : 'Public Stats'}
+                {isOwnProfile ? 'Shop Intelligence' : 'Public Intelligence'}
               </h3>
               {activeTab === 'stats' && (
                 <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-full">
@@ -1181,7 +1291,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
               )}
             </div>
 
-            {isOwnProfile && (
+            {canManageOwnProfile && (
               <div className="bg-white p-5 rounded-2xl border border-zinc-100 shadow-sm">
                 <h4 className="text-xs font-black uppercase tracking-wider text-zinc-400 mb-4">Your Reviews</h4>
                 <div className="space-y-3">
@@ -1233,7 +1343,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           </div>
         ) : (
           <div className="p-4 space-y-4">
-            {isOwnProfile && (
+            {canManageOwnProfile && (
               <div className="bg-white rounded-2xl border border-zinc-100 p-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Create Post</p>
                 <input
@@ -1328,7 +1438,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                       {post.content || 'Post'}
                     </div>
                   )}
-                  {isOwnProfile && (
+                  {canManageOwnProfile && (
                     <button
                       onClick={() => handleDeletePost(post.id || post.post_id)}
                       className="absolute top-2 right-2 bg-white/80 text-zinc-600 text-[9px] font-bold px-2 py-1 rounded"
@@ -1348,6 +1458,47 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
           </div>
         )}
       </div>
+
+      {showAvatarViewer && (
+        <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-4 flex items-center justify-between border-b border-zinc-100">
+              <div>
+                <p className="text-sm font-black text-zinc-900">Profile photo</p>
+                <p className="text-[11px] text-zinc-500 font-medium">View or update the picture on your profile.</p>
+              </div>
+              <button onClick={() => setShowAvatarViewer(false)} className="p-2 rounded-full bg-zinc-100 text-zinc-600" aria-label="Close photo viewer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="rounded-3xl overflow-hidden bg-zinc-100">
+                <img src={profileData.avatar} alt="profile preview" className="w-full h-72 object-cover" />
+              </div>
+              <div className="mt-4 grid gap-2">
+                {canManageOwnProfile && (
+                  <button
+                    onClick={() => {
+                      avatarInputRef.current?.click();
+                      setShowAvatarViewer(false);
+                    }}
+                    className="w-full py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black"
+                    disabled={avatarUploading}
+                  >
+                    {avatarUploading ? 'Uploading…' : 'Choose from gallery'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAvatarViewer(false)}
+                  className="w-full py-3 bg-zinc-100 text-zinc-700 rounded-2xl text-xs font-black"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showEdit && (
         <div className="fixed inset-0 z-[60]">
@@ -1390,7 +1541,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onOpen
                 className="w-full p-3 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold"
                 disabled={avatarUploading}
               >
-                {avatarUploading ? 'Uploading avatar…' : 'Upload Avatar'}
+                {avatarUploading ? 'Uploading avatar…' : 'Choose from gallery'}
               </button>
               <div className="pt-2">
                 <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Social Links</p>

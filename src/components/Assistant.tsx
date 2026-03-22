@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users, MapPin, ExternalLink } from 'lucide-react';
 import { Product } from '../types';
 import {
   createMessage,
@@ -141,6 +142,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   authPromptMessage,
   onToast
 }) => {
+  void onOpenQrScan;
   const [chats, setChats] = useState<AssistantChat[]>([]);
   const [activeChatId, setActiveChatId] = useState('');
   const [input, setInput] = useState('');
@@ -701,8 +703,6 @@ export const Assistant: React.FC<AssistantProps> = ({
         return 'slate';
       case 'Partnerships':
         return 'indigo';
-      case 'Scan QR':
-        return 'fuchsia';
       case 'Feed':
         return 'emerald';
       case 'RFQ':
@@ -749,7 +749,6 @@ export const Assistant: React.FC<AssistantProps> = ({
     { label: 'Rewards', icon: Trophy, onClick: () => onOpenRewards(), tone: getActionTone('Rewards') },
     { label: 'Subscriptions', icon: BadgeCheck, onClick: () => onOpenSubscriptions(), tone: getActionTone('Subscriptions') },
     { label: 'Partnerships', icon: Plug, onClick: () => onOpenPartnerships(), tone: getActionTone('Partnerships') },
-    { label: 'Scan QR', icon: Camera, onClick: () => onOpenQrScan(), tone: getActionTone('Scan QR') },
     ...(canAccessSeller ? [
       { label: 'RFQ', icon: Plug, onClick: () => onOpenRFQ(), tone: getActionTone('RFQ') },
       { label: 'Seller Studio', icon: Sparkles, onClick: () => onOpenSellerStudio(), tone: getActionTone('Seller Studio') },
@@ -763,6 +762,32 @@ export const Assistant: React.FC<AssistantProps> = ({
       return a.label.localeCompare(b.label);
     });
   }, [assistantActionUsage, suggestionChips]);
+
+  const buildMapUrl = (payload?: Record<string, any>) => {
+    if (!payload) return '';
+    const explicit = String(payload?.map_url || payload?.maps_url || payload?.navigation_url || payload?.directions_url || '').trim();
+    if (explicit) return explicit;
+    const lat = String(payload?.lat || payload?.latitude || payload?.y || '').trim();
+    const lng = String(payload?.lng || payload?.lon || payload?.longitude || payload?.x || '').trim();
+    const address = String(payload?.address || payload?.address_line || payload?.location_address || payload?.formatted_address || '').trim();
+    if (lat && lng) {
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
+    }
+    if (address) {
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+    }
+    return '';
+  };
+
+  const mapPayloadPreview = (payload?: Record<string, any>) => {
+    if (!payload) return null;
+    const address = String(payload?.address || payload?.address_line || payload?.location_address || payload?.formatted_address || '').trim();
+    const region = String(payload?.region || payload?.region_name || payload?.city || payload?.county || payload?.market_zone || '').trim();
+    const lat = String(payload?.lat || payload?.latitude || payload?.y || '').trim();
+    const lng = String(payload?.lng || payload?.lon || payload?.longitude || payload?.x || '').trim();
+    const bits = [address, region, lat && lng ? `${lat}, ${lng}` : ''].filter(Boolean);
+    return bits.length ? bits : null;
+  };
 
   const buildActionsFromMetadata = (metadata?: Record<string, any>): AssistantAction[] => {
     const rawActions = Array.isArray(metadata?.actions) ? metadata.actions : [];
@@ -831,18 +856,44 @@ export const Assistant: React.FC<AssistantProps> = ({
           case 'show_paths':
           case 'start_navigation': {
             const sellerId = payload.seller_id || payload.destination_seller_id;
+            const mapUrl = buildMapUrl(payload);
             return {
               label: label || (type === 'start_navigation' ? 'Start Navigation' : 'Show Paths'),
               onClick: () => {
                 if (type === 'start_navigation') {
-                  onStartNavigation(payload);
+                  if (sellerId || payload.product_id || payload.id || payload.path_id || payload.preferred_path_id || payload.route_id) {
+                    onStartNavigation(payload);
+                    return;
+                  }
+                  if (mapUrl) {
+                    window.open(mapUrl, '_blank', 'noopener,noreferrer');
+                    return;
+                  }
+                  onToast('Open the location to view directions.');
                   return;
                 }
                 if (sellerId) {
                   onOpenSeller(sellerId);
                   return;
                 }
+                if (mapUrl) {
+                  window.open(mapUrl, '_blank', 'noopener,noreferrer');
+                  return;
+                }
                 onToast('Open the seller to view directions.');
+              }
+            };
+          }
+          case 'open_map': {
+            const mapUrl = buildMapUrl(payload);
+            return {
+              label: label || 'Open map',
+              onClick: () => {
+                if (mapUrl) {
+                  window.open(mapUrl, '_blank', 'noopener,noreferrer');
+                  return;
+                }
+                onToast('Map location unavailable.');
               }
             };
           }
@@ -894,11 +945,6 @@ export const Assistant: React.FC<AssistantProps> = ({
             return {
               label: label || 'Open Feed',
               onClick: () => onOpenFeed()
-            };
-          case 'open_qr_scan':
-            return {
-              label: label || 'Scan QR',
-              onClick: () => onOpenQrScan()
             };
           case 'open_profile':
             return {
@@ -1016,6 +1062,542 @@ export const Assistant: React.FC<AssistantProps> = ({
             >
               Open attachment
             </a>
+          );
+        })}
+      </div>
+    );
+  };
+
+  type AssistantBlock =
+    | { type: 'text'; content: string }
+    | { type: 'table'; headers: string[]; rows: string[][] };
+
+  const isTableSeparator = (line: string) => /^\s*\|?(\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(line.trim());
+  const isTableRow = (line: string) => line.includes('|') && !line.trim().startsWith('```');
+
+  const splitTableCells = (line: string) =>
+    line
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((cell) => cell.trim());
+
+  const parseAssistantBlocks = (content: string): AssistantBlock[] => {
+    const lines = String(content || '').replace(/\r\n/g, '\n').split('\n');
+    const blocks: AssistantBlock[] = [];
+    const textBuffer: string[] = [];
+    const flushText = () => {
+      const text = textBuffer.join('\n').trim();
+      if (text) blocks.push({ type: 'text', content: text });
+      textBuffer.length = 0;
+    };
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const next = lines[i + 1] ?? '';
+      if (isTableRow(line) && isTableSeparator(next)) {
+        const headers = splitTableCells(line);
+        const rows: string[][] = [];
+        i += 2;
+        for (; i < lines.length; i += 1) {
+          const rowLine = lines[i];
+          if (!isTableRow(rowLine) || isTableSeparator(rowLine)) {
+            i -= 1;
+            break;
+          }
+          rows.push(splitTableCells(rowLine));
+        }
+        flushText();
+        if (headers.length > 0) {
+          blocks.push({ type: 'table', headers, rows });
+        }
+        continue;
+      }
+      textBuffer.push(line);
+    }
+    flushText();
+    return blocks;
+  };
+
+  const renderAssistantContent = (msg: AssistantMessage) => {
+    const blocks = parseAssistantBlocks(msg.content || '');
+    return (
+      <div className="space-y-3 text-[12.5px] leading-[1.72] tracking-[0.01em] text-white/88">
+        {blocks.map((block, idx) => {
+          if (block.type === 'table') {
+            return (
+              <div key={`${msg.id || 'assistant'}-table-${idx}`} className="overflow-x-auto rounded-[1.25rem] border border-white/10 bg-white/5">
+                <table className="min-w-full text-left text-[11px] leading-[1.55]">
+                  <thead className="bg-white/8 text-white/75">
+                    <tr>
+                      {block.headers.map((header, headerIdx) => (
+                        <th key={`${msg.id || 'assistant'}-th-${idx}-${headerIdx}`} className="px-3 py-2.5 font-black uppercase tracking-[0.14em] whitespace-nowrap">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, rowIdx) => (
+                      <tr key={`${msg.id || 'assistant'}-tr-${idx}-${rowIdx}`} className="border-t border-white/10">
+                        {block.headers.map((_, cellIdx) => (
+                          <td key={`${msg.id || 'assistant'}-td-${idx}-${rowIdx}-${cellIdx}`} className="px-3 py-2.5 text-white/88 align-top">
+                            {row[cellIdx] || '—'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+          return (
+            <div key={`${msg.id || 'assistant'}-text-${idx}`} className="text-[12.5px] leading-[1.72] tracking-[0.01em] text-white/88">
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-2.5 last:mb-0">{children}</p>,
+                  a: ({ children, href }) => (
+                    <a href={href || '#'} target="_blank" rel="noreferrer" className="text-emerald-200 underline decoration-emerald-200/35 underline-offset-2">
+                      {children}
+                    </a>
+                  ),
+                  ul: ({ children }) => <ul className="my-2 ml-4 list-disc space-y-1">{children}</ul>,
+                  ol: ({ children }) => <ol className="my-2 ml-4 list-decimal space-y-1">{children}</ol>,
+                  li: ({ children }) => <li className="pl-1">{children}</li>,
+                  strong: ({ children }) => <strong className="font-extrabold text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-white/90">{children}</em>,
+                  blockquote: ({ children }) => (
+                    <blockquote className="my-2 border-l-2 border-emerald-400/35 pl-4 text-white/72">{children}</blockquote>
+                  ),
+                  code: ({ children }) => (
+                    <code className="rounded bg-black/30 px-1.5 py-0.5 text-[11px] font-medium text-emerald-100">{children}</code>
+                  ),
+                  pre: ({ children }) => (
+                    <pre className="my-2 overflow-x-auto rounded-[1.25rem] border border-white/10 bg-black/30 p-3 text-[11px] leading-relaxed text-emerald-50">{children}</pre>
+                  ),
+                  h1: ({ children }) => <h1 className="mb-2.5 text-[15px] font-black tracking-tight text-white">{children}</h1>,
+                  h2: ({ children }) => <h2 className="mb-2 text-[13px] font-black tracking-tight text-white">{children}</h2>,
+                  h3: ({ children }) => <h3 className="mb-2 text-[12px] font-black tracking-tight text-white">{children}</h3>,
+                }}
+              >
+                {block.content}
+              </ReactMarkdown>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderAssistantLinks = (metadata?: Record<string, any>) => {
+    const links = Array.isArray(metadata?.links) ? metadata.links : [];
+    if (!links.length) return null;
+    return (
+      <div className="flex flex-wrap gap-2">
+        {links.slice(0, 6).map((link: any, idx: number) => {
+          const url = String(link?.url || link?.href || link?.link || '').trim();
+          if (!url) return null;
+          const label = String(link?.label || link?.title || 'Open link').trim();
+          return (
+            <a
+              key={`${url}-${idx}`}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-2 rounded-full text-[10px] font-semibold bg-white/8 hover:bg-white/15 transition-colors text-white/88 underline underline-offset-2"
+            >
+              {label}
+            </a>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const isLocationLikeItem = (item: any) => {
+    if (!item || typeof item !== 'object') return false;
+    return Boolean(
+      String(item?.address || item?.address_line || item?.location_address || item?.formatted_address || '').trim() ||
+      String(item?.region || item?.region_name || item?.city || item?.county || item?.market_zone || '').trim() ||
+      String(item?.lat || item?.latitude || item?.y || '').trim() ||
+      String(item?.lng || item?.lon || item?.longitude || item?.x || '').trim() ||
+      String(item?.map_url || item?.maps_url || item?.navigation_url || item?.directions_url || '').trim() ||
+      String(item?.path_id || item?.route_id || item?.preferred_path_id || '').trim()
+    );
+  };
+
+  const locationCardLabel = (item: any) => {
+    const rawType = String(item?.type || item?.kind || item?.source || item?.category || item?.place_type || item?.point_type || item?.route_type || '').toLowerCase();
+    if (rawType.includes('pickup')) return 'Pickup point';
+    if (rawType.includes('delivery')) return 'Delivery point';
+    if (rawType.includes('route') || rawType.includes('path')) return 'Route';
+    if (rawType.includes('market') || rawType.includes('shop') || rawType.includes('store') || rawType.includes('place')) return 'Place';
+    if (rawType.includes('map') || rawType.includes('pin') || rawType.includes('point')) return 'Map target';
+    if (String(item?.path_id || item?.route_id || item?.preferred_path_id || '').trim()) return 'Route';
+    if (String(item?.seller_id || item?.supplier_id || item?.merchant_id || '').trim()) return 'Shop';
+    return 'Location';
+  };
+
+  const locationCardTone = (kindLabel: string) => {
+    const kind = String(kindLabel || '').toLowerCase();
+    if (kind.includes('pickup')) {
+      return {
+        badge: 'bg-amber-400/10 text-amber-100',
+        pill: 'bg-amber-400/8 text-amber-100',
+        icon: 'border-amber-300/20 bg-amber-400/10 text-amber-50',
+        border: 'border-amber-300/20'
+      };
+    }
+    if (kind.includes('delivery')) {
+      return {
+        badge: 'bg-sky-400/10 text-sky-100',
+        pill: 'bg-sky-400/8 text-sky-100',
+        icon: 'border-sky-300/20 bg-sky-400/10 text-sky-50',
+        border: 'border-sky-300/20'
+      };
+    }
+    if (kind.includes('route')) {
+      return {
+        badge: 'bg-violet-400/10 text-violet-100',
+        pill: 'bg-violet-400/8 text-violet-100',
+        icon: 'border-violet-300/20 bg-violet-400/10 text-violet-50',
+        border: 'border-violet-300/20'
+      };
+    }
+    if (kind.includes('shop')) {
+      return {
+        badge: 'bg-emerald-400/10 text-emerald-100',
+        pill: 'bg-emerald-400/8 text-emerald-100',
+        icon: 'border-emerald-300/20 bg-emerald-400/10 text-emerald-50',
+        border: 'border-emerald-300/20'
+      };
+    }
+    if (kind.includes('place')) {
+      return {
+        badge: 'bg-teal-400/10 text-teal-100',
+        pill: 'bg-teal-400/8 text-teal-100',
+        icon: 'border-teal-300/20 bg-teal-400/10 text-teal-50',
+        border: 'border-teal-300/20'
+      };
+    }
+    if (kind.includes('map target')) {
+      return {
+        badge: 'bg-slate-400/10 text-slate-100',
+        pill: 'bg-slate-400/8 text-slate-100',
+        icon: 'border-slate-300/20 bg-slate-400/10 text-slate-50',
+        border: 'border-slate-300/20'
+      };
+    }
+    return {
+      badge: 'bg-white/8 text-white/75',
+      pill: 'bg-white/4 text-white/65',
+      icon: 'border-white/10 bg-white/5 text-white/80',
+      border: 'border-white/10'
+    };
+  };
+
+  const referenceCardLabel = (item: any) => {
+    if (item?.product_id || item?.canonical_id) return 'Product';
+    if (item?.seller_id || item?.supplier_id || item?.merchant_id) return 'Seller';
+    if (item?.path_id || item?.route_id || item?.preferred_path_id) return 'Route';
+    if (item?.address || item?.address_line || item?.location || item?.region || item?.lat || item?.lng) return 'Location';
+    return 'Result';
+  };
+
+  const referenceCardTone = (label: string) => {
+    const kind = String(label || '').toLowerCase();
+    if (kind.includes('product')) {
+      return {
+        badge: 'bg-indigo-400/10 text-indigo-100',
+        pill: 'bg-indigo-400/8 text-indigo-100',
+        icon: 'border-indigo-300/20 bg-indigo-400/10 text-indigo-50',
+        border: 'border-indigo-300/20'
+      };
+    }
+    if (kind.includes('seller')) {
+      return {
+        badge: 'bg-emerald-400/10 text-emerald-100',
+        pill: 'bg-emerald-400/8 text-emerald-100',
+        icon: 'border-emerald-300/20 bg-emerald-400/10 text-emerald-50',
+        border: 'border-emerald-300/20'
+      };
+    }
+    if (kind.includes('route')) {
+      return {
+        badge: 'bg-violet-400/10 text-violet-100',
+        pill: 'bg-violet-400/8 text-violet-100',
+        icon: 'border-violet-300/20 bg-violet-400/10 text-violet-50',
+        border: 'border-violet-300/20'
+      };
+    }
+    if (kind.includes('location')) {
+      return {
+        badge: 'bg-teal-400/10 text-teal-100',
+        pill: 'bg-teal-400/8 text-teal-100',
+        icon: 'border-teal-300/20 bg-teal-400/10 text-teal-50',
+        border: 'border-teal-300/20'
+      };
+    }
+    return {
+      badge: 'bg-white/8 text-white/75',
+      pill: 'bg-white/4 text-white/65',
+      icon: 'border-white/10 bg-white/5 text-white/80',
+      border: 'border-white/10'
+    };
+  };
+
+  const renderAssistantLocationCards = (metadata?: Record<string, any>) => {
+    const references = Array.isArray(metadata?.references) ? metadata.references : [];
+    const rawItems: any[] = [];
+    references.forEach((ref: any) => {
+      const items = Array.isArray(ref?.data?.items) ? ref.data.items : [];
+      items.forEach((item: any) => {
+        if (isLocationLikeItem(item)) rawItems.push(item);
+      });
+    });
+    const metadataLocation = metadata?.location && typeof metadata.location === 'object' ? metadata.location : null;
+    if (metadataLocation && isLocationLikeItem(metadataLocation)) {
+      rawItems.unshift(metadataLocation);
+    }
+    const items = rawItems.filter((item, idx) => rawItems.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(item)) === idx);
+    if (!items.length) return null;
+
+    return (
+      <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-3 shadow-[0_12px_30px_rgba(2,6,23,0.18)] backdrop-blur-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/85">Locations</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-white/55">Addresses, routes, and map targets you can open quickly.</p>
+          </div>
+          <div className="rounded-full bg-white/5 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/75">
+            {items.length} place{items.length === 1 ? '' : 's'}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {items.slice(0, 4).map((item: any, idx: number) => {
+            const name = String(item?.name || item?.title || item?.label || 'Location').trim();
+            const kindLabel = locationCardLabel(item);
+            const tone = locationCardTone(kindLabel);
+            const address = String(item?.address || item?.address_line || item?.location_address || item?.formatted_address || '').trim();
+            const region = String(item?.region || item?.region_name || item?.city || item?.county || item?.market_zone || '').trim();
+            const lat = String(item?.lat || item?.latitude || item?.y || '').trim();
+            const lng = String(item?.lng || item?.lon || item?.longitude || item?.x || '').trim();
+            const distance = String(item?.distance || item?.distance_km || item?.distance_m || '').trim();
+            const duration = String(item?.duration || item?.duration_min || item?.eta || item?.eta_min || '').trim();
+            const mapUrl = buildMapUrl(item);
+            const pathId = String(item?.path_id || item?.route_id || item?.preferred_path_id || '').trim();
+            const sellerId = String(item?.seller_id || item?.supplier_id || item?.merchant_id || '').trim();
+            const locationBits = [address, region, lat && lng ? `${lat}, ${lng}` : ''].filter(Boolean);
+            const routeBits = [distance ? `Distance: ${distance}` : '', duration ? `ETA: ${duration}` : '', pathId ? `Route: ${pathId}` : ''].filter(Boolean);
+            return (
+              <div key={`${name}-${idx}`} className={`rounded-xl border bg-slate-950/30 p-3 backdrop-blur-sm ${tone.border}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border ${tone.icon}`}>
+                    <MapPin className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[11px] font-black leading-snug tracking-tight text-white/90">{name}</p>
+                      <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-[0.22em] ${tone.badge}`}>
+                        {kindLabel}
+                      </span>
+                    </div>
+                    {routeBits.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {routeBits.map((bit: string, bitIdx: number) => (
+                          <span key={`${name}-${idx}-route-${bitIdx}`} className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[9px] font-bold ${tone.pill}`}>
+                            {bit}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {locationBits.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {locationBits.map((bit: string, bitIdx: number) => (
+                          <span key={`${name}-${idx}-bit-${bitIdx}`} className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-1 text-[9px] text-white/65">
+                            <MapPin className="h-3 w-3 text-emerald-200" />
+                            {bit}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {mapUrl && (
+                        <button
+                          type="button"
+                          onClick={() => window.open(mapUrl, '_blank', 'noopener,noreferrer')}
+                          className="inline-flex items-center gap-1 rounded-full bg-white/8 px-2.5 py-1 text-[9px] font-black text-white/85 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          Open in Maps
+                        </button>
+                      )}
+                      {(pathId || sellerId) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (pathId || sellerId) {
+                              onStartNavigation({
+                                path_id: pathId || undefined,
+                                seller_id: sellerId || undefined,
+                                address,
+                                region,
+                                lat,
+                                lng,
+                                map_url: mapUrl
+                              });
+                            } else if (mapUrl) {
+                              window.open(mapUrl, '_blank', 'noopener,noreferrer');
+                            }
+                              }}
+                          className="rounded-full bg-white/10 px-2.5 py-1 text-[9px] font-bold text-white/80"
+                        >
+                          Navigate
+                        </button>
+                      )}
+                    </div>
+                    {mapUrl && (
+                          <p className="mt-2 text-[9px] leading-relaxed text-white/55">
+                        Tap Open in Maps for turn-by-turn directions or use Navigate to continue inside Sconnect.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderAssistantReferenceCards = (metadata?: Record<string, any>) => {
+    const references = Array.isArray(metadata?.references) ? metadata.references : [];
+    if (!references.length) return null;
+    return (
+      <div className="grid gap-2 sm:grid-cols-2">
+        {references.slice(0, 4).map((ref: any, idx: number) => {
+          const items = Array.isArray(ref?.data?.items) ? ref.data.items : [];
+          if (!items.length) return null;
+          const kindLabel = referenceCardLabel(items[0]);
+          const tone = referenceCardTone(kindLabel);
+          return (
+            <div key={`${ref?.label || 'ref'}-${idx}`} className={`rounded-2xl border bg-slate-950/45 p-3 shadow-[0_12px_30px_rgba(2,6,23,0.18)] backdrop-blur-sm ${tone.border}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/85">{String(ref?.label || 'Results')}</p>
+                    <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-[0.22em] ${tone.badge}`}>
+                      {kindLabel}
+                    </span>
+                  </div>
+                  {ref?.detail ? <p className="mt-1 text-[10px] leading-relaxed text-white/55">{String(ref.detail)}</p> : null}
+                </div>
+                <div className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] ${tone.badge}`}>
+                  {items.length} item{items.length === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {items.slice(0, 3).map((item: any, itemIdx: number) => {
+                  const name = String(item?.name || item?.title || item?.label || 'Item').trim();
+                  const detailBits = [
+                    item?.price ? `KES ${item.price}` : '',
+                    item?.currency ? String(item.currency) : '',
+                    item?.rating ? `${item.rating}★` : '',
+                    item?.distance ? String(item.distance) : '',
+                    item?.location ? String(item.location) : '',
+                    item?.address ? String(item.address) : '',
+                    item?.region ? String(item.region) : '',
+                    item?.lat && item?.lng ? `${item.lat},${item.lng}` : ''
+                  ].filter(Boolean);
+                  const url = String(item?.url || item?.link || item?.href || '').trim();
+                  const image = String(item?.image_url || item?.thumbnail_url || '').trim();
+                  const mapUrl = buildMapUrl(item);
+                  const mapPreview = mapPayloadPreview(item);
+                  return (
+                    <div key={`${ref?.label || 'ref'}-${idx}-${itemIdx}`} className={`rounded-xl border bg-slate-950/30 p-3 backdrop-blur-sm ${tone.border}`}>
+                      <div className="flex items-start gap-3">
+                        {image ? (
+                          <img
+                            src={image}
+                            alt={name}
+                            className="h-14 w-14 shrink-0 rounded-xl object-cover border border-white/10"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className={`h-14 w-14 shrink-0 rounded-xl border ${tone.icon}`} />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-black leading-snug tracking-tight text-white/90">{name}</p>
+                          {detailBits.length > 0 && (
+                            <p className="mt-1 text-[10px] leading-relaxed text-white/55">{detailBits.join(' • ')}</p>
+                          )}
+                          {mapPreview?.length ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {mapPreview.map((bit: string, bitIdx: number) => (
+                                <span key={`${ref?.label || 'ref'}-${idx}-${itemIdx}-loc-${bitIdx}`} className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-1 text-[9px] text-white/65">
+                                  <MapPin className="h-3 w-3 text-white/75" />
+                                  {bit}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {url && (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`px-2.5 py-1 rounded-full text-[9px] font-bold underline underline-offset-2 ${tone.pill}`}
+                              >
+                                Open
+                              </a>
+                            )}
+                            {item?.seller_id && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenSeller(String(item.seller_id))}
+                                className={`px-2.5 py-1 rounded-full text-[9px] font-bold ${tone.pill}`}
+                              >
+                                Seller
+                              </button>
+                            )}
+                            {item?.product_id && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const product = findProductById(String(item.product_id));
+                                  if (product) {
+                                    onOpenProduct(product);
+                                  } else {
+                                    onOpenSearch(name);
+                                  }
+                                }}
+                                className={`px-2.5 py-1 rounded-full text-[9px] font-bold ${tone.pill}`}
+                              >
+                                Product
+                              </button>
+                            )}
+                            {mapUrl && (
+                              <button
+                                type="button"
+                                onClick={() => window.open(mapUrl, '_blank', 'noopener,noreferrer')}
+                                className={`px-2.5 py-1 rounded-full text-[9px] font-bold inline-flex items-center gap-1 ${tone.badge}`}
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Map
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -1731,10 +2313,6 @@ useEffect(() => {
       onOpenBag();
       return 'Opening your bag.';
     }
-    if (cmd === '/scan') {
-      onOpenQrScan();
-      return 'Opening QR scanner.';
-    }
     if (cmd === '/subscribe') {
       onOpenSubscriptions();
       return 'Opening subscriptions.';
@@ -1820,7 +2398,7 @@ useEffect(() => {
                 className="w-8 h-8 rounded-xl object-cover border border-white/10"
               />
               <div>
-                <p className="text-sm font-black">Conversations</p>
+                <p className="text-sm font-black tracking-tight">Conversations</p>
                 <p className="text-[10px] text-white/50">{chats.length} chats</p>
               </div>
             </div>
@@ -1834,10 +2412,11 @@ useEffect(() => {
           )}
           <button
             onClick={() => setIsSidebarOpen(prev => !prev)}
-            className="p-2 bg-white/10 rounded-xl"
+            className="p-2 bg-white/10 rounded-xl text-white text-lg font-black leading-none"
             title={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            aria-label={isSidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
           >
-            <ArrowRightLeft className="w-4 h-4 text-white" />
+            &gt;
           </button>
         </div>
 
@@ -1875,11 +2454,11 @@ useEffect(() => {
                 .map((chat) => (
                   <div
                     key={chat.id}
-                    className={`w-full text-left p-2 rounded-xl text-[10px] font-bold flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/70'}`}
+                    className={`w-full text-left p-2 rounded-xl text-[10px] font-semibold tracking-[0.06em] flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/72'}`}
                   >
                     <button
                       onClick={() => setActiveChatId(chat.id)}
-                      className="flex-1 text-left"
+                      className="flex-1 text-left tracking-tight"
                     >
                       {chat.title || 'New chat'}
                     </button>
@@ -1892,7 +2471,7 @@ useEffect(() => {
                             await updateThread(chat.id, { pinned: nextPinned });
                           } catch {}
                         }}
-                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
+                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-semibold tracking-[0.08em]"
                         title="Pin chat"
                       >
                         {chat.pinned ? 'Unpin' : 'Pin'}
@@ -1908,7 +2487,7 @@ useEffect(() => {
                             await deleteThread(chat.id);
                           } catch {}
                         }}
-                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
+                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-semibold tracking-[0.08em]"
                         title="Delete chat"
                       >
                         Del
@@ -1930,13 +2509,13 @@ useEffect(() => {
                     onToast('Unable to start assistant chat.');
                   }
                 }}
-                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-semibold tracking-[0.08em] flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" /> New chat
               </button>
               <button
                 onClick={() => onOpenOnboarding()}
-                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-semibold tracking-[0.08em] flex items-center justify-center gap-2"
               >
                 <Trophy className="w-4 h-4" /> Onboarding
               </button>
@@ -1961,16 +2540,16 @@ useEffect(() => {
                   className="w-8 h-8 rounded-xl object-cover border border-white/10"
                 />
                 <div>
-                  <p className="text-sm font-black">Conversations</p>
+                  <p className="text-sm font-black tracking-tight">Conversations</p>
                   <p className="text-[10px] text-white/50">{chats.length} chats</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsSidebarOpen(false)}
-                className="p-2 bg-white/10 rounded-xl"
+                className="p-2 bg-white/10 rounded-xl text-white text-lg font-black leading-none"
                 aria-label="Close navigation"
               >
-                <ArrowRightLeft className="w-4 h-4 text-white" />
+                &gt;
               </button>
             </div>
 
@@ -2007,14 +2586,14 @@ useEffect(() => {
                   .map((chat) => (
                     <div
                       key={chat.id}
-                      className={`w-full text-left p-2 rounded-xl text-[10px] font-bold flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/70'}`}
+                    className={`w-full text-left p-2 rounded-xl text-[10px] font-semibold tracking-[0.06em] flex items-center justify-between ${activeChatId === chat.id ? 'bg-white/15 text-white' : 'bg-white/5 text-white/72'}`}
                     >
                       <button
                         onClick={() => {
                           setActiveChatId(chat.id);
                           setIsSidebarOpen(false);
                         }}
-                        className="flex-1 text-left"
+                        className="flex-1 text-left tracking-tight"
                       >
                         {chat.title || 'New chat'}
                       </button>
@@ -2027,7 +2606,7 @@ useEffect(() => {
                               await updateThread(chat.id, { pinned: nextPinned });
                             } catch {}
                           }}
-                          className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-black"
+                          className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-semibold tracking-[0.08em]"
                           title="Pin chat"
                         >
                           {chat.pinned ? 'Unpin' : 'Pin'}
@@ -2050,7 +2629,7 @@ useEffect(() => {
                       onToast('Unable to start assistant chat.');
                     }
                   }}
-                  className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                  className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-semibold tracking-[0.08em] flex items-center justify-center gap-2"
                 >
                   <Sparkles className="w-4 h-4" /> New chat
                 </button>
@@ -2059,7 +2638,7 @@ useEffect(() => {
                     onOpenOnboarding();
                     setIsSidebarOpen(false);
                   }}
-                  className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-black flex items-center justify-center gap-2"
+                  className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-semibold tracking-[0.08em] flex items-center justify-center gap-2"
                 >
                   <Trophy className="w-4 h-4" /> Onboarding
                 </button>
@@ -2229,13 +2808,13 @@ useEffect(() => {
               return (
                 <div
                   key={msg.id || `msg_${i}`}
-                  className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse ml-auto text-right' : ''}`}
+                  className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse ml-auto text-right' : ''}`}
                 >
-                  <div className={`h-9 w-9 rounded-2xl flex items-center justify-center text-[9px] font-black ${isUser ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/80'}`}>
+                  <div className={`h-8 w-8 rounded-2xl flex items-center justify-center text-[9px] font-black ${isUser ? 'bg-indigo-500/70 text-white' : 'bg-white/8 text-white/75'}`}>
                     {isUser ? 'You' : 'AI'}
                   </div>
-                  <div className="max-w-[85%] space-y-2">
-                    <div className={`text-[10px] font-bold ${isUser ? 'text-white/60' : 'text-white/70'}`}>
+                  <div className="max-w-[82%] space-y-1.5">
+                    <div className={`text-[10px] font-semibold tracking-[0.12em] uppercase ${isUser ? 'text-white/55' : 'text-white/65'}`}>
                       {isUser ? 'You' : 'Soko AI'}
                     </div>
                     {msg.role === 'assistant' && Array.isArray(msg.metadata?.agent_status) && msg.metadata.agent_status.length > 0 && (
@@ -2254,17 +2833,24 @@ useEffect(() => {
                         })}
                       </div>
                     )}
-                    <div className={`px-4 py-3 rounded-2xl text-[12px] leading-relaxed ${isUser ? 'bg-indigo-500/80 text-white' : 'bg-white/10 text-white/90'}`}>
-                      {msg.content}
+                    <div className={`px-4 py-3 rounded-[1.25rem] ${isUser ? 'bg-indigo-500/70 text-white' : 'border border-white/10 bg-slate-950/35 text-white/90 backdrop-blur-sm'}`}>
+                      {isUser ? (
+                        <div className="text-[12.5px] leading-[1.72] tracking-[0.01em] whitespace-pre-wrap">{msg.content}</div>
+                      ) : (
+                        renderAssistantContent(msg)
+                      )}
                     </div>
                     {msg.role === 'assistant' && renderMedia(msg.metadata, msg.content)}
+                    {msg.role === 'assistant' && renderAssistantLinks(msg.metadata)}
+                    {msg.role === 'assistant' && renderAssistantLocationCards(msg.metadata)}
+                    {msg.role === 'assistant' && renderAssistantReferenceCards(msg.metadata)}
                     {msg.role === 'assistant' && Array.isArray(msg.metadata?.references) && msg.metadata.references.length > 0 && (
                       <div className="space-y-2">
                         <div className="flex flex-wrap gap-2">
                           {(msg.metadata.references as AssistantReference[]).map((ref, idx) => (
                             <span
                               key={`${msg.id || i}-ref-${idx}`}
-                              className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-emerald-500/10 text-emerald-200"
+                            className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-emerald-500/10 text-emerald-200"
                             >
                               {ref.label}{ref.detail ? ` · ${ref.detail}` : ''}
                             </span>
@@ -2275,14 +2861,24 @@ useEffect(() => {
                             const items = (ref.data as any)?.items;
                             if (!Array.isArray(items) || items.length === 0) return null;
                             return (
-                              <div key={`${msg.id || i}-ref-detail-${idx}`} className="text-[10px] text-white/70 space-y-1">
+                              <div key={`${msg.id || i}-ref-detail-${idx}`} className="text-[10px] leading-relaxed text-white/70 space-y-1">
                                 {items.slice(0, 3).map((item: any, itemIdx: number) => (
                                   <div key={`${msg.id || i}-ref-item-${idx}-${itemIdx}`} className="flex flex-wrap gap-2">
-                                    {Object.entries(item).map(([key, value]) => (
-                                      <span key={key} className="px-2 py-1 rounded-full bg-white/5">
-                                        {key}: {String(value ?? '')}
-                                      </span>
-                                    ))}
+                                    {Object.entries(item).map(([key, value]) => {
+                                      if (value == null || value === '') return null;
+                                      if (key === 'url' || key === 'link' || key === 'href') {
+                                        return (
+                                          <a key={key} href={String(value)} target="_blank" rel="noreferrer" className="px-2 py-1 rounded-full bg-white/5 underline underline-offset-2 text-emerald-200">
+                                            {String(value)}
+                                          </a>
+                                        );
+                                      }
+                                      return (
+                                        <span key={key} className="px-2 py-1 rounded-full bg-white/5">
+                                          {key}: {String(value ?? '')}
+                                        </span>
+                                      );
+                                    })}
                                   </div>
                                 ))}
                               </div>
@@ -2297,7 +2893,7 @@ useEffect(() => {
                           <button
                             key={idx}
                             onClick={action.onClick}
-                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-semibold tracking-[0.08em] hover:bg-white/20 transition-colors"
                           >
                             {action.label}
                           </button>
@@ -2311,20 +2907,20 @@ useEffect(() => {
                             type="button"
                             onClick={() => void submitMessageFeedback(true, msg.id!)}
                             disabled={messageFeedbackSaving && (messageFeedbackTarget?.messageId === msg.id || messageFeedbackTarget == null)}
-                            className="px-3 py-2 bg-emerald-500/10 rounded-full text-[10px] font-bold hover:bg-emerald-500/20 transition-colors"
+                            className="px-3 py-2 bg-emerald-500/10 rounded-full text-[10px] font-semibold tracking-[0.08em] hover:bg-emerald-500/20 transition-colors"
                           >
                             Helpful
                           </button>
                           <button
                             type="button"
                             onClick={() => openMessageFeedback(msg.id!)}
-                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold hover:bg-white/20 transition-colors"
+                            className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-semibold tracking-[0.08em] hover:bg-white/20 transition-colors"
                           >
                             Correct this
                           </button>
                         </div>
                         {messageFeedbackTarget?.messageId === msg.id && (
-                          <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                          <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-3 backdrop-blur-sm">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">Correction feedback</div>
                             <div className="grid gap-3 sm:grid-cols-2">
                               <label className="grid gap-1 text-[11px]">
@@ -2425,7 +3021,7 @@ useEffect(() => {
                 <button
                   key={action.label}
                   onClick={action.onClick}
-                  className={`shrink-0 px-3 py-2 rounded-full text-[10px] font-bold whitespace-nowrap flex items-center gap-2 border transition-colors ${actionToneClasses[action.tone] || actionToneClasses.slate}`}
+                  className={`shrink-0 px-3 py-2 rounded-full text-[10px] font-semibold tracking-[0.08em] whitespace-nowrap flex items-center gap-2 border transition-colors ${actionToneClasses[action.tone] || actionToneClasses.slate}`}
                 >
                   <action.icon className="w-3 h-3" /> {action.label}
                 </button>
@@ -2440,7 +3036,7 @@ useEffect(() => {
                       bumpActionUsage(chip.label);
                       setInput(chip.value);
                     }}
-                    className="px-3 py-2 bg-white/10 rounded-full text-[10px] font-bold whitespace-nowrap"
+                    className="px-3 py-2 bg-white/8 rounded-full text-[10px] font-semibold tracking-[0.08em] whitespace-nowrap text-white/80 hover:bg-white/15 transition-colors"
                   >
                     {chip.label}
                   </button>
@@ -2479,7 +3075,7 @@ useEffect(() => {
                 <Mic className="w-5 h-5" />
               </button>
               <input
-                className="flex-1 min-w-0 h-11 bg-white/10 rounded-full px-4 text-sm text-white placeholder:text-white/40 caret-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400/40"
+                className="flex-1 min-w-0 h-11 bg-slate-900/55 border border-white/10 rounded-full px-4 text-[13px] leading-none text-white placeholder:text-white/35 caret-emerald-300 outline-none focus:ring-2 focus:ring-emerald-400/40 backdrop-blur-sm"
                 placeholder="Ask Sconnect to search, compare, or buy..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

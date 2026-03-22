@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, MessageCircle, Share2, ShoppingBag, ChevronDown, Music2, Volume2, VolumeX, Plus, Star, Sparkles, ArrowRight, Copy, Send, User, Radio } from 'lucide-react';
+import { Heart, MessageCircle, Share2, ShoppingBag, ChevronDown, Music2, Volume2, VolumeX, Plus, Star, Sparkles, ArrowRight, Copy, Send, User, Radio, Check } from 'lucide-react';
 import { Product } from '../types';
 import { addCartItem } from '../lib/cartApi';
 import { getProduct } from '../lib/catalogApi';
@@ -640,33 +640,35 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   if (tab === 'live') {
     return (
       <div className="relative h-full w-full bg-black overflow-hidden select-none">
-        <div className="absolute left-0 right-0 top-0 z-30 px-4 py-6">
-          <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
-            <button 
-              onClick={() => setShowCreatePost(true)}
-              className="p-2 bg-white/10 rounded-full text-white"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-            <div className="flex gap-6 text-white/60 font-bold text-base mx-auto">
+        <div className="absolute left-0 right-0 top-0 z-30 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4">
+          <div className="w-full max-w-5xl mx-auto flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <button 
+                onClick={() => setShowCreatePost(true)}
+                className="p-2 bg-white/10 rounded-full text-white"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => onSellerOpen('')}
+                  className="p-2 bg-white/10 rounded-full text-white"
+                >
+                  <User className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={() => setIsMuted(!isMuted)}
+                  className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
+                >
+                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </button>
+              </div>
+            </div>
+            <div className="flex justify-center gap-6 text-white/60 font-bold text-base flex-wrap">
               <button onClick={() => setTab('for_you')} className="hover:text-white transition-colors">For You</button>
               <button onClick={() => setTab('following')} className="hover:text-white transition-colors">Following</button>
               <button className="relative text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full">
                 Live
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => onSellerOpen('')}
-                className="p-2 bg-white/10 rounded-full text-white"
-              >
-                <User className="w-5 h-5" />
-              </button>
-              <button 
-                onClick={() => setIsMuted(!isMuted)}
-                className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
-              >
-                {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
             </div>
           </div>
@@ -745,12 +747,12 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
 
         {!loading && items.length === 0 && (
           <div className="h-full w-full flex items-center justify-center">
-            <div className="w-full max-w-md bg-white/10 border border-white/10 rounded-3xl p-6 text-white text-center">
-              <p className="text-lg font-black">Welcome to Sconnect Feed</p>
-              <p className="text-[11px] text-white/70 mt-2">
+          <div className="w-full max-w-md bg-white/10 border border-white/10 rounded-3xl p-8 sm:p-10 text-white text-center shadow-2xl">
+              <p className="text-2xl font-black">Welcome to Sconnect Feed</p>
+              <p className="text-sm text-white/70 mt-3 leading-relaxed">
                 Follow sellers, discover new drops, or create your first post.
               </p>
-              <div className="mt-5 flex flex-col gap-2">
+              <div className="mt-6 flex flex-col gap-2">
                 <button
                   onClick={() => setShowCreatePost(true)}
                   className="w-full py-3 bg-emerald-500 text-white rounded-2xl text-[11px] font-bold"
@@ -810,18 +812,18 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                     initial={{ opacity: 0, y: 20 }}
                     animate={index === activeIndex ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
                     transition={{ duration: 0.5 }}
-                    className="pointer-events-auto cursor-pointer"
+                    className="pointer-events-auto cursor-pointer max-w-[92%] rounded-[2rem] bg-black/30 backdrop-blur-md border border-white/10 p-4 sm:p-5 shadow-2xl shadow-black/30"
                     onClick={() => {
                       if (item.productId) {
                         onProductOpen(toProduct(item));
                       }
                     }}
                   >
-                    <div className="flex items-center gap-2 mb-3 pointer-events-auto">
+                    <div className="flex flex-wrap items-center gap-2 mb-3 pointer-events-auto">
                       {item.sellerAvatar ? (
                         <img 
                           src={item.sellerAvatar} 
-                          className="w-10 h-10 rounded-full border-2 border-white"
+                          className="w-10 h-10 rounded-full border-2 border-white object-cover shrink-0"
                           alt="avatar"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -829,7 +831,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                           }}
                         />
                       ) : (
-                        <div className="w-10 h-10 rounded-full border-2 border-white bg-white/20 flex items-center justify-center text-[10px] font-black">
+                        <div className="w-10 h-10 rounded-full border-2 border-white bg-white/20 flex items-center justify-center text-[10px] font-black shrink-0">
                           {item.sellerName?.slice(0, 2).toUpperCase() || 'SC'}
                         </div>
                       )}
@@ -838,11 +840,12 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                           e.stopPropagation();
                           if (item.sellerId) onSellerOpen(item.sellerId);
                         }}
-                        className="font-bold text-lg shadow-sm"
+                        className={`font-bold text-base sm:text-lg shadow-sm ${followedSellerIds.includes(item.sellerId) ? 'text-emerald-300' : 'text-white'}`}
                       >
-                        @{item.sellerName || 'Seller'}
+                        {followedSellerIds.includes(item.sellerId) ? 'Following ' : '@'}
+                        {item.sellerName || 'Seller'}
                       </button>
-                      <div className="flex items-center gap-1 bg-black/20 backdrop-blur-md px-2 py-1 rounded-lg">
+                      <div className="flex items-center gap-1 bg-black/20 backdrop-blur-md px-2 py-1 rounded-full">
                         <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
                         <span className="text-[10px] font-black">{item.sellerRating ?? '—'}</span>
                       </div>
@@ -852,7 +855,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                             e.stopPropagation();
                             toggleFollow(item.sellerId);
                           }}
-                          className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ml-2 ${
+                          className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ml-0 sm:ml-2 ${
                             followedSellerIds.includes(item.sellerId) ? 'bg-white text-zinc-900' : 'bg-red-500 text-white'
                           }`}
                         >
@@ -861,28 +864,28 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                       )}
                     </div>
 
-                    <h3 className="text-xl font-bold mb-1 drop-shadow-lg">{item.name}</h3>
-                    <p className="text-sm opacity-90 line-clamp-2 mb-4 drop-shadow-md max-w-[85%]">
+                    <h3 className="text-xl sm:text-2xl font-black mb-2 drop-shadow-lg leading-tight">{item.name}</h3>
+                    <p className="text-sm sm:text-base opacity-90 line-clamp-2 mb-4 drop-shadow-md max-w-[95%] leading-relaxed">
                       {item.description}
                     </p>
 
-                    <div className="flex items-center gap-2 mb-4">
+                    <div className="flex items-center gap-2 mb-4 text-white/90">
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
                           setIsMuted(m => !m);
                         }}
-                        className="flex items-center gap-2"
+                        className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 backdrop-blur-sm"
                       >
                         <Music2 className="w-4 h-4 animate-spin" style={{ animationDuration: '3s' }} />
-                        <span className="text-xs font-medium truncate max-w-[200px]">Original sound</span>
+                        <span className="text-xs font-medium truncate max-w-[180px]">Original sound</span>
                         {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                       </button>
                     </div>
 
-                    <div className="flex gap-2 pointer-events-auto">
+                    <div className="flex flex-wrap gap-2 pointer-events-auto">
                       {item.tags.map(tag => (
-                        <span key={tag} className="px-2 py-1 bg-white/10 backdrop-blur-md rounded-md text-[10px] font-bold uppercase tracking-tight border border-white/10">
+                        <span key={tag} className="px-2.5 py-1 bg-white/10 backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-tight border border-white/10">
                           #{tag}
                         </span>
                       ))}
@@ -890,31 +893,47 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                   </motion.div>
                 </div>
 
-                <div className="absolute right-4 bottom-10 z-20 flex flex-col gap-5 items-center pointer-events-auto">
+                <div className="absolute right-3 sm:right-4 bottom-8 z-20 flex flex-col gap-4 sm:gap-5 items-center pointer-events-auto">
               <div className="relative mb-4">
                 {item.sellerAvatar ? (
                   <img 
                     src={item.sellerAvatar} 
-                    className="w-12 h-12 rounded-full border-2 border-white"
+                    className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-white object-cover"
                     alt="seller"
                     onClick={() => item.sellerId && onSellerOpen(item.sellerId)}
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-full border-2 border-white bg-white/20 flex items-center justify-center text-[10px] font-black">
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-white bg-white/20 flex items-center justify-center text-[10px] font-black">
                     {item.sellerName?.slice(0, 2).toUpperCase() || 'SC'}
                   </div>
                 )}
-                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-500 rounded-full p-0.5 border-2 border-black">
-                  <Plus className="w-3 h-3 text-white" />
-                </div>
+                {item.sellerId && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFollow(item.sellerId);
+                    }}
+                    className={`absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full p-1 border-2 border-black transition-colors ${
+                      followedSellerIds.includes(item.sellerId) ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'
+                    }`}
+                    aria-label={followedSellerIds.includes(item.sellerId) ? 'Unfollow seller' : 'Follow seller'}
+                  >
+                    {followedSellerIds.includes(item.sellerId) ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Plus className="w-3 h-3" />
+                    )}
+                  </button>
+                )}
               </div>
 
               <button 
                 onClick={() => toggleLike(item)}
                 className="flex flex-col items-center gap-1 group"
               >
-                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform">
-                  <Heart className={`w-8 h-8 ${likedIds.includes(getItemKey(item)) ? 'text-red-500 fill-red-500' : 'text-white fill-transparent'} transition-colors`} />
+                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform shadow-lg shadow-black/20">
+                  <Heart className={`w-7 h-7 sm:w-8 sm:h-8 ${likedIds.includes(getItemKey(item)) ? 'text-red-500 fill-red-500' : 'text-white fill-transparent'} transition-colors`} />
                 </div>
                 <span className="text-[11px] text-white font-bold drop-shadow-md">
                   {likedIds.includes(getItemKey(item)) ? 'Liked' : 'Like'}
@@ -929,8 +948,8 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 }}
                 className="flex flex-col items-center gap-1 group"
               >
-                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform">
-                  <MessageCircle className="w-8 h-8 text-white fill-white/10" />
+                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform shadow-lg shadow-black/20">
+                  <MessageCircle className="w-7 h-7 sm:w-8 sm:h-8 text-white fill-white/10" />
                 </div>
                 <span className="text-[11px] text-white font-bold drop-shadow-md">Chat</span>
               </button>
@@ -939,8 +958,8 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 onClick={() => toggleSave(item)}
                 className="flex flex-col items-center gap-1 group"
               >
-                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform">
-                  <Star className={`w-8 h-8 ${savedIds.includes(getItemKey(item)) ? 'text-amber-400 fill-amber-400' : 'text-white fill-white/10'}`} />
+                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform shadow-lg shadow-black/20">
+                  <Star className={`w-7 h-7 sm:w-8 sm:h-8 ${savedIds.includes(getItemKey(item)) ? 'text-amber-400 fill-amber-400' : 'text-white fill-white/10'}`} />
                 </div>
                 <span className="text-[11px] text-white font-bold drop-shadow-md">
                   {savedIds.includes(getItemKey(item)) ? 'Saved' : 'Save'}
@@ -951,8 +970,8 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 onClick={() => handleShare(item)}
                 className="flex flex-col items-center gap-1 group"
               >
-                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform">
-                  <Share2 className="w-8 h-8 text-white fill-white/10" />
+                <div className="p-2.5 bg-black/20 backdrop-blur-sm rounded-full group-active:scale-125 transition-transform shadow-lg shadow-black/20">
+                  <Share2 className="w-7 h-7 sm:w-8 sm:h-8 text-white fill-white/10" />
                 </div>
                 <span className="text-[11px] text-white font-bold drop-shadow-md">Share</span>
               </button>
@@ -962,7 +981,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 className="flex flex-col items-center gap-1 group mt-2"
               >
                 <div className="p-3 bg-indigo-600 rounded-full shadow-xl shadow-indigo-500/40 group-active:scale-95 transition-transform">
-                  <ShoppingBag className="w-7 h-7 text-white" />
+                  <ShoppingBag className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                 </div>
                 <span className="text-[10px] text-white font-black mt-1 bg-black/40 px-2 py-0.5 rounded-full">Add to Bag</span>
               </button>
@@ -972,7 +991,7 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
                 className="flex flex-col items-center gap-1 group"
               >
                 <div className="p-2.5 bg-emerald-500 rounded-full shadow-xl shadow-emerald-500/40 group-active:scale-95 transition-transform">
-                  <ShoppingBag className="w-6 h-6 text-white" />
+                  <ShoppingBag className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 </div>
                 <span className="text-[10px] text-white font-black mt-1 bg-black/40 px-2 py-0.5 rounded-full">Buy Now</span>
               </button>
@@ -1070,15 +1089,31 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
         )}
       </div>
 
-      <div className="absolute left-0 right-0 top-0 z-30 px-4 py-6">
-        <div className="w-full max-w-5xl mx-auto flex items-center justify-between">
-          <button 
-            onClick={() => setShowCreatePost(true)}
-            className="p-2 bg-white/10 rounded-full text-white"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-          <div className="flex gap-6 text-white/60 font-bold text-base mx-auto">
+      <div className="absolute left-0 right-0 top-0 z-30 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4">
+        <div className="w-full max-w-5xl mx-auto flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={() => setShowCreatePost(true)}
+              className="p-2 bg-white/10 rounded-full text-white"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => onSellerOpen('')}
+                className="p-2 bg-white/10 rounded-full text-white"
+              >
+                <User className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => setIsMuted(!isMuted)}
+                className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
+              >
+                {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+          <div className="flex justify-center gap-6 text-white/60 font-bold text-base flex-wrap">
             <button
               onClick={() => setTab('for_you')}
               className={`relative ${tab === 'for_you' ? 'text-white after:absolute after:bottom-[-4px] after:left-1/2 after:-translate-x-1/2 after:w-6 after:h-1 after:bg-white after:rounded-full' : 'hover:text-white transition-colors'}`}
@@ -1096,20 +1131,6 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
               className="relative hover:text-white transition-colors"
             >
               Live
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => onSellerOpen('')}
-              className="p-2 bg-white/10 rounded-full text-white"
-            >
-              <User className="w-5 h-5" />
-            </button>
-            <button 
-              onClick={() => setIsMuted(!isMuted)}
-              className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white"
-            >
-              {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
             </button>
           </div>
         </div>

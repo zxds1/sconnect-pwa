@@ -20,12 +20,14 @@ import {
   Phone,
   Bell,
   Share2,
-  Flag
+  Flag,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Product, PricePoint, Review } from '../types';
 import { ProductAIChat } from './ProductAIChat';
-import { getCustomNavigation, listPathLandmarks, listPopularPaths, listSellerPaths, precomputePathWaypoints, recordPath, type PathLandmark, type PathPoint, type RecordedPath } from '../lib/searchApi';
+import { getCustomNavigation, listPathLandmarks, listPopularPaths, listSellerPaths, listUserLocations, precomputePathWaypoints, recordPath, type PathLandmark, type PathPoint, type RecordedPath, type UserLocation } from '../lib/searchApi';
 import {
   getProductDetail,
   getProductMedia,
@@ -177,6 +179,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [followupOrderId, setFollowupOrderId] = React.useState('');
   const [ratingOrderId, setRatingOrderId] = React.useState('');
   const [showMapModal, setShowMapModal] = React.useState(Boolean(initialShowMap));
+  const [isMapExpanded, setIsMapExpanded] = React.useState(false);
   const [routeInfo, setRouteInfo] = React.useState<{ distanceKm: number; durationMin: number } | null>(null);
   const [routeSteps, setRouteSteps] = React.useState<Array<{ instruction: string; distance: number; duration: number }>>([]);
   const [userCoords, setUserCoords] = React.useState<{ lat: number; lng: number } | null>(null);
@@ -196,10 +199,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [preferredPathId, setPreferredPathId] = React.useState<string | null>(initialPreferredPathId ?? null);
   const [navigationMode, setNavigationMode] = React.useState<'silent' | 'mapbox'>(initialNavigationMode || 'silent');
   const [pathLandmarks, setPathLandmarks] = React.useState<PathLandmark[]>([]);
-  const shopFrontImage = React.useMemo(
-    () => pathLandmarks.find((landmark) => landmark.type === 'shop_front')?.image_url,
-    [pathLandmarks]
-  );
+  const [buyerLocationLabel, setBuyerLocationLabel] = React.useState<string | null>(null);
   const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<any>(null);
   const userMarkerRef = React.useRef<any>(null);
@@ -211,6 +211,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const landmarkMarkersRef = React.useRef<any[]>([]);
   const recordingWatchIdRef = React.useRef<number | null>(null);
   const navWatchIdRef = React.useRef<number | null>(null);
+  const buyerLocationInitRef = React.useRef(false);
   const mapboxToken = typeof (import.meta as any)?.env?.VITE_MAPBOX_TOKEN === 'string'
     ? (import.meta as any).env.VITE_MAPBOX_TOKEN
     : '';
@@ -281,6 +282,22 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [goodDeal, setGoodDeal] = React.useState<Record<string, any> | null>(null);
   const [reviews, setReviews] = React.useState<Review[]>([]);
   const [sellerProfile, setSellerProfile] = React.useState<SellerProfile | null>(null);
+  const sellerNavigationLandmarks = React.useMemo(
+    () => (Array.isArray(sellerProfile?.landmarks) ? (sellerProfile.landmarks as PathLandmark[]) : []),
+    [sellerProfile]
+  );
+  const navigationLandmarks = React.useMemo(
+    () => (pathLandmarks.length > 0 ? pathLandmarks : sellerNavigationLandmarks),
+    [pathLandmarks, sellerNavigationLandmarks]
+  );
+  const shopFrontImage = React.useMemo(
+    () => navigationLandmarks.find((landmark) => landmark.type === 'shop_front')?.image_url || sellerProfile?.shop_front_image_url,
+    [navigationLandmarks, sellerProfile?.shop_front_image_url]
+  );
+  const directionsNote = React.useMemo(
+    () => String(sellerProfile?.directions_note || '').trim(),
+    [sellerProfile?.directions_note]
+  );
   const [sellerReputation, setSellerReputation] = React.useState<SellerReputation | null>(null);
   const [counterfeitSummary, setCounterfeitSummary] = React.useState<SummaryStat | null>(null);
   const [, setDisputeSummary] = React.useState<SummaryStat | null>(null);
@@ -979,6 +996,68 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     if (!showMapModal) return;
+    let active = true;
+    const hasCoords = (loc?: UserLocation | null) =>
+      Boolean(loc && loc.lat !== undefined && loc.lng !== undefined && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)));
+    const resolveBuyerLocation = async () => {
+      try {
+        const locations = await listUserLocations().catch(() => []);
+        if (!active) return;
+        if (buyerLocationInitRef.current || userCoords) return;
+        const preferred = (locations || []).find((location) => location.is_default && hasCoords(location))
+          || (locations || []).find((location) => hasCoords(location));
+        if (preferred && hasCoords(preferred)) {
+          buyerLocationInitRef.current = true;
+          setUserCoords({ lat: Number(preferred.lat), lng: Number(preferred.lng) });
+          setBuyerLocationLabel(preferred.label || preferred.address_line || 'Saved Location');
+          return;
+        }
+        if (!navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            if (!active || buyerLocationInitRef.current || userCoords) return;
+            buyerLocationInitRef.current = true;
+            setUserCoords({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            });
+            setBuyerLocationLabel('My Location');
+          },
+          () => {}
+        );
+      } catch {}
+    };
+    resolveBuyerLocation();
+    return () => {
+      active = false;
+    };
+  }, [showMapModal]);
+
+  React.useEffect(() => {
+    if (!showMapModal) {
+      buyerLocationInitRef.current = false;
+      setBuyerLocationLabel(null);
+      setIsMapExpanded(false);
+      return;
+    }
+    if (!mapReadyRef.current || !mapRef.current || !userCoords) return;
+    const mapboxgl = mapboxModuleRef.current;
+    if (!mapboxgl) return;
+    mapRef.current.easeTo({
+      center: [userCoords.lng, userCoords.lat],
+      duration: 500
+    });
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLngLat([userCoords.lng, userCoords.lat]);
+    } else {
+      userMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
+        .setLngLat([userCoords.lng, userCoords.lat])
+        .addTo(mapRef.current);
+    }
+  }, [showMapModal, userCoords]);
+
+  React.useEffect(() => {
+    if (!showMapModal) return;
     const loc = activeProduct.location || sellerProfile?.location;
     const lat = loc?.lat;
     const lng = loc?.lng;
@@ -1156,7 +1235,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       try {
         const profile = toMapboxProfile(routeProfile);
         let data: any = null;
-        if (preferredPathId && navigationMode === 'silent') {
+        if (preferredPathId) {
           data = await getCustomNavigation({
             path_id: preferredPathId,
             from_lng: fromLng,
@@ -1261,6 +1340,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       setRecordingStart(null);
     }
   }, [showMapModal]);
+
+  React.useEffect(() => {
+    if (!showMapModal || !mapRef.current) return;
+    const raf = window.requestAnimationFrame(() => {
+      mapRef.current?.resize?.();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [isMapExpanded, showMapModal, userCoords, routeInfo]);
 
   const stopNavWatch = () => {
     if (navWatchIdRef.current) {
@@ -1442,8 +1529,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     if (!mapboxgl) return;
     landmarkMarkersRef.current.forEach((marker) => marker.remove());
     landmarkMarkersRef.current = [];
-    if (pathLandmarks.length === 0) return;
-    pathLandmarks
+    if (navigationLandmarks.length === 0) return;
+    navigationLandmarks
       .filter((landmark) => Number.isFinite(landmark.lat) && Number.isFinite(landmark.lng))
       .forEach((landmark, idx) => {
         const el = document.createElement('div');
@@ -1462,7 +1549,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           .addTo(mapRef.current!);
         landmarkMarkersRef.current.push(marker);
       });
-  }, [pathLandmarks, showMapModal]);
+  }, [navigationLandmarks, showMapModal]);
 
   return (
     <motion.div
@@ -2477,7 +2564,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl"
+              className={`${isMapExpanded ? 'fixed inset-0 w-full h-full rounded-none' : 'w-full max-w-2xl rounded-3xl'} bg-white overflow-hidden shadow-2xl flex flex-col`}
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 20, opacity: 0 }}
@@ -2489,6 +2576,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   </div>
                   <div>
                     <p className="text-sm font-black text-zinc-900">Pickup Directions</p>
+                    {buyerLocationLabel && (
+                      <p className="text-[10px] text-indigo-600 font-black uppercase tracking-wider">
+                        Using {buyerLocationLabel}
+                      </p>
+                    )}
                     {routeInfo && (
                       <p className="text-[10px] text-zinc-500 font-bold">
                         {routeInfo.distanceKm} km • {routeInfo.durationMin} min
@@ -2496,12 +2588,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={() => setModal('map', false)}
-                  className="p-2 rounded-full hover:bg-zinc-100"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setModal('map', false)}
+                    className="p-2 rounded-full hover:bg-zinc-100"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               {availablePaths.length > 0 && (
                 <div className="px-4 py-3 border-b bg-zinc-50/70 flex flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-600">
@@ -2523,11 +2617,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   </select>
                 </div>
               )}
-              {(selectedPath || pathLandmarks.length > 0) && (
+              {(selectedPath || navigationLandmarks.length > 0 || directionsNote) && (
                 <div className="px-4 py-3 border-b bg-white">
                   {shopFrontImage && (
                     <div className="mb-3 overflow-hidden rounded-2xl border border-zinc-100">
                       <img src={shopFrontImage} alt="Shop front" className="h-40 w-full object-cover" />
+                    </div>
+                  )}
+                  {directionsNote && (
+                    <div className="mb-3 rounded-2xl border border-amber-100 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-900">
+                      {directionsNote}
                     </div>
                   )}
                   <div className="flex flex-wrap gap-3 text-[10px] font-bold text-zinc-600">
@@ -2547,10 +2646,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                       </span>
                     )}
                   </div>
-                  {pathLandmarks.length > 0 && (
+                  {navigationLandmarks.length > 0 && (
                     <div className="mt-3 overflow-x-auto">
                       <div className="flex gap-3 min-w-max">
-                        {pathLandmarks.map((landmark) => (
+                        {navigationLandmarks.map((landmark) => (
                           <div key={landmark.id || landmark.image_url} className="w-40 bg-zinc-50 rounded-2xl border border-zinc-100 overflow-hidden">
                             <img src={landmark.image_url} alt={landmark.label} className="h-24 w-full object-cover" />
                             <div className="p-2">
@@ -2564,14 +2663,31 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   )}
                 </div>
               )}
-              <div className="relative h-[360px] bg-zinc-100">
+              <div className={`${isMapExpanded ? 'flex-1 min-h-0' : 'relative h-[360px]'} bg-zinc-100 relative`}>
                 <div ref={mapContainerRef} className="absolute inset-0" />
                 {!mapboxToken && (
                   <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
                     Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
                   </div>
                 )}
-                <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
+                <div className="absolute top-3 right-3 z-10">
+                  <button
+                    onClick={() => setIsMapExpanded((prev) => !prev)}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/90 backdrop-blur-md border border-white shadow-xl text-[10px] font-black text-zinc-700"
+                  >
+                    {isMapExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                    {isMapExpanded ? 'Exit Fullscreen' : 'Fullscreen'}
+                  </button>
+                </div>
+                {isRecording && (
+                  <div className="absolute top-12 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                    <div>
+                      Recording… {Math.round(recordingDistance)}m · {Math.floor((recordingStart ? (Date.now() - recordingStart) : 0) / 60000)}m
+                    </div>
+                    <div className="text-[9px] text-white/80">Points: {recordingPoints.length} / 10</div>
+                  </div>
+                )}
+                <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap gap-2">
                   <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex flex-wrap gap-1 text-[9px] font-bold text-zinc-700">
                     {[
                       { label: 'Drive', value: 'driving' },
@@ -2608,9 +2724,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   )}
                   <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex items-center gap-1 text-[9px] font-bold text-zinc-700">
                     <button
-                    onClick={() => {
-                      const next = !voiceDirectionsEnabled;
-                      setVoiceDirectionsEnabled(next);
+                      onClick={() => {
+                        const next = !voiceDirectionsEnabled;
+                        setVoiceDirectionsEnabled(next);
                         void updateUiPreferences({ voice_directions_enabled: next }).catch(() => {});
                       }}
                       className={`px-3 py-1 rounded-full ${voiceDirectionsEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-700'}`}
@@ -2639,15 +2755,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     )}
                   </div>
                 </div>
-                {isRecording && (
-                  <div className="absolute top-12 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
-                    <div>
-                      Recording… {Math.round(recordingDistance)}m · {Math.floor((recordingStart ? (Date.now() - recordingStart) : 0) / 60000)}m
-                    </div>
-                    <div className="text-[9px] text-white/80">Points: {recordingPoints.length} / 10</div>
-                  </div>
-                )}
-                <div className="absolute bottom-0 left-0 right-0 pb-3 px-3">
+              <div className="absolute bottom-0 left-0 right-0 pb-3 px-3">
                   <div className="bg-white/95 backdrop-blur-md rounded-t-3xl border border-white shadow-2xl p-4 max-h-[40vh] overflow-hidden">
                     {routeSteps.length > 0 && (
                       <div className="max-h-28 overflow-auto text-[10px] text-zinc-700 space-y-1">

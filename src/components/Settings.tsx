@@ -15,7 +15,12 @@ import {
   Database,
   Volume2,
   Moon,
-  Sun
+  Sun,
+  MapPin,
+  Plus,
+  Pencil,
+  Home,
+  LocateFixed
 } from 'lucide-react';
 import { getNotificationPreferences, updateNotificationPreferences } from '../lib/notificationsApi';
 import {
@@ -29,6 +34,15 @@ import {
   getUiPreferences,
   updateUiPreferences
 } from '../lib/settingsApi';
+import {
+  createUserLocation,
+  deleteUserLocation,
+  listRegions,
+  listUserLocations,
+  type Region,
+  type UserLocation,
+  updateUserLocation
+} from '../lib/searchApi';
 
 interface SettingsProps {
   onOpenDataDashboard?: () => void;
@@ -93,6 +107,19 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
   });
   const [comparisonProfile, setComparisonProfile] = React.useState('default');
   const [comparisonStatus, setComparisonStatus] = React.useState<string | null>(null);
+  const [savedLocations, setSavedLocations] = React.useState<UserLocation[]>([]);
+  const [locationRegions, setLocationRegions] = React.useState<Region[]>([]);
+  const [locationForm, setLocationForm] = React.useState({
+    id: '',
+    label: '',
+    address_line: '',
+    region_id: '',
+    lat: '',
+    lng: '',
+    is_default: true
+  });
+  const [locationLoading, setLocationLoading] = React.useState(false);
+  const [locationStatus, setLocationStatus] = React.useState<string | null>(null);
   const [deleteForm, setDeleteForm] = React.useState({
     verificationMethod: 'mfa',
     mfa: false,
@@ -104,10 +131,12 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
     let ignore = false;
     const load = async () => {
       try {
-        const [summary, consentsResp, prefs] = await Promise.all([
+        const [summary, consentsResp, prefs, regionsResp, locationsResp] = await Promise.all([
           getSettingsSummary(),
           getConsents(),
-          getNotificationPreferences()
+          getNotificationPreferences(),
+          listRegions().catch(() => []),
+          listUserLocations().catch(() => [])
         ]);
         if (ignore) return;
         setDataSummary({
@@ -149,6 +178,8 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           trending: Boolean(prefs.trending),
           watched_items: Boolean(prefs.watched_items)
         });
+        setLocationRegions(regionsResp || []);
+        setSavedLocations(locationsResp || []);
         const uiPrefs = await getUiPreferences();
         if (uiPrefs?.theme === 'light' || uiPrefs?.theme === 'dark' || uiPrefs?.theme === 'system') {
           setTheme(uiPrefs.theme);
@@ -183,6 +214,8 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           setConsents({ location: false, receipts: false, personalization: false, marketing: false });
           setNotificationPrefs({ price_drops: false, back_in_stock: false, trending: false, watched_items: false });
           setConsentHistory([]);
+          setLocationRegions([]);
+          setSavedLocations([]);
           setUiPrefsLoaded(true);
         }
       }
@@ -245,6 +278,122 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
 
   const updateThreshold = (key: keyof typeof dealThresholds, value: number) => {
     setDealThresholds((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const regionNameById = React.useMemo(() => {
+    return locationRegions.reduce((acc, region) => {
+      acc[region.id] = `${region.name}${region.type ? ` (${region.type})` : ''}`;
+      return acc;
+    }, {} as Record<string, string>);
+  }, [locationRegions]);
+
+  const resetLocationForm = () => {
+    setLocationForm({
+      id: '',
+      label: '',
+      address_line: '',
+      region_id: '',
+      lat: '',
+      lng: '',
+      is_default: true
+    });
+  };
+
+  const loadSavedLocations = React.useCallback(async () => {
+    try {
+      const [regionsResp, locationsResp] = await Promise.all([
+        listRegions().catch(() => []),
+        listUserLocations().catch(() => [])
+      ]);
+      setLocationRegions(regionsResp || []);
+      setSavedLocations(locationsResp || []);
+    } catch {
+      setLocationRegions([]);
+      setSavedLocations([]);
+    }
+  }, []);
+
+  const handleEditLocation = (location: UserLocation) => {
+    setLocationForm({
+      id: location.id,
+      label: location.label || '',
+      address_line: location.address_line || '',
+      region_id: location.region_id || '',
+      lat: location.lat !== undefined && location.lat !== null ? String(location.lat) : '',
+      lng: location.lng !== undefined && location.lng !== null ? String(location.lng) : '',
+      is_default: Boolean(location.is_default)
+    });
+    setLocationStatus(null);
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus('Browser location is unavailable.');
+      return;
+    }
+    setLocationStatus(null);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationForm((prev) => ({
+          ...prev,
+          lat: String(position.coords.latitude),
+          lng: String(position.coords.longitude)
+        }));
+        setLocationStatus('Current location captured.');
+      },
+      () => {
+        setLocationStatus('Could not read your current location.');
+      }
+    );
+  };
+
+  const handleSaveLocation = async () => {
+    if (!locationForm.label.trim()) {
+      setLocationStatus('Location label is required.');
+      return;
+    }
+    setLocationLoading(true);
+    setLocationStatus(null);
+    const payload = {
+      label: locationForm.label.trim(),
+      address_line: locationForm.address_line.trim(),
+      region_id: locationForm.region_id || undefined,
+      lat: locationForm.lat.trim() ? Number(locationForm.lat) : undefined,
+      lng: locationForm.lng.trim() ? Number(locationForm.lng) : undefined,
+      is_default: Boolean(locationForm.is_default)
+    };
+    try {
+      if (locationForm.id) {
+        await updateUserLocation(locationForm.id, { id: locationForm.id, ...payload } as UserLocation);
+        setLocationStatus('Saved location updated.');
+      } else {
+        await createUserLocation({ id: '', ...payload } as UserLocation);
+        setLocationStatus('Saved location added.');
+      }
+      await loadSavedLocations();
+      resetLocationForm();
+    } catch (err: any) {
+      setLocationStatus(err?.message || 'Unable to save location.');
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  const handleDeleteLocation = async (id: string) => {
+    setLocationLoading(true);
+    setLocationStatus(null);
+    try {
+      await deleteUserLocation(id);
+      await loadSavedLocations();
+      if (locationForm.id === id) {
+        resetLocationForm();
+      }
+      setLocationStatus('Saved location removed.');
+    } catch (err: any) {
+      setLocationStatus(err?.message || 'Unable to delete location.');
+    } finally {
+      setLocationLoading(false);
+    }
   };
 
   const applyProfilePreset = (profile: string) => {
@@ -496,6 +645,168 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           >
             Open Data Dashboard
           </button>
+        </div>
+
+        {/* Saved Locations */}
+        <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm">
+          <div className="flex items-center gap-3 mb-4">
+            <MapPin className="w-5 h-5 text-indigo-500" />
+            <div>
+              <p className="text-sm font-bold text-zinc-900">Saved Locations</p>
+              <p className="text-[10px] text-zinc-500">Keep home, work, and pickup spots ready for search and delivery.</p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                value={locationForm.label}
+                onChange={(e) => setLocationForm((prev) => ({ ...prev, label: e.target.value }))}
+                placeholder="Label e.g. Home"
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+              />
+              <input
+                value={locationForm.address_line}
+                onChange={(e) => setLocationForm((prev) => ({ ...prev, address_line: e.target.value }))}
+                placeholder="Address line"
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <select
+                value={locationForm.region_id}
+                onChange={(e) => setLocationForm((prev) => ({ ...prev, region_id: e.target.value }))}
+                className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+              >
+                <option value="">Select region</option>
+                {locationRegions.map((region) => (
+                  <option key={region.id} value={region.id}>
+                    {regionNameById[region.id]}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <input
+                  value={locationForm.lat}
+                  onChange={(e) => setLocationForm((prev) => ({ ...prev, lat: e.target.value }))}
+                  placeholder="Lat"
+                  className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+                />
+                <input
+                  value={locationForm.lng}
+                  onChange={(e) => setLocationForm((prev) => ({ ...prev, lng: e.target.value }))}
+                  placeholder="Lng"
+                  className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleUseCurrentLocation}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase"
+              >
+                <LocateFixed className="w-4 h-4" />
+                Use Current Location
+              </button>
+              <button
+                type="button"
+                onClick={() => setLocationForm((prev) => ({ ...prev, is_default: !prev.is_default }))}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase"
+              >
+                {locationForm.is_default ? <Home className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
+                {locationForm.is_default ? 'Default' : 'Make Default'}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleSaveLocation}
+                disabled={locationLoading}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase disabled:opacity-60"
+              >
+                <Plus className="w-4 h-4" />
+                {locationForm.id ? 'Update Location' : 'Add Location'}
+              </button>
+              {locationForm.id && (
+                <button
+                  type="button"
+                  onClick={resetLocationForm}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase"
+                >
+                  Cancel Edit
+                </button>
+              )}
+            </div>
+            {locationStatus && (
+              <div className="text-[10px] font-bold text-zinc-500">{locationStatus}</div>
+            )}
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {savedLocations.map((location) => (
+              <div key={location.id} className="rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-zinc-900">{location.label}</span>
+                      {location.is_default && (
+                        <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          Default
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold text-zinc-500">
+                      {location.address_line || 'No address line'}
+                    </div>
+                    <div className="text-[10px] font-bold text-zinc-400">
+                      {location.region_id ? regionNameById[location.region_id] || location.region_id : 'No region selected'}
+                      {location.lat !== undefined && location.lng !== undefined ? ` • ${Number(location.lat).toFixed(5)}, ${Number(location.lng).toFixed(5)}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!location.is_default && (
+                      <button
+                        onClick={async () => {
+                          setLocationLoading(true);
+                          try {
+                            await updateUserLocation(location.id, { ...location, is_default: true } as UserLocation);
+                            await loadSavedLocations();
+                          } catch (err: any) {
+                            setLocationStatus(err?.message || 'Unable to make default.');
+                          } finally {
+                            setLocationLoading(false);
+                          }
+                        }}
+                        className="text-[9px] font-black uppercase px-2 py-1 rounded-full bg-indigo-50 text-indigo-700"
+                      >
+                        Set Default
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleEditLocation(location)}
+                      className="text-[9px] font-black uppercase px-2 py-1 rounded-full bg-zinc-100 text-zinc-700 inline-flex items-center gap-1"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteLocation(location.id)}
+                      className="text-[9px] font-black uppercase px-2 py-1 rounded-full bg-rose-50 text-rose-700 inline-flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {savedLocations.length === 0 && (
+              <div className="text-[10px] font-bold text-zinc-400">
+                No saved locations yet.
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Favorite Shop Alerts */}

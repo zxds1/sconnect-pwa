@@ -15,7 +15,9 @@ import {
   TrendingUp,
   Bell,
   Sparkles,
-  Clock
+  Clock,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { Product } from '../types';
 import { getProduct } from '../lib/catalogApi';
@@ -24,6 +26,7 @@ import {
   listSavedSearches,
   listSearchAlerts,
   listWatchlist,
+  listUserLocations,
   addWatchlistItem,
   updateWatchlistItem,
   deleteWatchlistItem,
@@ -54,7 +57,8 @@ import {
   type RecordedPath,
   type WatchlistItem,
   type SavedSearch,
-  type RecentSearch
+  type RecentSearch,
+  type UserLocation
 } from '../lib/searchApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
 import {
@@ -92,6 +96,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [searchQuery, setSearchQuery] = useState('');
   const [locationQuery, setLocationQuery] = useState('');
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationSourceLabel, setLocationSourceLabel] = useState<string | null>(null);
   const [maxDistance, setMaxDistance] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000]);
@@ -99,6 +104,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [sortBy, setSortBy] = useState<'price_asc' | 'price_desc' | 'rating'>('rating');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [isNearMeActive, setIsNearMeActive] = useState(false);
@@ -199,6 +205,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [mapProducts, setMapProducts] = useState<Product[]>([]);
   const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);
   const [trendingQueries, setTrendingQueries] = useState<string[]>([]);
+  const [savedLocations, setSavedLocations] = useState<UserLocation[]>([]);
   const [searchQueryId, setSearchQueryId] = useState<string | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -777,14 +784,15 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     let ignore = false;
     const load = async () => {
       try {
-        const [saved, recent, watchlist, alerts, favorites, trending, recs] = await Promise.all([
+        const [saved, recent, watchlist, alerts, favorites, trending, recs, locations] = await Promise.all([
           listSavedSearches(),
           listRecentSearches(),
           listWatchlist(),
           listSearchAlerts(),
           listShopFavorites(),
           searchTrending(),
-          searchRecommendations()
+          searchRecommendations(),
+          listUserLocations().catch(() => [])
         ]);
         if (ignore) return;
         setSavedSearches(saved);
@@ -793,6 +801,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         setSearchAlerts(alerts);
         setFavoriteShopIds(favorites.map((item: any) => item.seller_id || item.id).filter(Boolean));
         setTrendingQueries(trending);
+        setSavedLocations(locations || []);
         const recProducts = await hydrateProductsFromResults(recs);
         if (!ignore) setRecommendedProducts(recProducts);
       } catch (err) {
@@ -803,6 +812,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           setSearchAlerts([]);
           setFavoriteShopIds([]);
           setTrendingQueries([]);
+          setSavedLocations([]);
           setRecommendedProducts([]);
         }
       }
@@ -817,6 +827,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     if (isNearMeActive) {
       setIsNearMeActive(false);
       setLocationQuery('');
+      setLocationSourceLabel(null);
       setMaxDistance(null);
       return;
     }
@@ -830,6 +841,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           setMaxDistance(10); // Default to 10km for "Near Me"
           setIsNearMeActive(true);
           setLocationQuery('My Location');
+          setLocationSourceLabel('My Location');
         },
         (error) => {
           console.error("Error getting location:", error);
@@ -838,6 +850,31 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       );
     }
   };
+
+  const applySavedLocation = (location: UserLocation) => {
+    setLocationQuery(location.label || location.address_line || 'Saved Location');
+    setLocationSourceLabel(location.label || location.address_line || 'Saved Location');
+    if (location.lat !== undefined && location.lng !== undefined) {
+      setUserCoords({ lat: Number(location.lat), lng: Number(location.lng) });
+      setIsNearMeActive(true);
+      setMaxDistance((prev) => prev ?? 10);
+    }
+  };
+
+  const locationActionLabel = isNearMeActive
+    ? (locationSourceLabel || 'Near Me')
+    : 'Use Nearby';
+  const activeLocationPreviewLabel = isNearMeActive
+    ? (locationSourceLabel || 'My Location')
+    : null;
+
+  useEffect(() => {
+    if (locationQuery.trim() || userCoords || isNearMeActive || savedLocations.length === 0) return;
+    const preferred = savedLocations.find((location) => location.is_default && location.lat !== undefined && location.lng !== undefined)
+      || savedLocations.find((location) => location.lat !== undefined && location.lng !== undefined);
+    if (!preferred) return;
+    applySavedLocation(preferred);
+  }, [isNearMeActive, locationQuery, savedLocations, userCoords]);
 
   const handleOpenCamera = async () => {
     if (mediaUploading) return;
@@ -1846,10 +1883,11 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       return {
         id: item.id,
         name: item.query,
-        time: mins >= 60 ? `${Math.round(mins / 60)} hrs ago` : `${mins} mins ago`
+        time: mins >= 60 ? `${Math.round(mins / 60)} hrs ago` : `${mins} mins ago`,
+        locationLabel: activeLocationPreviewLabel
       };
     });
-  }, [recentSearches]);
+  }, [activeLocationPreviewLabel, recentSearches]);
 
   const mapItems = viewMode === 'map'
     ? (mapProducts.length > 0 ? mapProducts : filteredProducts)
@@ -1886,6 +1924,18 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   useEffect(() => {
     mapItemsRef.current = mapItems;
   }, [mapItems]);
+
+  useEffect(() => {
+    if (viewMode !== 'map') {
+      setIsMapExpanded(false);
+      return;
+    }
+    if (!mapRef.current) return;
+    const raf = window.requestAnimationFrame(() => {
+      mapRef.current?.resize?.();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [isMapExpanded, viewMode, mapReadyVersion]);
 
   return (
     <div
@@ -2057,7 +2107,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             onClick={handleUseMyLocation}
             className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${isNearMeActive ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}
           >
-            <Navigation className="w-3 h-3" /> Near Me
+            <Navigation className="w-3 h-3" /> {locationActionLabel}
           </button>
 
           <div className="w-px h-4 bg-zinc-200 mx-1" />
@@ -2117,15 +2167,32 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
 
         {viewMode === 'map' ? (
           <>
-            <div className="relative h-[360px] sm:h-[520px] w-full rounded-3xl overflow-hidden border-2 border-zinc-200 bg-zinc-100">
+            <div className={`${isMapExpanded ? 'fixed inset-0 z-[90] rounded-none border-0' : 'relative h-[360px] sm:h-[520px] rounded-3xl border-2'} w-full overflow-hidden bg-zinc-100 relative`}>
               <div ref={mapContainerRef} className="absolute inset-0" />
               {!mapboxToken && (
                 <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/70 text-white text-xs font-bold">
                   Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
                 </div>
               )}
-              <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
-                <div className="bg-white/90 backdrop-blur-md border border-white shadow-xl rounded-2xl p-2 flex items-center gap-2">
+              <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
+                <button
+                  onClick={() => setIsMapExpanded((prev) => !prev)}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/90 backdrop-blur-md border border-white shadow-xl text-[10px] font-black text-zinc-700"
+                >
+                  {isMapExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  {isMapExpanded ? 'Exit Fullscreen' : 'Fullscreen'}
+                </button>
+              </div>
+              {isRecording && (
+                <div className="absolute top-4 left-4 bg-rose-600/90 text-white px-3 py-2 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                  <div>
+                    Recording… {Math.round(recordingDistance)}m · {Math.floor(recordingElapsedSec / 60)}m {recordingElapsedSec % 60}s
+                  </div>
+                  <div className="text-[9px] text-white/80">Points: {recordingPointCount} / {recordingGoal}</div>
+                </div>
+              )}
+              <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap items-center gap-2">
+                <div className="bg-white/90 backdrop-blur-md border border-white shadow-xl rounded-2xl p-2 flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => setShowPathsPanel((prev) => !prev)}
                     className="px-3 py-1.5 rounded-full bg-zinc-900 text-white text-[10px] font-black"
@@ -2145,8 +2212,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   >
                     {voiceDirectionsEnabled ? 'Voice On' : 'Voice Off'}
                   </button>
-                </div>
-                <div className="bg-white/90 backdrop-blur-md border border-white shadow-xl rounded-2xl p-2 flex items-center gap-2">
                   <button
                     onClick={() => {
                       if (isRecording) {
@@ -2169,14 +2234,6 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   )}
                 </div>
               </div>
-              {isRecording && (
-                <div className="absolute top-4 left-4 bg-rose-600/90 text-white px-3 py-2 rounded-2xl text-[10px] font-bold shadow space-y-1">
-                  <div>
-                    Recording… {Math.round(recordingDistance)}m · {Math.floor(recordingElapsedSec / 60)}m {recordingElapsedSec % 60}s
-                  </div>
-                  <div className="text-[9px] text-white/80">Points: {recordingPointCount} / {recordingGoal}</div>
-                </div>
-              )}
               {showPathsPanel && (
                 <div className="absolute top-20 right-4 w-72 bg-white/95 backdrop-blur rounded-2xl border border-white shadow-xl p-4 space-y-3 z-10">
                   <div className="flex items-center justify-between">
@@ -2401,7 +2458,14 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             {savedSearches.length > 0 && (
               <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Searches</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Searches</h3>
+                    {activeLocationPreviewLabel && (
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                        Context: {activeLocationPreviewLabel}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] text-zinc-400 font-bold">{savedSearches.length} saved</span>
                 </div>
                 <div className="flex flex-col gap-2">
@@ -2416,6 +2480,11 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                         >
                           {item.query}
                         </button>
+                        {activeLocationPreviewLabel && (
+                          <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                            {activeLocationPreviewLabel}
+                          </span>
+                        )}
                         <select
                           value={frequency}
                           onChange={(e) => setAlertFrequency((prev) => ({ ...prev, [item.id]: e.target.value }))}
@@ -2615,18 +2684,30 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             </div>
 
             {/* Recent Searches */}
-            <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
-              <div className="flex items-center gap-2 mb-3">
-                <Clock className="w-4 h-4 text-indigo-600" />
+              <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center gap-2 mb-3">
+                  <Clock className="w-4 h-4 text-indigo-600" />
                 <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Recent Searches</h3>
-              </div>
-              <div className="space-y-2">
-                {recentSearchSummary.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
-                    <span>{item.name}</span>
+                {activeLocationPreviewLabel && (
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                    {activeLocationPreviewLabel}
+                  </span>
+                )}
+                </div>
+                <div className="space-y-2">
+                  {recentSearchSummary.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="truncate">{item.name}</span>
+                      {item.locationLabel && (
+                        <span className="px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500 uppercase tracking-widest text-[8px]">
+                          {item.locationLabel}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-zinc-400">{item.time}</span>
-                  </div>
-                ))}
+                    </div>
+                  ))}
                 {recentSearchSummary.length === 0 && (
                   <div className="text-[10px] font-bold text-zinc-400">No recent searches yet.</div>
                 )}
@@ -2765,6 +2846,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                           value={locationQuery}
                           onChange={(e) => {
                             setLocationQuery(e.target.value);
+                            setLocationSourceLabel(null);
                             if (e.target.value !== 'My Location') {
                               setUserCoords(null);
                               setIsNearMeActive(false);
@@ -2795,6 +2877,11 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                       </div>
                       {userCoords && (
                         <div className="space-y-2">
+                          {locationSourceLabel && (
+                            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                              Using {locationSourceLabel}
+                            </div>
+                          )}
                           <div className="flex justify-between items-center">
                             <label className="text-[9px] font-bold text-zinc-400 uppercase">Radius</label>
                             <span className="text-xs font-black text-indigo-600">{maxDistance} km</span>
@@ -2810,6 +2897,28 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                           />
                         </div>
                       )}
+                      {savedLocations.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+                            Saved Locations
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {savedLocations.map((location) => (
+                              <button
+                                key={location.id}
+                                onClick={() => applySavedLocation(location)}
+                                className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-colors ${
+                                  location.is_default
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-zinc-100 text-zinc-600 hover:bg-indigo-50 hover:text-indigo-700'
+                                }`}
+                              >
+                                {location.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                       <div className="grid grid-cols-2 gap-2">
@@ -2817,7 +2926,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                           onClick={handleUseMyLocation}
                           className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-bold transition-colors ${isNearMeActive ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-white hover:bg-zinc-800'}`}
                         >
-                          <Navigation className="w-4 h-4" /> {isNearMeActive ? 'Near Me Active' : 'Use Nearby'}
+                          <Navigation className="w-4 h-4" /> {isNearMeActive ? `Using ${locationSourceLabel || 'Nearby'}` : 'Use Nearby'}
                         </button>
                         <button
                           onClick={async () => {

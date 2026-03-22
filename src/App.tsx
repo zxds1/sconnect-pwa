@@ -589,6 +589,10 @@ export default function App() {
     const sellerId = payload?.seller_id || payload?.destination_seller_id;
     const productId = payload?.product_id || payload?.id;
     const pathId = payload?.path_id || payload?.preferred_path_id || payload?.route_id;
+    const mapUrl = String(payload?.map_url || payload?.maps_url || payload?.navigation_url || '').trim();
+    const address = String(payload?.address || payload?.address_line || payload?.location_address || '').trim();
+    const lat = String(payload?.lat || payload?.latitude || payload?.y || '').trim();
+    const lng = String(payload?.lng || payload?.lon || payload?.longitude || payload?.x || '').trim();
     const profile = ['driving', 'walking', 'cycling', 'motorbike', 'scooter', 'tuktuk'].includes(String(payload?.profile))
       ? (payload.profile as 'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk')
       : undefined;
@@ -607,6 +611,12 @@ export default function App() {
       } catch {}
     }
     if (!product) {
+      const target = mapUrl || (lat && lng ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}` : '') || (address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : '');
+      if (target) {
+        window.open(target, '_blank', 'noopener,noreferrer');
+        setToast('Opening map.');
+        return;
+      }
       setToast('Unable to open navigation for this seller yet.');
       return;
     }
@@ -692,10 +702,6 @@ export default function App() {
   };
 
   const handleOpenProfile = () => {
-    if (!hasSession()) {
-      promptForLogin('Sign in to open your profile and manage account settings.', 'profile');
-      return;
-    }
     setSelectedSellerId(null);
     setView('profile');
   };
@@ -1037,6 +1043,7 @@ export default function App() {
               <Profile 
                 onBack={goBack}
                 onSettingsOpen={() => setView('settings')}
+                onRequireLogin={(message) => promptForLogin(message, 'profile')}
                 onOpenSellerStudio={handleOpenSellerStudio}
                 onSellerAccountCreated={() => {
                   setIsSellerAccount(true);

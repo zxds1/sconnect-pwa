@@ -4,7 +4,7 @@ import {
   invalidateCachedJson,
   setCachedJson,
 } from './apiCache';
-import { getAuthItem, setAuthItem } from './authStorage';
+import { getAuthItem, getVisitorId, setAuthItem } from './authStorage';
 
 export type ApiError = {
   status: number;
@@ -70,9 +70,11 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   const token = getAuthToken();
   const role = getRole();
   const correlationId = getCorrelationId();
+  const visitorId = !token ? getVisitorId() : undefined;
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
   if (userId) headers['X-User-Id'] = userId;
+  if (visitorId) headers['X-Visitor-Id'] = visitorId;
   if (correlationId) headers['X-Correlation-Id'] = correlationId;
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (role) headers['X-Role'] = role;

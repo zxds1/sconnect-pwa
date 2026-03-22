@@ -16,6 +16,7 @@ import { Security } from "./pages/Security";
 import { Compliance } from "./pages/Compliance";
 import { Risk } from "./pages/Risk";
 import { Audit } from "./pages/Audit";
+import { Activity } from "./pages/Activity";
 import { SupplierApplications } from "./pages/SupplierApplications";
 import { AssistantModels } from "./pages/AssistantModels";
 import { Partnerships } from "./pages/Partnerships";
@@ -72,8 +73,9 @@ export default function App() {
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/security" element={<Security />} />
             <Route path="/compliance" element={<Compliance />} />
-            <Route path="/risk" element={<Risk />} />
+              <Route path="/risk" element={<Risk />} />
               <Route path="/audit" element={<Audit />} />
+              <Route path="/activity" element={<Activity />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </div>

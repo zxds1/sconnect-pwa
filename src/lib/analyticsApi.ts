@@ -1,4 +1,5 @@
 import { apiFetch } from './apiClient';
+import { getAuthItem, getVisitorId } from './authStorage';
 
 export type AnalyticsEvent = {
   name: string;
@@ -77,9 +78,11 @@ const normalizeEvent = (event: AnalyticsEvent) => ({
 
 export const postAnalyticsEvent = async (event: AnalyticsEvent) => {
   const normalized = normalizeEvent(event);
+  const visitorId = getAuthItem('soko:auth_token') ? undefined : getVisitorId();
   normalized.properties = {
     ...normalized.properties,
     ...analyticsSession,
+    ...(visitorId ? { visitor_id: visitorId } : {}),
   };
   return apiFetch('/v1/audit/events', {
     method: 'POST',

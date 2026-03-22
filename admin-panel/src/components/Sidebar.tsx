@@ -16,7 +16,8 @@ const navItems = [
   { path: "/security", label: "Security Overview" },
   { path: "/compliance", label: "Compliance" },
   { path: "/risk", label: "Risk Radar" },
-  { path: "/audit", label: "Audit Trail" }
+  { path: "/audit", label: "Audit Trail" },
+  { path: "/activity", label: "Platform Activity" }
 ];
 
 export const Sidebar = () => {

@@ -20,6 +20,11 @@ const removeStorage = (storage: Storage, key: string) => {
   } catch {}
 };
 
+const createId = () =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `id_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`);
+
 export const getAuthItem = (key: string) => {
   if (!canUseStorage()) return undefined;
   const sessionValue = readStorage(window.sessionStorage, key);
@@ -48,4 +53,14 @@ export const removeAuthItem = (key: string) => {
   if (!canUseStorage()) return;
   removeStorage(window.sessionStorage, key);
   removeStorage(window.localStorage, key);
+};
+
+export const getVisitorId = () => {
+  if (!canUseStorage()) return createId();
+  if (getAuthItem('soko:auth_token')) return undefined;
+  const existing = getAuthItem('soko:visitor_id');
+  if (existing) return existing;
+  const visitorId = createId();
+  setAuthItem('soko:visitor_id', visitorId);
+  return visitorId;
 };

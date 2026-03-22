@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { X, ArrowLeft, ShoppingBag, Star, BarChart3, MapPin, Map as MapIcon, HelpCircle } from 'lucide-react';
+import { X, ArrowLeft, ShoppingBag, Star, BarChart3, MapPin, Map as MapIcon, HelpCircle, Maximize2, Minimize2 } from 'lucide-react';
 import { Product } from '../types';
 import { addCartItem } from '../lib/cartApi';
-import { listPopularPaths, recordPath, type PathPoint } from '../lib/searchApi';
+import { listPopularPaths, listUserLocations, recordPath, type PathPoint, type UserLocation } from '../lib/searchApi';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
 import {
   detectCityKey,
@@ -83,6 +83,8 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
   const [compareUserCoords, setCompareUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [compareMapReady, setCompareMapReady] = useState(false);
   const [compareRouteProfile, setCompareRouteProfile] = useState<'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk'>('driving');
+  const [locationSourceLabel, setLocationSourceLabel] = useState<string | null>(null);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [routeConfig, setRouteConfig] = useState<RouteMultipliersConfig>(() => getDefaultRouteMultipliers());
   const routeTelemetry = useMemo(() => createRouteTelemetryTracker('comparison_map'), []);
 
@@ -347,6 +349,49 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
   }, []);
 
   useEffect(() => {
+    if (!compareMapRef.current) return;
+    const raf = window.requestAnimationFrame(() => {
+      compareMapRef.current?.resize?.();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [compareMapReady, isMapExpanded, activeMapProduct]);
+
+  useEffect(() => {
+    let active = true;
+    const hasCoords = (loc?: UserLocation | null) =>
+      Boolean(loc && loc.lat !== undefined && loc.lng !== undefined && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)));
+    const resolveBuyerLocation = async () => {
+      try {
+        const locations = await listUserLocations().catch(() => []);
+        if (!active || compareUserCoords) return;
+        const preferred = (locations || []).find((location) => location.is_default && hasCoords(location))
+          || (locations || []).find((location) => hasCoords(location));
+        if (preferred && hasCoords(preferred)) {
+          setCompareUserCoords({ lat: Number(preferred.lat), lng: Number(preferred.lng) });
+          setLocationSourceLabel(preferred.label || preferred.address_line || 'Saved Location');
+          return;
+        }
+        if (!navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            if (!active || compareUserCoords) return;
+            setCompareUserCoords({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            });
+            setLocationSourceLabel('My Location');
+          },
+          () => {}
+        );
+      } catch {}
+    };
+    resolveBuyerLocation();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!activeMapProduct || !activeMapProduct.mapItems?.[0]) return;
     if (!mapboxToken) return;
     if (!compareMapContainerRef.current) return;
@@ -426,6 +471,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
               lng: position.coords.longitude
             };
             setCompareUserCoords(coords);
+            setLocationSourceLabel('My Location');
             if (compareMapRef.current) {
               compareUserMarkerRef.current?.remove();
               compareUserMarkerRef.current = new mapboxgl.Marker({ color: '#10b981' })
@@ -1221,7 +1267,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
 
       {activeMapProduct && activeMapItem && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl">
+          <div className={`${isMapExpanded ? 'fixed inset-0 w-full h-full rounded-none' : 'w-full max-w-2xl rounded-3xl'} bg-white overflow-hidden shadow-2xl flex flex-col`}>
             <div className="p-4 border-b flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-indigo-100 rounded-xl">
@@ -1229,6 +1275,11 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                 </div>
                 <div>
                   <p className="text-sm font-black text-zinc-900">Location Map</p>
+                  {locationSourceLabel && (
+                    <p className="text-[10px] text-indigo-600 font-black uppercase tracking-wider">
+                      Using {locationSourceLabel}
+                    </p>
+                  )}
                   <p className="text-[10px] text-zinc-500 font-bold">
                     {activeMapItem.seller_name || 'Seller'} • {activeMapItem.distance_km?.toFixed(1) || '—'} km
                   </p>
@@ -1242,7 +1293,16 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
               </button>
             </div>
 
-            <div className="relative h-[360px] bg-zinc-100">
+            <div className={`${isMapExpanded ? 'flex-1 min-h-0' : 'relative h-[360px]'} bg-zinc-100 relative`}>
+              <div className="absolute top-3 right-3 z-10">
+                <button
+                  onClick={() => setIsMapExpanded((prev) => !prev)}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/90 backdrop-blur-md border border-white shadow-xl text-[10px] font-black text-zinc-700"
+                >
+                  {isMapExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  {isMapExpanded ? 'Exit Fullscreen' : 'Fullscreen'}
+                </button>
+              </div>
               <div ref={compareMapContainerRef} className="absolute inset-0" />
               {!mapboxToken && (
                 <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
@@ -1254,7 +1314,15 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                   Route: {compareRouteInfo.distanceKm} km · {compareRouteInfo.durationMin} min
                 </div>
               )}
-              <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
+              {isRecording && (
+                <div className="absolute top-12 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                  <div>
+                    Recording… {Math.round(recordingDistance)}m · {Math.floor((recordingStart ? (Date.now() - recordingStart) : 0) / 60000)}m
+                  </div>
+                  <div className="text-[9px] text-white/80">Points: {recordingPoints.length} / 10</div>
+                </div>
+              )}
+              <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap gap-2">
                 <div className="bg-white/90 backdrop-blur-md px-2 py-1.5 rounded-2xl border border-white shadow-xl flex flex-wrap gap-1 text-[9px] font-bold text-zinc-700">
                   {[
                     { label: 'Drive', value: 'driving' },
@@ -1306,14 +1374,6 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
                   )}
                 </div>
               </div>
-              {isRecording && (
-                <div className="absolute top-12 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
-                  <div>
-                    Recording… {Math.round(recordingDistance)}m · {Math.floor((recordingStart ? (Date.now() - recordingStart) : 0) / 60000)}m
-                  </div>
-                  <div className="text-[9px] text-white/80">Points: {recordingPoints.length} / 10</div>
-                </div>
-              )}
               <div className="absolute bottom-0 left-0 right-0 pb-3 px-3">
                 <div className="bg-white/95 backdrop-blur-md rounded-t-3xl border border-white shadow-2xl p-4 max-h-[40vh] overflow-hidden">
                   {compareRouteSteps.length > 0 && (

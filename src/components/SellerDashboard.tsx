@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, BarChart3, Settings, Package, 
   Sparkles, X, Upload, Star, MapPin, Edit3, Save, Trash2,
-  Wand2, TrendingUp, Users, AlertCircle,
+  Wand2, TrendingUp, Users, AlertCircle, Maximize2, Minimize2,
   ArrowUpRight, Wallet, Megaphone, QrCode, Download, 
   ShieldCheck, Clock, MessageSquare, Heart, Phone, ImageIcon,
   LineChart as LineChartIcon, Zap, Send
@@ -146,7 +146,7 @@ import { createGroupBuyOffer } from '../lib/groupBuyApi';
 import { createProduct, listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
 import { getVideoDurationSeconds } from '../lib/mediaUpload';
-import { addPathLandmark, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, type PathPoint, type RecordedPath } from '../lib/searchApi';
+import { addPathLandmark, createPlace, createRegion, deletePath, deletePlace, deleteRegion, listPathWaypoints, listPlaces, listRegions, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, updatePlace, updateRegion, type PathPoint, type PathWaypoint, type Place, type Region, type RecordedPath } from '../lib/searchApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 import {
   getSellerRank,
@@ -154,9 +154,11 @@ import {
   getSellerProfile,
   updateSellerProfile,
   listSellerLocations,
+  listSellerLocationHistory,
   createSellerLocation,
   updateSellerLocation,
   type SellerLocation,
+  type ShopLandmark,
   type DeliveryDetails
 } from '../lib/sellerProfileApi';
 import { getSellerPreferences, updateSellerPreferences, type SellerPreferences as SellerPreferencesApi } from '../lib/sellerPreferencesApi';
@@ -400,6 +402,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const mediaDrawerInputRef = useRef<HTMLInputElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const shopFrontInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState('onboarding');
   const sellerTabHistoryReadyRef = useRef(false);
   const sellerTabSuppressPushRef = useRef(false);
@@ -513,12 +516,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     let ignore = false;
     const loadSeller = async () => {
       try {
-      const [profile, locations, shareLink, metrics, prefsResp] = await Promise.all([
+      const [profile, locations, , shareLink, metrics, prefsResp, regions, places] = await Promise.all([
         getSellerProfile(),
         listSellerLocations(),
+        listSellerLocationHistory().catch(() => []),
         getSellerShareLink().catch(() => null),
         getSellerMetrics().catch(() => null),
-          getSellerPreferences().catch(() => null)
+        getSellerPreferences().catch(() => null),
+        listRegions().catch(() => []),
+        listPlaces().catch(() => [])
         ]);
         if (ignore || !profile) return;
         const primaryLocation = locations?.[0];
@@ -551,6 +557,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             ? { address: location.address, lat: location.lat, lng: location.lng }
             : prev.location
         }));
+        setLocationRegions(Array.isArray(regions) ? regions : []);
+        setLocationPlaces(Array.isArray(places) ? places : []);
+        setProfileData({
+          name: profile.name || seller.name,
+          description: profile.description || seller.description,
+          address: locations?.[0]?.address || seller.location?.address || '',
+          placeId: profile.place_id || locations?.[0]?.place_id || '',
+          defaultRegionId: profile.default_region_id || locations?.[0]?.region_id || '',
+          locationMode: profile.location_mode || 'fixed'
+        });
         setSellerShareLink((shareLink as any)?.share_url ?? null);
         const prefs = (prefsResp as SellerPreferencesApi | null) ?? null;
         setSellerPreferences(prefs);
@@ -645,8 +661,29 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [profileData, setProfileData] = useState({
     name: seller.name,
     description: seller.description,
-    address: seller.location?.address || ''
+    address: seller.location?.address || '',
+    placeId: '',
+    defaultRegionId: '',
+    locationMode: 'fixed',
   });
+  const [shopFrontImageUrl, setShopFrontImageUrl] = useState('');
+  const [directionsNote, setDirectionsNote] = useState('');
+  const [shopLandmarks, setShopLandmarks] = useState<Array<ShopLandmark & { uploading?: boolean }>>([]);
+  const [locationRegions, setLocationRegions] = useState<Region[]>([]);
+  const [locationPlaces, setLocationPlaces] = useState<Place[]>([]);
+  const [locationAdminStatus, setLocationAdminStatus] = useState<string | null>(null);
+  const [regionDraft, setRegionDraft] = useState({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '' });
+  const [placeDraft, setPlaceDraft] = useState({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '' });
+  const [editingRegionId, setEditingRegionId] = useState<string | null>(null);
+  const [editingPlaceId, setEditingPlaceId] = useState<string | null>(null);
+  const activeShopLocationLabel = (() => {
+    const selectedPlace = locationPlaces.find((place) => place.id === profileData.placeId);
+    const selectedRegion = locationRegions.find((region) => region.id === profileData.defaultRegionId);
+    if (selectedPlace?.name) return `Using ${selectedPlace.name}`;
+    if (selectedRegion?.name) return `Using ${selectedRegion.name}`;
+    if (profileData.address.trim()) return `Using ${profileData.address.trim()}`;
+    return '';
+  })();
 
   const [showListingOptimizer, setShowListingOptimizer] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -744,6 +781,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const mapboxModuleRef = useRef<any>(null);
   const mapboxLoadingRef = useRef<Promise<any> | null>(null);
   const [showPathRecorder, setShowPathRecorder] = useState(false);
+  const [isPathRecorderExpanded, setIsPathRecorderExpanded] = useState(false);
   const [pathRecordingActive, setPathRecordingActive] = useState(false);
   const [pathRecordingPoints, setPathRecordingPoints] = useState<PathPoint[]>([]);
   const [pathRecordingDistance, setPathRecordingDistance] = useState(0);
@@ -758,6 +796,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [pathRecordingStatus, setPathRecordingStatus] = useState<string | null>(null);
   const [sellerPaths, setSellerPaths] = useState<RecordedPath[]>([]);
   const [sellerPathsStatus, setSellerPathsStatus] = useState<string | null>(null);
+  const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
+  const [selectedPathWaypoints, setSelectedPathWaypoints] = useState<PathWaypoint[]>([]);
+  const [selectedPathLoading, setSelectedPathLoading] = useState(false);
   const landmarkDragIndexRef = useRef<number | null>(null);
   const pathRecorderContainerRef = useRef<HTMLDivElement | null>(null);
   const pathRecorderMapRef = useRef<any>(null);
@@ -868,6 +909,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [sellerLocations, setSellerLocations] = useState<SellerLocation[]>([]);
+  const [sellerLocationHistory, setSellerLocationHistory] = useState<Array<{
+    id: string;
+    lat: number;
+    lng: number;
+    region_id?: string;
+    place_id?: string;
+    source?: string;
+    created_at?: string;
+  }>>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [notificationPrefs, setNotificationPrefs] = useState<SellerNotificationPreferences>({
@@ -1382,6 +1432,36 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setSellerPaths(items);
     } catch (err: any) {
       setSellerPathsStatus(err?.message || 'Unable to set primary path.');
+    }
+  };
+
+  const handleViewPathWaypoints = async (pathId: string) => {
+    setSellerPathsStatus(null);
+    setSelectedPathLoading(true);
+    setSelectedPathId(pathId);
+    try {
+      const items = await listPathWaypoints(pathId);
+      setSelectedPathWaypoints(items);
+    } catch (err: any) {
+      setSellerPathsStatus(err?.message || 'Unable to load waypoints.');
+    } finally {
+      setSelectedPathLoading(false);
+    }
+  };
+
+  const handleDeletePath = async (pathId: string) => {
+    setSellerPathsStatus(null);
+    try {
+      await deletePath(pathId);
+      const items = await listSellerPaths(seller.id, true);
+      setSellerPaths(items);
+      if (selectedPathId === pathId) {
+        setSelectedPathId(null);
+        setSelectedPathWaypoints([]);
+      }
+      setSellerPathsStatus('Path deleted.');
+    } catch (err: any) {
+      setSellerPathsStatus(err?.message || 'Unable to delete path.');
     }
   };
 
@@ -1919,6 +1999,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         ]);
         if (ignore) return;
         setSellerLocations(locations);
+        setSellerLocationHistory(Array.isArray(history) ? history : []);
         if (profile?.name || profile?.description) {
           setProfileData(prev => ({
             ...prev,
@@ -1936,6 +2017,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             description: profile?.description || prev.description,
             avatar: profile?.logo_url || prev.avatar
           }));
+        }
+        if (typeof profile?.shop_front_image_url === 'string') {
+          setShopFrontImageUrl(profile.shop_front_image_url);
+        }
+        if (typeof profile?.directions_note === 'string') {
+          setDirectionsNote(profile.directions_note);
+        }
+        if (Array.isArray(profile?.landmarks)) {
+          setShopLandmarks(profile.landmarks);
         }
         if (verification) {
           setVerificationStatus(verification);
@@ -2912,6 +3002,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   }, [mapboxToken, sellerLocations, showPathRecorder]);
 
   useEffect(() => {
+    if (!showPathRecorder) {
+      setIsPathRecorderExpanded(false);
+      return;
+    }
+    if (!pathRecorderMapRef.current) return;
+    const raf = window.requestAnimationFrame(() => {
+      pathRecorderMapRef.current?.resize?.();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [isPathRecorderExpanded, showPathRecorder, sellerLocations]);
+
+  useEffect(() => {
     if (!showPathRecorder || !pathRecorderMapRef.current) return;
     const source = pathRecorderMapRef.current.getSource('recording-path') as any;
     if (!source) return;
@@ -3147,6 +3249,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
+  const uploadShopFrontImage = async (file: File) => {
+    setSettingsStatus(null);
+    try {
+      const url = await uploadMediaFile(file, 'shop_front');
+      setShopFrontImageUrl(url);
+      setSettingsStatus('Shop front photo uploaded.');
+    } catch (err: any) {
+      setSettingsStatus(err?.message || 'Unable to upload shop front photo.');
+    } finally {
+      if (shopFrontInputRef.current) shopFrontInputRef.current.value = '';
+    }
+  };
+
   const uploadLandmarkMedia = async (file: File, index: number) => {
     setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: true } : item));
     try {
@@ -3154,6 +3269,27 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, imageUrl: url, uploading: false } : item));
     } catch {
       setPathLandmarkDrafts(prev => prev.map((item, i) => i === index ? { ...item, uploading: false } : item));
+    }
+  };
+
+  const addShopLandmark = () => {
+    setShopLandmarks(prev => ([
+      ...prev,
+      { label: '', type: 'landmark', image_url: '', sequence: prev.length + 1 }
+    ]));
+  };
+
+  const updateShopLandmark = (index: number, patch: Partial<ShopLandmark & { uploading?: boolean }>) => {
+    setShopLandmarks(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  };
+
+  const handleShopLandmarkFile = async (index: number, file?: File | null) => {
+    if (!file) return;
+    try {
+      const url = await uploadMediaFile(file, 'shop_landmark');
+      updateShopLandmark(index, { image_url: url });
+    } catch (err: any) {
+      setSettingsStatus(err?.message || 'Unable to upload landmark photo.');
     }
   };
 
@@ -3834,19 +3970,51 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     try {
       await updateSellerProfile({
         name: profileData.name,
-        description: profileData.description
+        description: profileData.description,
+        place_id: profileData.placeId || undefined,
+        default_region_id: profileData.defaultRegionId || undefined,
+        location_mode: profileData.locationMode || undefined,
+        shop_front_image_url: shopFrontImageUrl || undefined,
+        directions_note: directionsNote || undefined,
+        landmarks: shopLandmarks
+          .filter(item => item.label.trim() || item.image_url.trim())
+          .map((item, index) => ({
+            id: item.id,
+            label: item.label,
+            type: item.type || 'landmark',
+            image_url: item.image_url,
+            lat: item.lat,
+            lng: item.lng,
+            sequence: item.sequence || index + 1
+          }))
       });
       const existing = sellerLocations[0];
       if (profileData.address) {
         if (existing?.id) {
-          await updateSellerLocation(existing.id, { address: profileData.address, lat: existing.lat, lng: existing.lng });
+          await updateSellerLocation(existing.id, {
+            address: profileData.address,
+            lat: existing.lat,
+            lng: existing.lng,
+            region_id: profileData.defaultRegionId || existing.region_id,
+            place_id: profileData.placeId || existing.place_id,
+            source: existing.source || 'manual_pin'
+          });
         } else {
-          await createSellerLocation({ address: profileData.address, lat: seller.location?.lat, lng: seller.location?.lng });
+          await createSellerLocation({
+            address: profileData.address,
+            lat: seller.location?.lat,
+            lng: seller.location?.lng,
+            region_id: profileData.defaultRegionId,
+            place_id: profileData.placeId,
+            source: 'manual_pin'
+          });
         }
       }
       const refreshedProfile = await getSellerProfile();
       const refreshedLocations = await listSellerLocations();
+      const refreshedHistory = await listSellerLocationHistory().catch(() => []);
       setSellerLocations(refreshedLocations);
+      setSellerLocationHistory(Array.isArray(refreshedHistory) ? refreshedHistory : []);
       setSeller(prev => ({
         ...prev,
         name: refreshedProfile?.name || profileData.name,
@@ -3856,9 +4024,143 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           ? { lat: refreshedLocations[0].lat || prev.location?.lat || 0, lng: refreshedLocations[0].lng || prev.location?.lng || 0, address: refreshedLocations[0].address || profileData.address }
           : prev.location
       }));
+      setShopFrontImageUrl(refreshedProfile?.shop_front_image_url || shopFrontImageUrl);
+      setDirectionsNote(refreshedProfile?.directions_note || directionsNote);
+      setProfileData(prev => ({
+        ...prev,
+        placeId: refreshedProfile?.place_id || prev.placeId,
+        defaultRegionId: refreshedProfile?.default_region_id || prev.defaultRegionId,
+        locationMode: refreshedProfile?.location_mode || prev.locationMode
+      }));
+      if (Array.isArray(refreshedProfile?.landmarks)) {
+        setShopLandmarks(refreshedProfile.landmarks);
+      }
       setSettingsStatus('Profile updated.');
     } catch (err: any) {
       setSettingsStatus(err?.message || 'Unable to update profile.');
+    }
+  };
+
+  const refreshLocationCatalog = async () => {
+    const [regions, places] = await Promise.all([
+      listRegions().catch(() => []),
+      listPlaces().catch(() => [])
+    ]);
+    setLocationRegions(Array.isArray(regions) ? regions : []);
+    setLocationPlaces(Array.isArray(places) ? places : []);
+  };
+
+  const handleCreateRegion = async () => {
+    setLocationAdminStatus(null);
+    try {
+      const isEditing = Boolean(editingRegionId);
+      if (!regionDraft.name.trim()) {
+        setLocationAdminStatus('Region name is required.');
+        return;
+      }
+      const payload = {
+        id: '',
+        type: regionDraft.type,
+        name: regionDraft.name.trim(),
+        parent_id: regionDraft.parentId || undefined,
+        centroid_lat: regionDraft.lat ? Number(regionDraft.lat) : undefined,
+        centroid_lng: regionDraft.lng ? Number(regionDraft.lng) : undefined,
+        metadata: {}
+      };
+      const created = editingRegionId
+        ? await updateRegion(editingRegionId, payload as Region)
+        : await createRegion(payload as Region);
+      await refreshLocationCatalog();
+      if (created?.id) {
+        setProfileData(prev => ({ ...prev, defaultRegionId: created.id }));
+      }
+      setRegionDraft({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '' });
+      setEditingRegionId(null);
+      setLocationAdminStatus(isEditing ? 'Region updated.' : 'Region created.');
+    } catch (err: any) {
+      setLocationAdminStatus(err?.message || 'Unable to create region.');
+    }
+  };
+
+  const handleCreatePlace = async () => {
+    setLocationAdminStatus(null);
+    try {
+      const isEditing = Boolean(editingPlaceId);
+      if (!placeDraft.name.trim()) {
+        setLocationAdminStatus('Place name is required.');
+        return;
+      }
+      const payload = {
+        id: '',
+        type: placeDraft.type,
+        name: placeDraft.name.trim(),
+        region_id: placeDraft.regionId || undefined,
+        address_line: placeDraft.addressLine || '',
+        lat: placeDraft.lat ? Number(placeDraft.lat) : undefined,
+        lng: placeDraft.lng ? Number(placeDraft.lng) : undefined,
+        metadata: {}
+      };
+      const created = editingPlaceId
+        ? await updatePlace(editingPlaceId, payload as Place)
+        : await createPlace(payload as Place);
+      await refreshLocationCatalog();
+      if (created?.id) {
+        setProfileData(prev => ({ ...prev, placeId: created.id, defaultRegionId: prev.defaultRegionId || placeDraft.regionId }));
+      }
+      setPlaceDraft({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '' });
+      setEditingPlaceId(null);
+      setLocationAdminStatus(isEditing ? 'Place updated.' : 'Place created.');
+    } catch (err: any) {
+      setLocationAdminStatus(err?.message || 'Unable to create place.');
+    }
+  };
+
+  const handleEditRegion = (region: Region) => {
+    setEditingRegionId(region.id);
+    setRegionDraft({
+      type: region.type || 'market_zone',
+      name: region.name || '',
+      parentId: region.parent_id || '',
+      lat: region.centroid_lat !== undefined && region.centroid_lat !== null ? String(region.centroid_lat) : '',
+      lng: region.centroid_lng !== undefined && region.centroid_lng !== null ? String(region.centroid_lng) : ''
+    });
+    setLocationAdminStatus(`Editing region: ${region.name}`);
+  };
+
+  const handleEditPlace = (place: Place) => {
+    setEditingPlaceId(place.id);
+    setPlaceDraft({
+      type: place.type || 'pickup_point',
+      name: place.name || '',
+      regionId: place.region_id || '',
+      addressLine: place.address_line || '',
+      lat: place.lat !== undefined && place.lat !== null ? String(place.lat) : '',
+      lng: place.lng !== undefined && place.lng !== null ? String(place.lng) : ''
+    });
+    setLocationAdminStatus(`Editing place: ${place.name}`);
+  };
+
+  const handleDeleteRegion = async (id: string) => {
+    setLocationAdminStatus(null);
+    try {
+      await deleteRegion(id);
+      await refreshLocationCatalog();
+      setProfileData(prev => (prev.defaultRegionId === id ? { ...prev, defaultRegionId: '' } : prev));
+      setLocationAdminStatus('Region deleted.');
+    } catch (err: any) {
+      setLocationAdminStatus(err?.message || 'Unable to delete region.');
+    }
+  };
+
+  const handleDeletePlace = async (id: string) => {
+    setLocationAdminStatus(null);
+    try {
+      await deletePlace(id);
+      await refreshLocationCatalog();
+      setProfileData(prev => (prev.placeId === id ? { ...prev, placeId: '' } : prev));
+      setLocationAdminStatus('Place deleted.');
+    } catch (err: any) {
+      setLocationAdminStatus(err?.message || 'Unable to delete place.');
     }
   };
 
@@ -8927,6 +9229,462 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     className="w-full pl-10 pr-4 py-3 bg-white border border-zinc-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
+                {(() => {
+                  const selectedPlace = locationPlaces.find((place) => place.id === profileData.placeId);
+                  const selectedRegion = locationRegions.find((region) => region.id === profileData.defaultRegionId);
+                  const locationLabel = selectedPlace?.name
+                    ? `Using ${selectedPlace.name}`
+                    : selectedRegion?.name
+                      ? `Using ${selectedRegion.name}`
+                      : profileData.address.trim()
+                        ? `Using ${profileData.address.trim()}`
+                        : '';
+                  return locationLabel ? (
+                    <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                      {locationLabel}
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Default Region</label>
+                  <select
+                    value={profileData.defaultRegionId}
+                    onChange={e => setProfileData(prev => ({ ...prev, defaultRegionId: e.target.value }))}
+                    className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Select region</option>
+                    {locationRegions.map((region) => (
+                      <option key={region.id} value={region.id}>
+                        {region.name} {region.type ? `(${region.type})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Base Place</label>
+                  <select
+                    value={profileData.placeId}
+                    onChange={e => setProfileData(prev => ({ ...prev, placeId: e.target.value }))}
+                    className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Select place</option>
+                    {locationPlaces.map((place) => (
+                      <option key={place.id} value={place.id}>
+                        {place.name} {place.address_line ? `- ${place.address_line}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Location Mode</label>
+                  <select
+                    value={profileData.locationMode}
+                    onChange={e => setProfileData(prev => ({ ...prev, locationMode: e.target.value }))}
+                    className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="fixed">Fixed</option>
+                    <option value="semi_mobile">Semi Mobile</option>
+                    <option value="mobile">Mobile</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-zinc-100 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Location Catalog</p>
+                    <p className="text-sm font-bold text-zinc-900">Create regions and places, then pick them above.</p>
+                  </div>
+                  {locationAdminStatus && (
+                    <span className="text-[10px] font-bold text-zinc-500">{locationAdminStatus}</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div className="space-y-3 rounded-2xl bg-zinc-50 p-3 border border-zinc-100">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{editingRegionId ? 'Edit Region' : 'Create Region'}</p>
+                      {editingRegionId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRegionId(null);
+                            setRegionDraft({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '' });
+                            setLocationAdminStatus(null);
+                          }}
+                          className="text-[10px] font-black text-zinc-500"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={regionDraft.type}
+                      onChange={(e) => setRegionDraft(prev => ({ ...prev, type: e.target.value }))}
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    >
+                      <option value="country">Country</option>
+                      <option value="county">County</option>
+                      <option value="city">City</option>
+                      <option value="subcounty">Subcounty</option>
+                      <option value="ward">Ward</option>
+                      <option value="market_zone">Market Zone</option>
+                    </select>
+                    <input
+                      value={regionDraft.name}
+                      onChange={(e) => setRegionDraft(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Region name"
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    />
+                    <select
+                      value={regionDraft.parentId}
+                      onChange={(e) => setRegionDraft(prev => ({ ...prev, parentId: e.target.value }))}
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    >
+                      <option value="">Parent region (optional)</option>
+                      {locationRegions.map((region) => (
+                        <option key={region.id} value={region.id}>
+                          {region.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        value={regionDraft.lat}
+                        onChange={(e) => setRegionDraft(prev => ({ ...prev, lat: e.target.value }))}
+                        placeholder="Centroid lat"
+                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                      />
+                      <input
+                        type="number"
+                        value={regionDraft.lng}
+                        onChange={(e) => setRegionDraft(prev => ({ ...prev, lng: e.target.value }))}
+                        placeholder="Centroid lng"
+                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCreateRegion}
+                      className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-[10px] font-black"
+                    >
+                      {editingRegionId ? 'Save Region' : 'Add Region'}
+                    </button>
+                  </div>
+                  <div className="space-y-3 rounded-2xl bg-zinc-50 p-3 border border-zinc-100">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{editingPlaceId ? 'Edit Place' : 'Create Place'}</p>
+                      {editingPlaceId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPlaceId(null);
+                            setPlaceDraft({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '' });
+                            setLocationAdminStatus(null);
+                          }}
+                          className="text-[10px] font-black text-zinc-500"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={placeDraft.type}
+                      onChange={(e) => setPlaceDraft(prev => ({ ...prev, type: e.target.value }))}
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    >
+                      <option value="open_market">Open Market</option>
+                      <option value="mall">Mall</option>
+                      <option value="estate">Estate</option>
+                      <option value="pickup_point">Pickup Point</option>
+                      <option value="office">Office</option>
+                      <option value="warehouse">Warehouse</option>
+                    </select>
+                    <input
+                      value={placeDraft.name}
+                      onChange={(e) => setPlaceDraft(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Place name"
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    />
+                    <select
+                      value={placeDraft.regionId}
+                      onChange={(e) => setPlaceDraft(prev => ({ ...prev, regionId: e.target.value }))}
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    >
+                      <option value="">Region (optional)</option>
+                      {locationRegions.map((region) => (
+                        <option key={region.id} value={region.id}>
+                          {region.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={placeDraft.addressLine}
+                      onChange={(e) => setPlaceDraft(prev => ({ ...prev, addressLine: e.target.value }))}
+                      placeholder="Address line"
+                      className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        value={placeDraft.lat}
+                        onChange={(e) => setPlaceDraft(prev => ({ ...prev, lat: e.target.value }))}
+                        placeholder="Lat"
+                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                      />
+                      <input
+                        type="number"
+                        value={placeDraft.lng}
+                        onChange={(e) => setPlaceDraft(prev => ({ ...prev, lng: e.target.value }))}
+                        placeholder="Lng"
+                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCreatePlace}
+                      className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-[10px] font-black"
+                    >
+                      {editingPlaceId ? 'Save Place' : 'Add Place'}
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Regions</p>
+                    <div className="max-h-40 overflow-auto space-y-1">
+                      {locationRegions.slice(0, 8).map((region) => (
+                        <div key={region.id} className="px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-100 text-[10px] font-bold text-zinc-700 flex items-center justify-between gap-2">
+                          <div>
+                            {region.name} <span className="text-zinc-400">{region.type}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEditRegion(region)}
+                              className="text-[10px] font-black text-indigo-600"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRegion(region.id)}
+                              className="text-[10px] font-black text-red-500"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {locationRegions.length === 0 && (
+                        <p className="text-[10px] text-zinc-500 font-bold">No regions yet.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Places</p>
+                    <div className="max-h-40 overflow-auto space-y-1">
+                      {locationPlaces.slice(0, 8).map((place) => (
+                        <div key={place.id} className="px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-100 text-[10px] font-bold text-zinc-700 flex items-center justify-between gap-2">
+                          <div>
+                            {place.name} <span className="text-zinc-400">{place.type}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEditPlace(place)}
+                              className="text-[10px] font-black text-indigo-600"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePlace(place.id)}
+                              className="text-[10px] font-black text-red-500"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {locationPlaces.length === 0 && (
+                        <p className="text-[10px] text-zinc-500 font-bold">No places yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-zinc-100 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Location History</p>
+                    <p className="text-sm font-bold text-zinc-900">Read-only audit trail of shop movements</p>
+                  </div>
+                  <span className="text-[10px] font-bold text-zinc-500">{sellerLocationHistory.length} records</span>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-auto">
+                  {sellerLocationHistory.slice(0, 8).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between rounded-2xl bg-zinc-50 border border-zinc-100 px-3 py-2 text-[10px] font-bold text-zinc-600">
+                      <div className="min-w-0">
+                        <p className="text-zinc-800">{item.source || 'manual_pin'}</p>
+                        <p className="text-zinc-400 truncate">
+                          {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-zinc-500">{item.created_at ? new Date(item.created_at).toLocaleString() : ''}</p>
+                        <p className="text-zinc-400">{item.region_id || item.place_id || 'Unlinked'}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {sellerLocationHistory.length === 0 && (
+                    <p className="text-[10px] text-zinc-500 font-bold">No history records yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-zinc-100 bg-zinc-50/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Shop Front Photo</label>
+                    <p className="text-[10px] text-zinc-500 font-medium">Used in buyer directions and shop detail cards.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => shopFrontInputRef.current?.click()}
+                    className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-[10px] font-black"
+                  >
+                    Upload
+                  </button>
+                </div>
+                <input
+                  ref={shopFrontInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      void uploadShopFrontImage(file);
+                    }
+                    e.currentTarget.value = '';
+                  }}
+                />
+                {shopFrontImageUrl && (
+                  <img src={shopFrontImageUrl} alt="Shop front preview" className="h-40 w-full object-cover rounded-2xl border border-zinc-200 bg-white" />
+                )}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Directions Note</label>
+                  <textarea
+                    rows={3}
+                    value={directionsNote}
+                    onChange={e => setDirectionsNote(e.target.value)}
+                    placeholder="Opposite the green kiosk, next to the service lane, first door on the left..."
+                    className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Landmark Photos</label>
+                      <p className="text-[10px] text-zinc-500 font-medium">Add 1-5 visual cues to make the route easy to follow.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addShopLandmark}
+                      className="px-3 py-2 rounded-xl bg-white border border-zinc-200 text-[10px] font-black text-zinc-700"
+                    >
+                      Add Landmark
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {shopLandmarks.length === 0 && (
+                      <p className="text-[10px] text-zinc-500 font-bold">No landmark photos added yet.</p>
+                    )}
+                    {shopLandmarks.map((item, idx) => (
+                      <div key={`${item.id || idx}`} className="grid grid-cols-1 sm:grid-cols-[auto,1.2fr,1fr,auto] gap-2 bg-white rounded-2xl p-3 border border-dashed border-zinc-200">
+                        <div className="space-y-2">
+                          <div className="w-12 h-12 rounded-xl overflow-hidden border border-zinc-100 bg-zinc-50 flex items-center justify-center">
+                            {item.image_url ? (
+                              <img src={item.image_url} alt={item.label || `Landmark ${idx + 1}`} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-[9px] text-zinc-400 font-bold">Photo</span>
+                            )}
+                          </div>
+                          <label className="inline-flex items-center justify-center px-3 py-2 rounded-xl bg-zinc-100 text-zinc-700 text-[9px] font-black cursor-pointer">
+                            Upload
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  void handleShopLandmarkFile(idx, file);
+                                }
+                                e.currentTarget.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <div className="space-y-2">
+                          <input
+                            value={item.label}
+                            onChange={(e) => updateShopLandmark(idx, { label: e.target.value })}
+                            placeholder="Label"
+                            className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                          />
+                          <input
+                            value={item.image_url}
+                            onChange={(e) => updateShopLandmark(idx, { image_url: e.target.value })}
+                            placeholder="Image URL"
+                            className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <select
+                            value={item.type || 'landmark'}
+                            onChange={(e) => updateShopLandmark(idx, { type: e.target.value })}
+                            className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                          >
+                            <option value="landmark">Landmark</option>
+                            <option value="shop_front">Shop Front</option>
+                            <option value="turn">Turn</option>
+                          </select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="number"
+                              value={item.lat ?? ''}
+                              onChange={(e) => updateShopLandmark(idx, { lat: e.target.value === '' ? undefined : Number(e.target.value) })}
+                              placeholder="Lat"
+                              className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                            />
+                            <input
+                              type="number"
+                              value={item.lng ?? ''}
+                              onChange={(e) => updateShopLandmark(idx, { lng: e.target.value === '' ? undefined : Number(e.target.value) })}
+                              placeholder="Lng"
+                              className="w-full px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-start">
+                          <button
+                            type="button"
+                            onClick={() => setShopLandmarks(prev => prev.filter((_, i) => i !== idx))}
+                            className="px-3 py-2 rounded-xl bg-zinc-100 text-zinc-600 text-[10px] font-black"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <button 
@@ -9655,7 +10413,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl"
+              className={`${isPathRecorderExpanded ? 'fixed inset-0 w-full h-full rounded-none' : 'w-full max-w-2xl rounded-3xl'} bg-white overflow-hidden shadow-2xl flex flex-col`}
             >
               <div className="p-4 border-b flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -9663,6 +10421,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <div>
                     <p className="text-sm font-black text-zinc-900">Record Shop Path</p>
                     <p className="text-[10px] text-zinc-500 font-bold">Capture the real route to your shop</p>
+                    {activeShopLocationLabel && (
+                      <p className="text-[10px] text-emerald-600 font-black uppercase tracking-wider">
+                        {activeShopLocationLabel}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <button
@@ -9672,7 +10435,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="relative h-[360px] bg-zinc-100">
+              <div className={`${isPathRecorderExpanded ? 'flex-1 min-h-0' : 'relative h-[360px]'} bg-zinc-100 relative`}>
                 <div ref={pathRecorderContainerRef} className="absolute inset-0" />
                 {!mapboxToken && (
                   <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
@@ -9684,7 +10447,29 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     Set your shop location to enable path recording.
                   </div>
                 )}
-                <div className="absolute top-3 right-3 flex flex-col gap-2">
+                {activeShopLocationLabel && (
+                  <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-2xl text-[10px] font-black text-emerald-700 shadow">
+                    {activeShopLocationLabel}
+                  </div>
+                )}
+                <div className="absolute top-3 right-3 z-10">
+                  <button
+                    onClick={() => setIsPathRecorderExpanded((prev) => !prev)}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-white shadow text-[9px] font-black text-zinc-700"
+                  >
+                    {isPathRecorderExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                    {isPathRecorderExpanded ? 'Exit Fullscreen' : 'Fullscreen'}
+                  </button>
+                </div>
+                {pathRecordingActive && (
+                  <div className="absolute top-3 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
+                    <div>
+                      Recording… {Math.round(pathRecordingDistance)}m · {Math.floor((pathRecordingStart ? (Date.now() - pathRecordingStart) : 0) / 60000)}m
+                    </div>
+                    <div className="text-[9px] text-white/80">Points: {pathRecordingPoints.length} / 10</div>
+                  </div>
+                )}
+                <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap gap-2">
                   <button
                     onClick={() => {
                       if (pathRecordingActive) {
@@ -9706,14 +10491,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     </button>
                   )}
                 </div>
-                {pathRecordingActive && (
-                  <div className="absolute top-3 left-3 bg-rose-600/90 text-white px-3 py-1.5 rounded-2xl text-[10px] font-bold shadow space-y-1">
-                    <div>
-                      Recording… {Math.round(pathRecordingDistance)}m · {Math.floor((pathRecordingStart ? (Date.now() - pathRecordingStart) : 0) / 60000)}m
-                    </div>
-                    <div className="text-[9px] text-white/80">Points: {pathRecordingPoints.length} / 10</div>
-                  </div>
-                )}
               </div>
               <div className="p-4 border-t">
                 <div className="grid grid-cols-2 gap-3 mb-3">
@@ -9864,7 +10641,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 )}
                 {sellerPaths.length > 0 && (
                   <div className="mt-4 border-t border-zinc-100 pt-3">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Routes</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Routes</p>
+                      {activeShopLocationLabel && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase tracking-widest">
+                          {activeShopLocationLabel}
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-2 space-y-2">
                       {sellerPaths.map((path) => (
                         <div key={path.id} className="flex items-center justify-between bg-zinc-50 rounded-2xl px-3 py-2 text-[10px] font-bold text-zinc-600">
@@ -9875,21 +10659,69 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                               {path.start_label || path.end_label ? ` · ${path.start_label || 'Start'} → ${path.end_label || 'Shop'}` : ''}
                             </p>
                           </div>
-                          {path.is_primary ? (
-                            <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-black">
-                              Primary
-                            </span>
-                          ) : (
+                          <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleSetPrimaryPath(path.id)}
-                              className="px-2 py-1 rounded-full bg-zinc-900 text-white text-[9px] font-black"
+                              onClick={() => handleViewPathWaypoints(path.id)}
+                              className="px-2 py-1 rounded-full bg-white border border-zinc-200 text-[9px] font-black text-zinc-700"
                             >
-                              Set Primary
+                              Waypoints
                             </button>
-                          )}
+                            {path.is_primary ? (
+                              <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-black">
+                                Primary
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleSetPrimaryPath(path.id)}
+                                className="px-2 py-1 rounded-full bg-zinc-900 text-white text-[9px] font-black"
+                              >
+                                Set Primary
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeletePath(path.id)}
+                              className="px-2 py-1 rounded-full bg-red-50 text-red-600 text-[9px] font-black"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
+                    {selectedPathId && (
+                      <div className="mt-3 rounded-2xl border border-zinc-100 bg-white p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Waypoints</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedPathId(null);
+                              setSelectedPathWaypoints([]);
+                            }}
+                            className="text-[10px] font-black text-zinc-500"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        {selectedPathLoading && (
+                          <p className="text-[10px] text-zinc-500 font-bold">Loading waypoints…</p>
+                        )}
+                        {!selectedPathLoading && selectedPathWaypoints.length === 0 && (
+                          <p className="text-[10px] text-zinc-500 font-bold">No waypoints saved yet.</p>
+                        )}
+                        {!selectedPathLoading && selectedPathWaypoints.length > 0 && (
+                          <div className="space-y-1 max-h-40 overflow-auto">
+                            {selectedPathWaypoints.map((point) => (
+                              <div key={`${point.index}-${point.lat}-${point.lng}`} className="flex items-center justify-between text-[10px] font-bold text-zinc-600 bg-zinc-50 rounded-xl px-2 py-1">
+                                <span>#{point.index + 1}</span>
+                                <span>{point.lat.toFixed(5)}, {point.lng.toFixed(5)}</span>
+                                <span>{Math.round(point.distance_from_start_meters || 0)}m</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 {sellerPathsStatus && (

@@ -161,7 +161,29 @@ export type NavigationResponse = {
   path_id?: string;
   source?: string;
   waypoints?: PathWaypoint[];
+  internal_waypoints?: PathWaypoint[];
   routes?: any[];
+};
+
+export type Region = {
+  id: string;
+  type: string;
+  name: string;
+  parent_id?: string;
+  centroid_lat?: number;
+  centroid_lng?: number;
+  metadata?: Record<string, any>;
+};
+
+export type Place = {
+  id: string;
+  type: string;
+  name: string;
+  region_id?: string;
+  address_line?: string;
+  lat?: number;
+  lng?: number;
+  metadata?: Record<string, any>;
 };
 
 const unwrapList = <T>(data: any): T[] => {
@@ -238,6 +260,58 @@ export const searchMap = async (params: {
     lng: params.lng,
     radius: params.radius,
   })}`, withLocationConsent(params.locationConsent)));
+
+export const listRegions = async (): Promise<Region[]> =>
+  unwrapList(await apiFetch('/v1/locations/regions'));
+
+export const listPlaces = async (): Promise<Place[]> =>
+  unwrapList(await apiFetch('/v1/locations/places'));
+
+export const createRegion = async (payload: Region): Promise<Region> =>
+  apiFetch('/v1/locations/regions', { method: 'POST', body: JSON.stringify(payload) });
+
+export const createPlace = async (payload: Place): Promise<Place> =>
+  apiFetch('/v1/locations/places', { method: 'POST', body: JSON.stringify(payload) });
+
+export const updateRegion = async (id: string, payload: Region): Promise<Region> =>
+  apiFetch(`/v1/locations/regions/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+
+export const deleteRegion = async (id: string): Promise<void> => {
+  await apiFetch(`/v1/locations/regions/${id}`, { method: 'DELETE' });
+};
+
+export const updatePlace = async (id: string, payload: Place): Promise<Place> =>
+  apiFetch(`/v1/locations/places/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+
+export const deletePlace = async (id: string): Promise<void> => {
+  await apiFetch(`/v1/locations/places/${id}`, { method: 'DELETE' });
+};
+
+export type UserLocation = {
+  id: string;
+  user_id?: string;
+  label: string;
+  address_line?: string;
+  region_id?: string;
+  lat?: number;
+  lng?: number;
+  is_default?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export const listUserLocations = async (): Promise<UserLocation[]> =>
+  unwrapList(await apiFetch('/v1/locations/user'));
+
+export const createUserLocation = async (payload: UserLocation): Promise<UserLocation> =>
+  apiFetch('/v1/locations/user', { method: 'POST', body: JSON.stringify(payload) });
+
+export const updateUserLocation = async (id: string, payload: UserLocation): Promise<UserLocation> =>
+  apiFetch(`/v1/locations/user/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+
+export const deleteUserLocation = async (id: string): Promise<void> => {
+  await apiFetch(`/v1/locations/user/${id}`, { method: 'DELETE' });
+};
 
 export const searchNearby = async (payload: {
   query?: string;
@@ -367,6 +441,13 @@ export const precomputePathWaypoints = async (pathId: string, params?: { max_dis
     max_distance_m: params?.max_distance_m,
     max_points: params?.max_points
   })}`, { method: 'POST' });
+
+export const listPathWaypoints = async (pathId: string): Promise<PathWaypoint[]> =>
+  unwrapList(await apiFetch(`/v1/paths/${pathId}/waypoints`));
+
+export const deletePath = async (pathId: string): Promise<void> => {
+  await apiFetch(`/v1/paths/${pathId}`, { method: 'DELETE' });
+};
 
 export const getCustomNavigation = async (payload: {
   path_id: string;
