@@ -106,6 +106,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
+  const [showRecentSearchesPanel, setShowRecentSearchesPanel] = useState(false);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [isNearMeActive, setIsNearMeActive] = useState(false);
   const [comparisonProfile, setComparisonProfile] = useState('default');
@@ -1053,9 +1054,18 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
   const cancelMediaSearch = () => {
     if (!mediaUploading) return;
     mediaCancelRef.current = true;
-    if (mediaAbortRef.current) {
-      mediaAbortRef.current.abort();
-      mediaAbortRef.current = null;
+    clearMediaPreview();
+  };
+
+  const clearMediaPreview = () => {
+    if (mediaUploading) {
+      mediaCancelRef.current = true;
+      if (mediaAbortRef.current) {
+        mediaAbortRef.current.abort();
+        mediaAbortRef.current = null;
+      }
+      setMediaUploading(false);
+      setMediaStatus('Media search canceled.');
     }
     if (videoPreviewRef.current) {
       URL.revokeObjectURL(videoPreviewRef.current);
@@ -1065,9 +1075,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     }
     setVideoPreview(null);
     setCapturedPreview(null);
-    setMediaUploading(false);
     setMediaError(null);
-    setMediaStatus('Media search canceled.');
+    if (!mediaUploading) {
+      setMediaStatus(null);
+    }
   };
 
   const handleReadResults = () => {
@@ -1084,6 +1095,77 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
     }
     alert('Voice feedback not supported on this browser.');
   };
+
+  const getProductLocationTarget = React.useCallback((product: Product) => {
+    const location = product.location || sellerMetaRef.current[product.sellerId]?.location;
+    if (!location) return '';
+    const target = (location.lat !== undefined && location.lng !== undefined)
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.lat},${location.lng}`)}`
+      : location.address
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.address)}`
+        : '';
+    return target;
+  }, []);
+
+  const openProductLocationMap = React.useCallback((product: Product) => {
+    const target = getProductLocationTarget(product);
+    if (!target) return false;
+    window.open(target, '_blank', 'noopener,noreferrer');
+    return true;
+  }, [getProductLocationTarget]);
+
+  const getProductDistanceKm = React.useCallback((product: Product) => {
+    if (!userCoords || !product.location?.lat || !product.location?.lng) return null;
+    const distanceKm = calculateDistance(userCoords.lat, userCoords.lng, product.location.lat, product.location.lng);
+    return Number.isFinite(distanceKm) ? distanceKm : null;
+  }, [userCoords]);
+
+  const getProductDistanceLabel = React.useCallback((product: Product) => {
+    const distanceKm = getProductDistanceKm(product);
+    if (distanceKm == null) return '';
+    if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} m away`;
+    return `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km away`;
+  }, [getProductDistanceKm]);
+
+  const getDistanceToneClass = React.useCallback((distanceKm: number | null) => {
+    if (distanceKm == null) return 'bg-zinc-900/80 text-white';
+    if (distanceKm < 1) return 'bg-emerald-600 text-white';
+    if (distanceKm < 5) return 'bg-sky-600 text-white';
+    if (distanceKm < 15) return 'bg-amber-500 text-white';
+    return 'bg-zinc-900/80 text-white';
+  }, [userCoords]);
+
+  const getDistanceCardClass = React.useCallback((distanceKm: number | null) => {
+    if (distanceKm == null) return 'border-zinc-100';
+    if (distanceKm < 1) return 'border-emerald-200';
+    if (distanceKm < 5) return 'border-sky-200';
+    if (distanceKm < 15) return 'border-amber-200';
+    return 'border-zinc-100';
+  }, [userCoords]);
+
+  const getDistanceOverlayClass = React.useCallback((distanceKm: number | null) => {
+    if (distanceKm == null) return 'from-zinc-950/0';
+    if (distanceKm < 1) return 'from-emerald-500/10';
+    if (distanceKm < 5) return 'from-sky-500/10';
+    if (distanceKm < 15) return 'from-amber-500/10';
+    return 'from-zinc-950/0';
+  }, [userCoords]);
+
+  const getDistanceSurfaceClass = React.useCallback((distanceKm: number | null) => {
+    if (distanceKm == null) return 'bg-zinc-50';
+    if (distanceKm < 1) return 'bg-emerald-50/80';
+    if (distanceKm < 5) return 'bg-sky-50/80';
+    if (distanceKm < 15) return 'bg-amber-50/80';
+    return 'bg-zinc-50';
+  }, [userCoords]);
+
+  const getShopDistanceKm = React.useCallback((shop: ShopDirectoryEntry) => {
+    if (!userCoords) return null;
+    const loc = normalizeLocation(shop.location);
+    if (!loc?.lat || !loc?.lng) return null;
+    const distanceKm = calculateDistance(userCoords.lat, userCoords.lng, loc.lat, loc.lng);
+    return Number.isFinite(distanceKm) ? distanceKm : null;
+  }, [userCoords]);
 
   const fitPathOnMap = (path: RecordedPath) => {
     if (!mapRef.current || !path.line_geojson) return;
@@ -1862,6 +1944,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         return rB - rA;
       });
     }
+    if (isNearMeActive && userCoords) {
+      results.sort((a, b) => {
+        const distA = a.location ? calculateDistance(userCoords.lat, userCoords.lng, a.location.lat, a.location.lng) : Number.POSITIVE_INFINITY;
+        const distB = b.location ? calculateDistance(userCoords.lat, userCoords.lng, b.location.lat, b.location.lng) : Number.POSITIVE_INFINITY;
+        return distA - distB;
+      });
+    }
 
     return results;
   }, [searchProducts, selectedCategory, priceRange, minRating, sortBy, userCoords, maxDistance, locationQuery, isNearMeActive, sellerMeta]);
@@ -1873,8 +1962,43 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       const loc = normalizeLocation(shop.location);
       return (loc?.address || '').toLowerCase().includes(query);
     });
-    return shops.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-  }, [shopResults, locationQuery]);
+    return shops.sort((a, b) => {
+      const distA = getShopDistanceKm(a) ?? Number.POSITIVE_INFINITY;
+      const distB = getShopDistanceKm(b) ?? Number.POSITIVE_INFINITY;
+      if (userCoords) {
+        return distA - distB;
+      }
+      return (b.rating || 0) - (a.rating || 0);
+    });
+  }, [getShopDistanceKm, locationQuery, shopResults, userCoords]);
+
+  const sortedRecommendedProducts = useMemo(() => {
+    const items = [...recommendedProducts];
+    if (!userCoords) return items;
+    return items.sort((a, b) => {
+      const distA = getProductDistanceKm(a) ?? Number.POSITIVE_INFINITY;
+      const distB = getProductDistanceKm(b) ?? Number.POSITIVE_INFINITY;
+      return distA - distB;
+    });
+  }, [getProductDistanceKm, recommendedProducts, userCoords]);
+
+  const sortedWatchlistProducts = useMemo(() => {
+    const items = [...watchlistProducts];
+    if (!userCoords) return items;
+    return items.sort((a, b) => {
+      const distA = getProductDistanceKm(a) ?? Number.POSITIVE_INFINITY;
+      const distB = getProductDistanceKm(b) ?? Number.POSITIVE_INFINITY;
+      return distA - distB;
+    });
+  }, [getProductDistanceKm, userCoords, watchlistProducts]);
+
+  const sortedSavedSearches = useMemo(() => {
+    return [...savedSearches].sort((a, b) => {
+      const tsA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tsB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tsB - tsA;
+    });
+  }, [savedSearches]);
 
   const recentSearchSummary = useMemo(() => {
     return recentSearches.slice(0, 5).map((item) => {
@@ -1883,11 +2007,16 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       return {
         id: item.id,
         name: item.query,
+        timestamp: ts,
         time: mins >= 60 ? `${Math.round(mins / 60)} hrs ago` : `${mins} mins ago`,
         locationLabel: activeLocationPreviewLabel
       };
     });
   }, [activeLocationPreviewLabel, recentSearches]);
+
+  const sortedRecentSearchSummary = useMemo(() => {
+    return [...recentSearchSummary].sort((a, b) => b.timestamp - a.timestamp);
+  }, [recentSearchSummary]);
 
   const mapItems = viewMode === 'map'
     ? (mapProducts.length > 0 ? mapProducts : filteredProducts)
@@ -1967,16 +2096,18 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                 }
               }}
               placeholder="Search products, shops, or snap a photo..." 
-              className="w-full pl-10 pr-24 py-2.5 bg-zinc-100 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-zinc-900"
+              className="w-full pl-10 pr-20 py-2.5 bg-zinc-100 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium text-zinc-900"
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              <button
-                onClick={recordSearch}
-                className="p-1.5 text-zinc-400 hover:text-indigo-600 transition-colors"
-                title="Search"
-              >
-                <SearchIcon className="w-4 h-4" />
-              </button>
+              {searchQuery.trim() && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="p-1.5 text-zinc-400 hover:text-zinc-600 transition-colors"
+                  title="Clear search"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
               <button 
                 onClick={handleStartListening}
                 className={`p-1.5 transition-colors ${isListening ? 'text-emerald-600' : 'text-zinc-400 hover:text-indigo-600'}`}
@@ -2009,9 +2140,10 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowQuickActions((prev) => !prev)}
-              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
+              className="px-2.5 sm:px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors inline-flex items-center gap-1"
             >
-              More
+              <span className="sm:hidden text-base leading-none">⋯</span>
+              <span className="hidden sm:inline">More</span>
             </button>
             <button 
               onClick={() => setShowFilters(!showFilters)}
@@ -2026,24 +2158,52 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             </div>
           )}
         </div>
-        {showQuickActions && (
-          <div className="flex items-center gap-2 mb-2">
-            <button 
-              onClick={handleSaveSearch}
-              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
-              title="Save this search"
+        <AnimatePresence>
+          {showQuickActions && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+              className="mb-2"
             >
-              Save
-            </button>
-            <button
-              onClick={handleReadResults}
-              className="px-3 py-1.5 rounded-full text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
-              title="Read results aloud"
-            >
-              Read
-            </button>
-          </div>
-        )}
+              <div className="rounded-2xl border border-zinc-100 bg-white/95 shadow-sm p-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">More Actions</span>
+                  <button
+                    onClick={() => setShowQuickActions(false)}
+                    className="px-2 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-100 text-zinc-600"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <button 
+                    onClick={handleSaveSearch}
+                    className="px-2.5 sm:px-3 py-2 rounded-xl text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
+                    title="Save this search"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={handleReadResults}
+                    className="px-2.5 sm:px-3 py-2 rounded-xl text-[10px] font-black bg-zinc-100 text-zinc-600 hover:text-indigo-600 transition-colors"
+                    title="Read results aloud"
+                  >
+                    Read
+                  </button>
+                  <button
+                    onClick={() => setShowRecentSearchesPanel((prev) => !prev)}
+                    className={`px-2.5 sm:px-3 py-2 rounded-xl text-[10px] font-black transition-colors ${showRecentSearchesPanel ? 'bg-indigo-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:text-indigo-600'}`}
+                    title="Show recent searches"
+                  >
+                    Recent
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="flex items-center gap-2 mb-2">
           <div className="px-3 py-1.5 bg-zinc-100 rounded-full text-[10px] font-black text-zinc-600">
@@ -2457,7 +2617,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             {/* Saved Searches */}
             {savedSearches.length > 0 && (
               <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Saved Searches</h3>
                     {activeLocationPreviewLabel && (
@@ -2468,50 +2628,60 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   </div>
                   <span className="text-[10px] text-zinc-400 font-bold">{savedSearches.length} saved</span>
                 </div>
-                <div className="flex flex-col gap-2">
-                  {savedSearches.map((item) => {
+                <div className="space-y-2">
+                  {sortedSavedSearches.map((item) => {
                     const existingAlert = item.query_hash ? alertByHash.get(item.query_hash) : undefined;
                     const frequency = alertFrequency[item.id] || 'daily';
                     return (
-                      <div key={item.id || item.query} className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => setSearchQuery(item.query)}
-                          className="px-3 py-1.5 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-600 hover:bg-indigo-50 hover:text-indigo-600"
-                        >
-                          {item.query}
-                        </button>
-                        {activeLocationPreviewLabel && (
-                          <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
-                            {activeLocationPreviewLabel}
-                          </span>
-                        )}
-                        <select
-                          value={frequency}
-                          onChange={(e) => setAlertFrequency((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                          className="px-2 py-1 rounded-full text-[9px] font-bold bg-zinc-50 border border-zinc-100 text-zinc-600"
-                        >
-                          <option value="daily">Daily</option>
-                          <option value="weekly">Weekly</option>
-                          <option value="monthly">Monthly</option>
-                        </select>
-                        <button
-                          onClick={() => handleCreateAlert(item)}
-                          disabled={Boolean(existingAlert)}
-                          className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${existingAlert ? 'bg-zinc-200 text-zinc-500' : 'bg-amber-500 text-white'}`}
-                        >
-                          {existingAlert ? 'Alerted' : 'Create Alert'}
-                        </button>
-                        <button
-                          onClick={() => handleRemoveSavedSearch(item)}
-                          className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-200 text-zinc-700"
-                        >
-                          Remove
-                        </button>
-                        {existingAlert?.status && (
-                          <span className="text-[9px] font-bold text-zinc-400 uppercase">
-                            {existingAlert.status}
-                          </span>
-                        )}
+                      <div
+                        key={item.id || item.query}
+                        className="p-3 rounded-2xl border border-zinc-100 bg-zinc-50/90 shadow-sm space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            onClick={() => setSearchQuery(item.query)}
+                            className="text-left flex-1 min-w-0"
+                          >
+                            <p className="text-xs font-bold text-zinc-900 line-clamp-1">{item.query}</p>
+                            <p className="text-[10px] text-zinc-500 mt-0.5">
+                              {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Saved search'}
+                            </p>
+                          </button>
+                          {activeLocationPreviewLabel && (
+                            <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest shrink-0">
+                              {activeLocationPreviewLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={frequency}
+                            onChange={(e) => setAlertFrequency((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            className="px-2 py-1 rounded-full text-[9px] font-bold bg-white border border-zinc-100 text-zinc-600"
+                          >
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                          </select>
+                          <button
+                            onClick={() => handleCreateAlert(item)}
+                            disabled={Boolean(existingAlert)}
+                            className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${existingAlert ? 'bg-zinc-200 text-zinc-500' : 'bg-amber-500 text-white'}`}
+                          >
+                            {existingAlert ? 'Alerted' : 'Create Alert'}
+                          </button>
+                          <button
+                            onClick={() => handleRemoveSavedSearch(item)}
+                            className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-200 text-zinc-700"
+                          >
+                            Remove
+                          </button>
+                          {existingAlert?.status && (
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase">
+                              {existingAlert.status}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -2570,10 +2740,13 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   <span className="text-[10px] text-indigo-600 font-bold">Watchlist</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {watchlistProducts.slice(0, 4).map((product) => {
+                  {sortedWatchlistProducts.slice(0, 4).map((product) => {
                     const watchItem = watchlistById.get(product.id);
                     const targetPrice = watchItem?.target_price ?? product.price;
                     const targetValue = watchItem ? (watchlistTargets[watchItem.id] ?? String(watchItem.target_price)) : '';
+                    const distanceKm = getProductDistanceKm(product);
+                    const distanceSurface = getDistanceSurfaceClass(distanceKm);
+                    const distanceBorder = getDistanceCardClass(distanceKm);
                     return (
                     <div
                       key={product.id}
@@ -2582,7 +2755,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                         onProductOpen(product);
                       }}
                       role="button"
-                      className="p-3 bg-zinc-50 rounded-xl flex items-center gap-3 text-left cursor-pointer"
+                      className={`p-3 rounded-xl flex items-center gap-3 text-left cursor-pointer border ${distanceSurface} ${distanceBorder}`}
                     >
                       <img src={product.mediaUrl} className="w-10 h-10 rounded-lg object-cover" alt={product.name} />
                       <div>
@@ -2663,56 +2836,136 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                 </div>
                 <span className="text-[10px] text-zinc-400 font-bold">Based on searches</span>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {recommendedProducts.slice(0, 4).map(product => (
-                  <button
-                    key={product.id}
-                    onClick={() => {
-                      trackSearchEvent('view', product.id);
-                      onProductOpen(product);
-                    }}
-                    className="p-3 bg-zinc-50 rounded-xl flex items-center gap-3 text-left"
-                  >
-                    <img src={product.mediaUrl} className="w-10 h-10 rounded-lg object-cover" alt={product.name} />
-                    <div>
-                      <p className="text-xs font-bold text-zinc-900 line-clamp-1">{product.name}</p>
-                      <p className="text-[10px] text-zinc-500">{product.category}</p>
+              <div className="space-y-2">
+                {sortedRecommendedProducts.slice(0, 4).map((product) => {
+                  const locationTarget = getProductLocationTarget(product);
+                  const sellerRating = sellerMeta[product.sellerId]?.rating;
+                  const distanceKm = getProductDistanceKm(product);
+                  const distanceLabel = getProductDistanceLabel(product);
+                  const distanceTone = getDistanceToneClass(distanceKm);
+                  const distanceSurface = getDistanceSurfaceClass(distanceKm);
+                  return (
+                    <div
+                      key={product.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        trackSearchEvent('view', product.id);
+                        onProductOpen(product);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          trackSearchEvent('view', product.id);
+                          onProductOpen(product);
+                        }
+                      }}
+                      className={`w-full p-3 rounded-2xl flex items-center gap-3 text-left border hover:border-indigo-200 transition-colors cursor-pointer ${distanceSurface} ${getDistanceCardClass(distanceKm)}`}
+                    >
+                      <img src={product.mediaUrl} className="w-12 h-12 rounded-xl object-cover shrink-0" alt={product.name} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-zinc-900 line-clamp-1">{product.name}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-500">
+                          <span className="rounded-full bg-white px-2 py-0.5 border border-zinc-200 uppercase tracking-widest">
+                            {product.category}
+                          </span>
+                          {product.price ? (
+                            <span className="text-indigo-600">KES {Number(product.price).toFixed(0)}</span>
+                          ) : null}
+                          {sellerRating ? (
+                            <span className="text-emerald-600">{Number(sellerRating || 0).toFixed(1)}★</span>
+                          ) : null}
+                          {distanceLabel ? (
+                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${distanceTone}`}>
+                              {distanceLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      {locationTarget && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openProductLocationMap(product);
+                          }}
+                          className="px-2.5 py-1.5 rounded-full bg-white border border-zinc-200 text-[9px] font-black uppercase tracking-widest text-indigo-700 shrink-0"
+                        >
+                          Map
+                        </button>
+                      )}
+                      <ChevronRight className="w-4 h-4 text-zinc-300 shrink-0" />
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
+                {sortedRecommendedProducts.length === 0 && (
+                  <div className="text-[10px] font-bold text-zinc-400">We’ll surface suggestions here as you search.</div>
+                )}
               </div>
             </div>
 
-            {/* Recent Searches */}
-              <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
-                <div className="flex items-center gap-2 mb-3">
-                  <Clock className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Recent Searches</h3>
-                {activeLocationPreviewLabel && (
-                  <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
-                    {activeLocationPreviewLabel}
-                  </span>
-                )}
-                </div>
-                <div className="space-y-2">
-                  {recentSearchSummary.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between text-[10px] font-bold text-zinc-600">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="truncate">{item.name}</span>
-                      {item.locationLabel && (
-                        <span className="px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500 uppercase tracking-widest text-[8px]">
-                          {item.locationLabel}
-                        </span>
+            <AnimatePresence>
+              {showRecentSearchesPanel && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.18 }}
+                  className="mb-6"
+                >
+                  <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-indigo-600" />
+                        <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Recent Searches</h3>
+                        {activeLocationPreviewLabel && (
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                            {activeLocationPreviewLabel}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setShowRecentSearchesPanel(false)}
+                        className="px-2 py-1 rounded-full text-[9px] font-black uppercase bg-zinc-100 text-zinc-600"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {sortedRecentSearchSummary.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setSearchQuery(item.name);
+                            setShowRecentSearchesPanel(false);
+                          }}
+                          className="w-full flex items-center gap-3 text-left p-3 rounded-2xl border border-zinc-100 bg-zinc-50/90 hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-white border border-zinc-100 flex items-center justify-center shrink-0">
+                            <Clock className="w-4 h-4 text-indigo-500" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="truncate text-xs font-bold text-zinc-900">{item.name}</span>
+                              {item.locationLabel && (
+                                <span className="px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500 uppercase tracking-widest text-[8px] font-black">
+                                  {item.locationLabel}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-[10px] font-bold text-zinc-400">{item.time}</div>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-zinc-300 shrink-0" />
+                        </button>
+                      ))}
+                      {recentSearchSummary.length === 0 && (
+                        <div className="text-[10px] font-bold text-zinc-400">No recent searches yet.</div>
                       )}
                     </div>
-                    <span className="text-zinc-400">{item.time}</span>
-                    </div>
-                  ))}
-                {recentSearchSummary.length === 0 && (
-                  <div className="text-[10px] font-bold text-zinc-400">No recent searches yet.</div>
-                )}
-              </div>
-            </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <AnimatePresence>
               {showFilters && (
                 <motion.div 
@@ -2963,6 +3216,14 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                   const shopName = shop.name || 'Shop';
                   const shopDescription = shop.category || shopLocation?.address || 'Local shop';
                   const shopAvatar = (shop as any).avatar || (shop as any).logo_url || (shop as any).image_url || '';
+                  const shopDistanceKm = getShopDistanceKm(shop);
+                  const shopDistanceLabel = shopDistanceKm == null
+                    ? ''
+                    : shopDistanceKm < 1
+                      ? `${Math.round(shopDistanceKm * 1000)} m away`
+                      : `${shopDistanceKm.toFixed(shopDistanceKm >= 10 ? 0 : 1)} km away`;
+                  const shopDistanceTone = getDistanceToneClass(shopDistanceKm);
+                  const shopDistanceSurface = getDistanceSurfaceClass(shopDistanceKm);
                   return (
                   <div
                     key={shopId || shopName}
@@ -2972,7 +3233,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && shopId) onShopOpen(shopId);
                     }}
-                    className="p-4 bg-white rounded-2xl border border-zinc-100 shadow-sm flex items-center justify-between text-left hover:border-indigo-200 transition-colors cursor-pointer"
+                    className={`p-4 rounded-2xl border shadow-sm flex items-center justify-between text-left hover:border-indigo-200 transition-colors cursor-pointer ${shopDistanceSurface} ${getDistanceCardClass(shopDistanceKm)}`}
                   >
                     <div className="flex items-center gap-3">
                       {shopAvatar ? (
@@ -2992,18 +3253,25 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                         )}
                       </div>
                     </div>
-                    <div className="text-[10px] font-black text-amber-500 flex items-center gap-1">
-                      ★ {shop.rating || 0}
+                    <div className="ml-3 flex flex-col items-end gap-2">
+                      <div className="text-[10px] font-black text-amber-500 flex items-center gap-1">
+                        ★ {shop.rating || 0}
+                      </div>
+                      {shopDistanceLabel && (
+                        <div className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${shopDistanceTone}`}>
+                          {shopDistanceLabel}
+                        </div>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (shopId) toggleFavoriteShop(shopId);
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${favoriteShopIds.includes(shopId) ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
+                      >
+                        {favoriteShopIds.includes(shopId) ? 'Favorited' : 'Favorite'}
+                      </button>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (shopId) toggleFavoriteShop(shopId);
-                      }}
-                      className={`ml-3 px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${favoriteShopIds.includes(shopId) ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600'}`}
-                    >
-                      {favoriteShopIds.includes(shopId) ? 'Favorited' : 'Favorite'}
-                    </button>
                   </div>
                 );
                 })}
@@ -3018,12 +3286,12 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
             {/* Results Grid */}
             <div className="grid grid-cols-2 gap-4">
               {filteredProducts.map((product, i) => (
-                <motion.div 
+                <motion.div
                   key={product.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  className="bg-white rounded-2xl border border-zinc-100 overflow-hidden flex flex-col shadow-sm cursor-pointer group"
+                  className={`bg-white rounded-2xl border overflow-hidden flex flex-col shadow-sm cursor-pointer group ${getDistanceCardClass(getProductDistanceKm(product))}`}
                   onClick={() => {
                     trackSearchEvent('view', product.id);
                     onProductOpen(product);
@@ -3031,6 +3299,7 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                 >
                   <div className="aspect-square relative overflow-hidden">
                     <img src={product.mediaUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={product.name} />
+                    <div className={`absolute inset-0 bg-gradient-to-br ${getDistanceOverlayClass(getProductDistanceKm(product))} to-transparent pointer-events-none`} />
                     
                     {/* Badges */}
                     <div className="absolute top-2 left-2 flex flex-col gap-1">
@@ -3042,6 +3311,11 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
                       {product.stockStatus === 'low_stock' && (
                         <div className="bg-red-500 text-white text-[8px] font-black px-2 py-1 rounded-full shadow-lg">
                           LOW STOCK
+                        </div>
+                      )}
+                      {getProductDistanceLabel(product) && (
+                        <div className={`text-white text-[8px] font-black px-2 py-1 rounded-full shadow-lg ${getDistanceToneClass(getProductDistanceKm(product))}`}>
+                          {getProductDistanceLabel(product)}
                         </div>
                       )}
                     </div>
@@ -3184,24 +3458,45 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
         )}
       </AnimatePresence>
 
-      {/* Visual Search Preview */}
-      {capturedPreview && (
-        <div className="fixed bottom-28 left-4 right-4 sm:left-auto sm:right-4 z-[60] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden sm:w-32">
-          <img src={capturedPreview} className="w-full h-24 object-cover" alt="capture" />
-          <div className="p-2 text-[9px] font-bold text-zinc-600">
-            Visual search applied
-          </div>
-        </div>
-      )}
-
-      {videoPreview && (
-        <div className="fixed bottom-28 left-4 right-4 sm:left-auto sm:right-40 z-[60] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden sm:w-40">
-          <video src={videoPreview} className="w-full h-24 object-cover" />
-          <div className="p-2 text-[9px] font-bold text-zinc-600">
-            Video search applied
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {(capturedPreview || videoPreview) && (
+          <motion.div
+            key="media-preview-dock"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            className="fixed bottom-6 right-3 left-auto z-[60] w-32 sm:bottom-4 sm:right-4 sm:w-36 space-y-2"
+          >
+            <div className="relative bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden">
+              <button
+                type="button"
+                onClick={clearMediaPreview}
+                className="absolute right-2 top-2 z-10 rounded-full bg-zinc-900/80 p-1.5 text-white shadow-lg"
+                title="Remove media"
+              >
+                <X className="h-3 w-3" />
+              </button>
+              {capturedPreview && (
+                <div className="border-b border-zinc-100">
+                  <img src={capturedPreview} className={`w-full object-cover ${videoPreview ? 'h-16' : 'h-20'}`} alt="capture" />
+                  <div className="px-2 py-1.5 text-[9px] font-bold text-zinc-600">
+                    Visual search applied
+                  </div>
+                </div>
+              )}
+              {videoPreview && (
+                <div>
+                  <video src={videoPreview} className={`w-full object-cover ${capturedPreview ? 'h-16' : 'h-20'}`} />
+                  <div className="px-2 py-1.5 text-[9px] font-bold text-zinc-600">
+                    Video search applied
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
