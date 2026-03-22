@@ -11,12 +11,9 @@ interface LoginProps {
   onRegisterOpen?: () => void;
   onResetOpen?: () => void;
   onAuthenticated?: () => void;
-  onBrowseFeed?: () => void;
-  onBrowseSearch?: () => void;
-  onBrowseShops?: () => void;
 }
 
-export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpen, onAuthenticated, onBrowseFeed, onBrowseSearch, onBrowseShops }) => {
+export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpen, onAuthenticated }) => {
   const [form, setForm] = React.useState({
     phone: '',
     pin: '',
@@ -183,21 +180,6 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
             </button>
           </form>
 
-          <div className="mt-6 rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
-            <p className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Browse as visitor</p>
-            <p className="mt-1 text-xs text-zinc-600">You can explore public content without signing in.</p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <button type="button" onClick={onBrowseFeed} className="rounded-xl bg-white px-3 py-2 text-[10px] font-black text-zinc-700 border border-zinc-200">
-                Feed
-              </button>
-              <button type="button" onClick={onBrowseSearch} className="rounded-xl bg-white px-3 py-2 text-[10px] font-black text-zinc-700 border border-zinc-200">
-                Search
-              </button>
-              <button type="button" onClick={onBrowseShops} className="rounded-xl bg-white px-3 py-2 text-[10px] font-black text-zinc-700 border border-zinc-200">
-                Shops
-              </button>
-            </div>
-          </div>
         </motion.div>
 
         <div className="mt-6 text-center text-xs text-zinc-500">

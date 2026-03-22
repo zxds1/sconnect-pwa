@@ -35,7 +35,7 @@ import { addCartItem, checkoutCart } from './lib/cartApi';
 import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
-import { getAuthItem, setAuthItem } from './lib/authStorage';
+import { setAuthItem } from './lib/authStorage';
 
 type AppView =
   | 'feed'
@@ -147,10 +147,9 @@ export default function App() {
     ];
     if (hashViews.includes(hashView)) return hashView;
     try {
-      const token = getAuthItem('soko:auth_token');
-      return token ? 'assistant' : 'feed';
+      return 'assistant';
     } catch {
-      return 'feed';
+      return 'assistant';
     }
   };
 
@@ -758,10 +757,7 @@ export default function App() {
                 onOpenSubscriptions={() => setView('subscriptions')}
                 onOpenPartnerships={() => setView('partnerships')}
                 onOpenFeed={() => setView('feed')}
-                onOpenShops={() => setView('shops')}
                 onOpenGroupBuys={() => setView('group-buys')}
-                onOpenLogin={() => setView('login')}
-                onOpenRegister={() => setView('register')}
                 onToast={setToast}
               />
             </motion.div>
@@ -780,9 +776,6 @@ export default function App() {
                 onRegisterOpen={() => setView('register')}
                 onResetOpen={() => setView('password-reset')}
                 onAuthenticated={() => setView('assistant')}
-                onBrowseFeed={() => setView('feed')}
-                onBrowseSearch={() => setView('search')}
-                onBrowseShops={() => setView('shops')}
               />
             </motion.div>
           )}
@@ -799,9 +792,6 @@ export default function App() {
                 onBack={goBack}
                 onLoginOpen={() => setView('login')}
                 onAuthenticated={() => setView('auth-onboarding')}
-                onBrowseFeed={() => setView('feed')}
-                onBrowseSearch={() => setView('search')}
-                onBrowseShops={() => setView('shops')}
               />
             </motion.div>
           )}

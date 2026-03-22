@@ -53,7 +53,6 @@ import { getCompareList } from '../lib/compareApi';
 import { getComparisonPreferences } from '../lib/settingsApi';
 import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
 import { listNotifications, type NotificationListResponse } from '../lib/notificationsApi';
-import { getAuthItem } from '../lib/authStorage';
 
 type AssistantAction = {
   label: string;
@@ -111,10 +110,7 @@ interface AssistantProps {
   onOpenSubscriptions: () => void;
   onOpenPartnerships: () => void;
   onOpenFeed: () => void;
-  onOpenShops: () => void;
   onOpenGroupBuys: () => void;
-  onOpenLogin: () => void;
-  onOpenRegister: () => void;
 }
 
 export const Assistant: React.FC<AssistantProps> = ({
@@ -135,10 +131,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   onOpenSubscriptions,
   onOpenPartnerships,
   onOpenFeed,
-  onOpenShops,
   onOpenGroupBuys,
-  onOpenLogin,
-  onOpenRegister,
   onToast
 }) => {
   const [chats, setChats] = useState<AssistantChat[]>([]);
@@ -222,7 +215,6 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [messageFeedbackUseInPlanner, setMessageFeedbackUseInPlanner] = useState(true);
   const [messageFeedbackSaving, setMessageFeedbackSaving] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const isVisitor = !getAuthItem('soko:auth_token');
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
@@ -1843,46 +1835,6 @@ useEffect(() => {
 
         {isSidebarOpen && (
           <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-            {isVisitor && (
-              <div className="mb-3 rounded-2xl border border-white/10 bg-white/6 p-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Visitor mode</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-white/75">
-                  Browse public content first. Log in to post, save, chat, and use seller tools.
-                </p>
-                <div className="mt-3 flex flex-col gap-2">
-                  <button
-                    onClick={onOpenFeed}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Browse feed
-                  </button>
-                  <button
-                    onClick={onOpenShops}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Browse shops
-                  </button>
-                  <button
-                    onClick={() => onOpenSearch('')}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Search products
-                  </button>
-                  <button
-                    onClick={onOpenLogin}
-                    className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Log in
-                  </button>
-                  <button
-                    onClick={onOpenRegister}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Create account
-                  </button>
-                </div>
-              </div>
-            )}
             <div className="space-y-2">
               {chats
                 .sort((a, b) => {
@@ -1993,46 +1945,6 @@ useEffect(() => {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-              {isVisitor && (
-                <div className="mb-3 rounded-2xl border border-white/10 bg-white/6 p-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Visitor mode</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-white/75">
-                    Browse public content first. Log in to post, save, chat, and use seller tools.
-                  </p>
-                <div className="mt-3 flex flex-col gap-2">
-                  <button
-                    onClick={onOpenFeed}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Browse feed
-                  </button>
-                  <button
-                    onClick={onOpenShops}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Browse shops
-                  </button>
-                  <button
-                    onClick={() => onOpenSearch('')}
-                    className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                  >
-                    Search products
-                  </button>
-                  <button
-                    onClick={onOpenLogin}
-                    className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-white"
-                    >
-                      Log in
-                    </button>
-                    <button
-                      onClick={onOpenRegister}
-                      className="w-full rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white"
-                    >
-                      Create account
-                    </button>
-                  </div>
-                </div>
-              )}
               <div className="space-y-2">
                 {chats
                   .sort((a, b) => {
