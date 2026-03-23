@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Zap, Loader2 } from 'lucide-react';
+import { MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Zap, Loader2, BadgePercent, Sparkles, Clock3 } from 'lucide-react';
 import { listGroupBuyInstances, joinGroupBuyInstance, createBuyerGroupRequest, type GroupBuyInstance } from '../lib/groupBuyApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 
@@ -33,6 +33,31 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [createSku, setCreateSku] = useState('');
   const [createQty, setCreateQty] = useState('5');
   const [createPrice, setCreatePrice] = useState('');
+
+  const summary = useMemo(() => {
+    const now = Date.now();
+    const open = items.filter((item) => String(item.status || '').toLowerCase().includes('open')).length;
+    const endingSoon = items.filter((item) => {
+      if (!item.expires_at) return false;
+      return new Date(item.expires_at).getTime() - now < 1000 * 60 * 60 * 24;
+    }).length;
+    const nearby = items.filter((item) => typeof item.distance_km === 'number' && item.distance_km <= Number(filters.radius_km || 0)).length;
+    const averageProgress = items.length
+      ? Math.round(items.reduce((acc, item) => {
+          const target = Math.max(1, item.target_tier_qty || item.min_group_size || 1);
+          const current = item.current_size || 0;
+          return acc + Math.min(100, (current / target) * 100);
+        }, 0) / items.length)
+      : 0;
+    return { open, endingSoon, nearby, averageProgress };
+  }, [filters.radius_km, items]);
+
+  const dealTone = (item: GroupBuyInstance) => {
+    const status = String(item.status || '').toLowerCase();
+    if (status.includes('closed')) return 'rgba(148,163,184,0.9)';
+    if (status.includes('filled')) return 'rgba(34,197,94,0.9)';
+    return 'rgba(56,189,248,0.9)';
+  };
 
   useEffect(() => {
     let alive = true;
@@ -123,135 +148,184 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-zinc-100">
-      <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950/90 backdrop-blur px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-4">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(34,197,94,0.16),_transparent_34%),radial-gradient(circle_at_80%_0%,_rgba(56,189,248,0.16),_transparent_28%),linear-gradient(180deg,_#090b12_0%,_#0b1020_55%,_#06070c_100%)] text-white">
+      <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950/75 backdrop-blur-xl px-4 pt-[calc(env(safe-area-inset-top)+0.85rem)] pb-4 shadow-[0_12px_60px_rgba(0,0,0,0.28)]">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {onBack && (
-              <button onClick={onBack} className="px-3 py-2 rounded-full bg-white/10 text-xs font-bold text-white">
+              <button onClick={onBack} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/10">
                 Back
               </button>
             )}
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">Shared deals</p>
-              <h2 className="text-2xl font-black text-white">Group Buys</h2>
+              <p className="text-[10px] font-black uppercase tracking-[0.32em] text-emerald-300/90">Shared deals</p>
+              <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">Group Buys</h2>
             </div>
           </div>
-          <div className="hidden sm:block text-right">
-            <p className="text-[11px] text-white/70 font-medium">Join nearby shoppers for better prices.</p>
-            <p className="text-[10px] text-white/50 font-bold">Seller participation is optional and location-aware.</p>
+          <div className="hidden text-right sm:block">
+            <p className="text-[11px] font-medium text-white/75">Join nearby shoppers for better prices.</p>
+            <p className="text-[10px] font-bold text-white/50">Seller participation is optional and location-aware.</p>
           </div>
         </div>
       </div>
 
-      <div className="px-4 py-5">
-        <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/95 p-5 shadow-2xl shadow-black/10">
-            <div className="flex items-center gap-2 text-xs font-bold text-zinc-500 uppercase tracking-widest">
-              <Filter className="w-4 h-4" /> Find deals
+      <div className="mx-auto w-full max-w-6xl px-4 py-4 sm:py-5">
+        <div className="sticky top-[calc(env(safe-area-inset-top)+4.2rem)] z-10 mb-4 rounded-3xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-sky-300">
+                <Filter className="h-4 w-4" /> Find deals
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/60">
+                {items.length} listings
+              </span>
             </div>
-            <p className="mt-2 text-sm text-zinc-600">
-              Filter by market, category, price, and distance to see the best shared orders nearby.
-            </p>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input
-              value={filters.market_name}
-              onChange={(e) => setFilters((prev) => ({ ...prev, market_name: e.target.value }))}
-              placeholder="Market or area"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-            <input
-              value={filters.category_id}
-              onChange={(e) => setFilters((prev) => ({ ...prev, category_id: e.target.value }))}
-              placeholder="Category or product"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-            <select
-              value={filters.status}
-              onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            >
-              <option value="open">Open</option>
-              <option value="filled">Filled</option>
-              <option value="closed">Closed</option>
-            </select>
-            <select
-              value={filters.sort}
-              onChange={(e) => setFilters((prev) => ({ ...prev, sort: e.target.value }))}
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            >
-              <option value="ending_soon">Ending soon</option>
-              <option value="most_full">Most full</option>
-              <option value="best_discount">Best discount</option>
-              <option value="nearest">Nearest</option>
-            </select>
-            <input
-              value={filters.price_max}
-              onChange={(e) => setFilters((prev) => ({ ...prev, price_max: e.target.value }))}
-              placeholder="Max price you want"
-              type="number"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-            <input
-              value={filters.radius_km}
-              onChange={(e) => setFilters((prev) => ({ ...prev, radius_km: e.target.value }))}
-              placeholder="Distance radius (km)"
-              type="number"
-              className="px-3 py-2 rounded-xl bg-zinc-50 text-sm font-semibold"
-            />
-            </div>
-            <button
-              onClick={handleUseMyLocation}
-              className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-indigo-600"
-            >
-              <MapPin className="w-4 h-4" /> Use my current location
-            </button>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-zinc-950 p-5 text-white shadow-2xl shadow-black/20">
-            <div className="text-xs font-black text-emerald-300 uppercase tracking-widest">Request a group deal</div>
-            <p className="mt-2 text-sm text-white/70">
-              Tell nearby sellers what you want, how many you need, and the price that works for you.
-            </p>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.2fr_1.2fr_0.7fr_0.7fr]">
               <input
-                value={createSku}
-                onChange={(e) => setCreateSku(e.target.value)}
-                placeholder="Product SKU or name"
-                className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white placeholder:text-white/40"
+                value={filters.market_name}
+                onChange={(e) => setFilters((prev) => ({ ...prev, market_name: e.target.value }))}
+                placeholder="Market or area"
+                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
               />
               <input
-                value={createQty}
-                onChange={(e) => setCreateQty(e.target.value)}
-                placeholder="How many units"
+                value={filters.category_id}
+                onChange={(e) => setFilters((prev) => ({ ...prev, category_id: e.target.value }))}
+                placeholder="Category or product"
+                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
+              />
+              <select
+                value={filters.status}
+                onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-sky-400/50"
+              >
+                <option value="open">Open</option>
+                <option value="filled">Filled</option>
+                <option value="closed">Closed</option>
+              </select>
+              <select
+                value={filters.sort}
+                onChange={(e) => setFilters((prev) => ({ ...prev, sort: e.target.value }))}
+                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-sky-400/50"
+              >
+                <option value="ending_soon">Ending soon</option>
+                <option value="most_full">Most full</option>
+                <option value="best_discount">Best discount</option>
+                <option value="nearest">Nearest</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
+              <input
+                value={filters.price_max}
+                onChange={(e) => setFilters((prev) => ({ ...prev, price_max: e.target.value }))}
+                placeholder="Max price you want"
                 type="number"
-                className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white placeholder:text-white/40"
+                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
               />
               <input
-                value={createPrice}
-                onChange={(e) => setCreatePrice(e.target.value)}
-                placeholder="Target price"
+                value={filters.radius_km}
+                onChange={(e) => setFilters((prev) => ({ ...prev, radius_km: e.target.value }))}
+                placeholder="Distance radius (km)"
                 type="number"
-                className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white placeholder:text-white/40"
+                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
               />
+              <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+                <button
+                  onClick={handleUseMyLocation}
+                  className="inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] text-sky-200 transition hover:bg-sky-400/15"
+                >
+                  <MapPin className="h-4 w-4" /> Use location
+                </button>
+                <span className="text-[11px] font-medium text-white/45">Nearby deals are prioritized when location is set.</span>
+              </div>
             </div>
-            <button
-              onClick={handleCreateRequest}
-              className="mt-4 px-4 py-3 rounded-2xl bg-emerald-500 text-white text-xs font-black inline-flex items-center gap-2"
-            >
-              <ShoppingCart className="w-4 h-4" /> Request deal
-            </button>
           </div>
         </div>
 
-        {error && <div className="mx-auto mt-4 w-full max-w-6xl text-sm text-rose-200 font-semibold">{error}</div>}
+        <details className="group mb-4 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">
+                <ShoppingCart className="h-4 w-4" /> Request a group deal
+              </div>
+              <p className="mt-2 text-sm text-white/70">
+                Tell nearby sellers what you want, how many you need, and the price that works for you.
+              </p>
+            </div>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/60 group-open:bg-white/10">
+              Toggle
+            </span>
+          </summary>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <input
+              value={createSku}
+              onChange={(e) => setCreateSku(e.target.value)}
+              placeholder="Product SKU or name"
+              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-emerald-400/50"
+            />
+            <input
+              value={createQty}
+              onChange={(e) => setCreateQty(e.target.value)}
+              placeholder="How many units"
+              type="number"
+              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-emerald-400/50"
+            />
+            <input
+              value={createPrice}
+              onChange={(e) => setCreatePrice(e.target.value)}
+              placeholder="Target price"
+              type="number"
+              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-emerald-400/50"
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleCreateRequest}
+              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-400 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:brightness-110"
+            >
+              <Sparkles className="h-4 w-4" /> Request deal
+            </button>
+            <span className="text-[11px] font-medium text-white/45">
+              Create a request and let sellers respond with better pricing tiers.
+            </span>
+          </div>
+        </details>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "Open deals", value: summary.open, tone: "from-sky-400/20 to-blue-500/10", icon: Users },
+            { label: "Ending soon", value: summary.endingSoon, tone: "from-amber-400/20 to-orange-500/10", icon: Clock3 },
+            { label: "Nearby", value: summary.nearby, tone: "from-emerald-400/20 to-teal-500/10", icon: MapPin },
+            { label: "Average fill", value: `${summary.averageProgress}%`, tone: "from-fuchsia-400/20 to-violet-500/10", icon: BadgePercent },
+          ].map((card) => {
+            const Icon = card.icon;
+            return (
+              <div key={card.label} className={`rounded-3xl border border-white/10 bg-gradient-to-br ${card.tone} p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur-xl`}>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.26em] text-white/55">{card.label}</div>
+                    <div className="mt-2 text-2xl font-black tracking-tight text-white">{card.value}</div>
+                  </div>
+                  <div className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/10 text-white">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm font-semibold text-rose-100">
+            {error}
+          </div>
+        )}
         {loading && (
-          <div className="mx-auto mt-4 w-full max-w-6xl flex items-center gap-2 text-sm text-white/70">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading shared deals...
+          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/70">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading shared deals...
           </div>
         )}
 
-        <div className="mx-auto mt-4 grid w-full max-w-6xl gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
           {items.map((item) => {
             const target = Math.max(1, item.target_tier_qty || item.min_group_size || 1);
             const current = item.current_size || 0;
@@ -269,65 +343,73 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 key={item.id}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="rounded-3xl border border-white/10 bg-white/95 p-5 shadow-2xl shadow-black/10"
+                className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_22px_80px_rgba(0,0,0,0.22)] backdrop-blur-xl"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-black text-zinc-900">{item.product_sku || 'Shared deal'}</div>
-                    <div className="text-[11px] text-zinc-500">
-                      {item.market_name || item.seller_name || 'Market'} • {item.distance_km ? `${item.distance_km.toFixed(1)}km` : 'Nearby'}{etaMin ? ` • ${etaMin} min` : ''}
+                    <div className="text-sm font-black tracking-tight text-white">{item.product_sku || 'Shared deal'}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-white/55">
+                      <span>{item.market_name || item.seller_name || 'Market'}</span>
+                      <span>•</span>
+                      <span>{item.distance_km ? `${item.distance_km.toFixed(1)} km` : 'Nearby'}</span>
+                      {etaMin ? (
+                        <>
+                          <span>•</span>
+                          <span>{etaMin} min</span>
+                        </>
+                      ) : null}
                     </div>
-                    <div className="text-[11px] text-zinc-500">
+                    <div className="mt-1 text-[11px] text-white/45">
                       {item.seller_mode || 'seller'} {item.visual_marker ? `• ${item.visual_marker}` : ''}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-black text-zinc-900">KSh {tierPrice || '-'}</div>
-                    {tierDiscount && <div className="text-[10px] text-emerald-600 font-bold">{tierDiscount} off</div>}
+                    <div className="text-sm font-black text-white">KSh {tierPrice || '-'}</div>
+                    {tierDiscount && <div className="text-[10px] font-bold text-emerald-300">{tierDiscount} off</div>}
                   </div>
                 </div>
 
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase">
+                  <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-[0.18em] text-white/45">
                     <span>{current}/{target} joined</span>
                     <span>{progress}%</span>
                   </div>
-                  <div className="h-2 rounded-full bg-zinc-100 overflow-hidden mt-1">
-                    <div className="h-full bg-indigo-500" style={{ width: `${progress}%` }} />
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/8">
+                    <div className="h-full rounded-full" style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${dealTone(item)}, rgba(255,255,255,0.14))` }} />
                   </div>
                 </div>
 
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => handleJoin(item)}
-                    className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-sky-100 transition hover:bg-sky-400/15"
                   >
-                    <Users className="w-4 h-4" /> Join deal
+                    <Users className="h-4 w-4" /> Join deal
                   </button>
                   {shareLink && (
                     <button
                       onClick={() => window.open(shareLink, '_blank', 'noopener')}
-                      className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-xs font-bold inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-white/90 transition hover:bg-white/10"
                     >
-                      <MessageCircle className="w-4 h-4" /> Open discussion
+                      <MessageCircle className="h-4 w-4" /> Open discussion
                     </button>
                   )}
                   {item.whatsapp_number && (
                     <a
                       href={`https://wa.me/${item.whatsapp_number}`}
-                      className="px-3 py-2 rounded-xl bg-zinc-100 text-xs font-bold inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-white/90 transition hover:bg-white/10"
                     >
-                      <MessageCircle className="w-4 h-4" /> Contact seller
+                      <MessageCircle className="h-4 w-4" /> Contact seller
                     </a>
                   )}
                   {item.expires_at && (
-                    <div className="text-[10px] text-zinc-500 font-bold inline-flex items-center gap-1">
-                      <Timer className="w-3 h-3" /> {new Date(item.expires_at).toLocaleDateString()}
+                    <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/55">
+                      <Timer className="h-3 w-3" /> {new Date(item.expires_at).toLocaleDateString()}
                     </div>
                   )}
                   {item.inventory_remaining !== undefined && (
-                    <div className="text-[10px] text-amber-600 font-bold inline-flex items-center gap-1">
-                      <Zap className="w-3 h-3" /> {item.inventory_remaining} left
+                    <div className="inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-200">
+                      <Zap className="h-3 w-3" /> {item.inventory_remaining} left
                     </div>
                   )}
                 </div>
@@ -335,7 +417,9 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             );
           })}
           {!loading && items.length === 0 && (
-            <div className="text-sm text-zinc-500 font-semibold">No group buys found. Try a different filter.</div>
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-sm font-semibold text-white/55">
+              No group buys found. Try a different filter.
+            </div>
           )}
         </div>
       </div>
