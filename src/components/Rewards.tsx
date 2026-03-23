@@ -1456,8 +1456,35 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                     )}
                   </div>
                   <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] text-zinc-600 font-bold">
-                    Stars earned: {scanResult?.stars_awarded ?? 0} • Product: {survey.product || 'Item'} • Qty: {quantity} • Repeat: {survey.repeat}.
+                    Stars earned: {scanResult?.stars_awarded ?? 0}
+                    {typeof scanResult?.raw_stars === 'number' && scanResult.raw_stars !== scanResult?.stars_awarded
+                      ? ` (from ${scanResult.raw_stars} raw)`
+                      : ''}
+                    • Product: {survey.product || 'Item'} • Qty: {quantity} • Repeat: {survey.repeat}.
                   </div>
+                  {Array.isArray(scanResult?.breakdown) && scanResult.breakdown.length > 0 && (
+                    <div className="p-3 bg-white rounded-2xl border border-zinc-200 text-[10px] text-zinc-700">
+                      <div className="mb-2 font-black uppercase tracking-[0.2em] text-zinc-500">Score breakdown</div>
+                      <div className="space-y-2">
+                        {scanResult.breakdown.map((item, index) => (
+                          <div key={`${item.key || index}`} className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-bold text-zinc-900">{item.label || item.key || 'Score item'}</div>
+                              {item.note && <div className="text-zinc-500">{item.note}</div>}
+                            </div>
+                            <div className="font-black text-emerald-700 whitespace-nowrap">
+                              +{Number(item.points ?? 0).toFixed(2)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {typeof scanResult?.raw_stars === 'number' && typeof scanResult?.stars_awarded === 'number' && scanResult.raw_stars > scanResult.stars_awarded && (
+                    <div className="p-3 bg-amber-50 rounded-2xl text-[10px] text-amber-800 font-bold">
+                      Final score capped at {scanResult.stars_awarded} stars from {scanResult.raw_stars} raw stars.
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       setQrStep('scan');

@@ -20,6 +20,10 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
   });
   const [status, setStatus] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const isValidPhone = (value: string) => /^\+?[0-9]{7,15}$/.test(value.trim());
+  const isValidTenant = (value: string) => /^[a-zA-Z0-9._:-]{2,64}$/.test(value.trim());
+  const isValidPin = (value: string) => /^[0-9]{4,6}$/.test(value.trim());
+  const isValidResetCode = (value: string) => /^[0-9]{4,8}$/.test(value.trim());
 
   React.useEffect(() => {
     try {
@@ -31,6 +35,10 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus(null);
+    if (!isValidPhone(form.phone) || !isValidTenant(form.tenant_id)) {
+      setStatus('Please enter a valid phone number and tenant ID.');
+      return;
+    }
     setLoading(true);
     try {
       await requestPasswordReset({
@@ -49,6 +57,10 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
   const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus(null);
+    if (!isValidPhone(form.phone) || !isValidTenant(form.tenant_id) || !isValidResetCode(form.reset_code) || !isValidPin(form.new_pin)) {
+      setStatus('Please check the reset code, PIN, phone number, and tenant ID.');
+      return;
+    }
     if (form.new_pin.trim() !== form.confirm_pin.trim()) {
       setStatus('PINs do not match.');
       return;
@@ -64,7 +76,7 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
       setStatus('PIN updated. You can sign in now.');
       if (onLoginOpen) onLoginOpen();
     } catch (err: any) {
-      setStatus(err?.message || 'Unable to reset PIN.');
+      setStatus('Unable to reset PIN. Please request a new code and try again.');
     } finally {
       setLoading(false);
     }

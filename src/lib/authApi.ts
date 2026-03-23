@@ -17,6 +17,21 @@ export type AuthDevicePayload = {
   screen?: string;
 };
 
+const sanitizeText = (value: string, maxLength = 256) =>
+  value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+
+const sanitizePhone = (value: string) => sanitizeText(value, 32);
+
+const sanitizePin = (value: string) => sanitizeText(value, 6);
+
+const sanitizeTenantId = (value: string) => sanitizeText(value, 64);
+
+const isValidPhone = (value: string) => /^\+?[0-9]{7,15}$/.test(value);
+
+const isValidPin = (value: string) => /^[0-9]{4,6}$/.test(value);
+
+const isValidTenantId = (value: string) => /^[a-zA-Z0-9._:-]{2,64}$/.test(value);
+
 const OFFLINE_LOGIN = {
   phone: '+254700000000',
   pin: '1234',
@@ -33,9 +48,9 @@ const createOfflineTokens = (): AuthTokens => ({
 });
 
 const matchesOfflineLogin = (payload: { phone: string; pin: string; tenant_id: string }) => {
-  const phone = payload.phone.trim();
-  const pin = payload.pin.trim();
-  const tenant = payload.tenant_id.trim() || OFFLINE_LOGIN.tenant_id;
+  const phone = sanitizePhone(payload.phone);
+  const pin = sanitizePin(payload.pin);
+  const tenant = sanitizeTenantId(payload.tenant_id) || OFFLINE_LOGIN.tenant_id;
   return phone === OFFLINE_LOGIN.phone && pin === OFFLINE_LOGIN.pin && tenant === OFFLINE_LOGIN.tenant_id;
 };
 
@@ -72,20 +87,31 @@ export const getDevicePayload = (): AuthDevicePayload => {
   };
 };
 
+const normalizeAuthPayload = <T extends { phone: string; pin: string; tenant_id: string }>(payload: T) => ({
+  ...payload,
+  phone: sanitizePhone(payload.phone),
+  pin: sanitizePin(payload.pin),
+  tenant_id: sanitizeTenantId(payload.tenant_id),
+});
+
 export const login = async (payload: {
   phone: string;
   pin: string;
   tenant_id: string;
   device?: AuthDevicePayload;
 }): Promise<AuthTokens> => {
+  const normalized = normalizeAuthPayload(payload);
+  if (!isValidPhone(normalized.phone) || !isValidPin(normalized.pin) || !isValidTenantId(normalized.tenant_id)) {
+    throw new Error('Please enter a valid phone number, PIN, and tenant ID.');
+  }
   try {
     return await apiFetch('/v1/auth/login', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(normalized),
     });
   } catch (err) {
     const offlineEnabled = import.meta.env.DEV && await isOfflineLoginEnabled();
-    if (offlineEnabled && matchesOfflineLogin(payload)) {
+    if (offlineEnabled && matchesOfflineLogin(normalized)) {
       try {
         setAuthItem('soko:role', OFFLINE_LOGIN.role);
         setAuthItem('soko:user_id', OFFLINE_LOGIN.user_id);
@@ -106,7 +132,7 @@ export const register = async (payload: {
 }): Promise<AuthTokens> =>
   apiFetch('/v1/auth/register', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(normalizeAuthPayload(payload)),
   });
 
 export const requestPasswordReset = async (payload: {
@@ -115,7 +141,10 @@ export const requestPasswordReset = async (payload: {
 }) =>
   apiFetch('/v1/auth/password/reset/request', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      phone: sanitizePhone(payload.phone),
+      tenant_id: sanitizeTenantId(payload.tenant_id),
+    }),
   });
 
 export const confirmPasswordReset = async (payload: {
@@ -126,5 +155,10 @@ export const confirmPasswordReset = async (payload: {
 }) =>
   apiFetch('/v1/auth/password/reset/confirm', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      phone: sanitizePhone(payload.phone),
+      reset_code: sanitizeText(payload.reset_code, 16),
+      new_pin: sanitizePin(payload.new_pin),
+      tenant_id: sanitizeTenantId(payload.tenant_id),
+    }),
   });

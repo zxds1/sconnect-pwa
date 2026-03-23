@@ -23,6 +23,9 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
   });
   const [status, setStatus] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const isValidPhone = (value: string) => /^\+?[0-9]{7,15}$/.test(value.trim());
+  const isValidPin = (value: string) => /^[0-9]{4,6}$/.test(value.trim());
+  const isValidTenant = (value: string) => /^[a-zA-Z0-9._:-]{2,64}$/.test(value.trim());
   React.useEffect(() => {
     try {
       const tenant = getAuthItem('soko:tenant_id') || '';
@@ -33,6 +36,10 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus(null);
+    if (!isValidPhone(form.phone) || !isValidPin(form.pin) || !isValidTenant(form.tenant_id)) {
+      setStatus('Please enter a valid phone number, PIN, and tenant ID.');
+      return;
+    }
     setLoading(true);
     try {
       const tokens = await login({
@@ -69,7 +76,7 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
       setStatus('Login successful.');
       onAuthenticated?.();
     } catch (err: any) {
-      setStatus(err?.message || 'Unable to login.');
+      setStatus('Unable to login. Please check your details and try again.');
     } finally {
       setLoading(false);
     }

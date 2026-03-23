@@ -119,12 +119,19 @@ export interface RewardsQrScanRequest {
 
 export interface RewardsQrScanResponse {
   scan_id?: string;
+  raw_stars?: number;
   rewards_issued?: number;
   stars_awarded?: number;
   balance?: number;
   stars_total?: number;
   rank?: number;
   participants?: number;
+  breakdown?: Array<{
+    key?: string;
+    label?: string;
+    points?: number;
+    note?: string;
+  }>;
   created_at?: string;
 }
 

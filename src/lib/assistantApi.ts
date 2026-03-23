@@ -160,14 +160,7 @@ export const streamThreadMessage = async (
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let message = res.statusText || 'Request failed';
-    try {
-      const errorBody = await res.json();
-      if (errorBody?.error?.message) {
-        message = errorBody.error.message;
-      }
-    } catch {}
-    throw new Error(message);
+    throw new Error(res.status >= 500 ? 'Service temporarily unavailable.' : 'Request failed. Please try again.');
   }
   const raw = await res.text();
   const lines = raw.split('\n').map((line) => line.trim());
