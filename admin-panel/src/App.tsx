@@ -20,6 +20,7 @@ import { Activity } from "./pages/Activity";
 import { SupplierApplications } from "./pages/SupplierApplications";
 import { AssistantModels } from "./pages/AssistantModels";
 import { Partnerships } from "./pages/Partnerships";
+import { Scrapers } from "./pages/Scrapers";
 
 export default function App() {
   const session = getSession();
@@ -49,6 +50,7 @@ export default function App() {
         { name: "assistant-models" },
         { name: "supplier-applications" },
         { name: "partnerships" },
+        { name: "scrapers" },
         { name: "alerts" },
         { name: "audit" },
         { name: "risk" },
@@ -70,6 +72,7 @@ export default function App() {
               <Route path="/assistant-models" element={<AssistantModels />} />
               <Route path="/supplier-applications" element={<SupplierApplications />} />
               <Route path="/partnerships" element={<Partnerships />} />
+              <Route path="/scrapers" element={<Scrapers />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/security" element={<Security />} />
             <Route path="/compliance" element={<Compliance />} />

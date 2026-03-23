@@ -34,7 +34,10 @@ export const adminFetch = async (path: string, options: RequestInit = {}) => {
   if (session?.tenantId) headers.set("X-Tenant-Id", session.tenantId);
   if (session?.userId) headers.set("X-User-Id", session.userId);
   if (session?.roles?.length) headers.set("X-Role", session.roles[0]);
-  headers.set("Content-Type", "application/json");
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
   const resp = await fetch(`${adminBaseUrl}${path}`, {
     ...options,

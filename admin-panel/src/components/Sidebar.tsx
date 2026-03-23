@@ -12,6 +12,7 @@ const navItems = [
   { path: "/assistant-models", label: "Assistant Models" },
   { path: "/supplier-applications", label: "Supplier Applications" },
   { path: "/partnerships", label: "Partnership APIs" },
+  { path: "/scrapers", label: "Scraper Control" },
   { path: "/alerts", label: "Security Alerts" },
   { path: "/security", label: "Security Overview" },
   { path: "/compliance", label: "Compliance" },
