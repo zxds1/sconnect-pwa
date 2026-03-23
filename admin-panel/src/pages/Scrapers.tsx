@@ -99,6 +99,83 @@ const buildSourceSeries = (rows: ScraperBatch[]) => {
     .map(([label, total]) => ({ label, total }));
 };
 
+const buildSourcePerformance = (rows: ScraperBatch[]) => {
+  const bySource = new Map<string, { label: string; total: number; complete: number; error: number; queued: number }>();
+  rows.forEach((batch) => {
+    const key = batch.source_name || "unknown";
+    const current = bySource.get(key) || { label: key, total: 0, complete: 0, error: 0, queued: 0 };
+    current.total += 1;
+    const kind = bucketStatus(batch.status);
+    if (kind === "complete") current.complete += 1;
+    else if (kind === "error") current.error += 1;
+    else if (kind === "queued" || kind === "processing") current.queued += 1;
+    bySource.set(key, current);
+  });
+  return Array.from(bySource.values()).sort((a, b) => b.total - a.total).slice(0, 6);
+};
+
+type TenantTimelinePoint = {
+  label: string;
+  total: number;
+  tenants: Record<string, number>;
+};
+
+const buildTenantTimeline = (rows: ScraperBatch[]) => {
+  const topTenants = Array.from(
+    rows.reduce((acc, batch) => {
+      const key = batch.tenant_id || "unknown";
+      acc.set(key, (acc.get(key) || 0) + 1);
+      return acc;
+    }, new Map<string, number>())
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([tenant]) => tenant);
+
+  const byDay = new Map<string, TenantTimelinePoint>();
+  rows.forEach((batch) => {
+    const day = new Date(batch.created_at);
+    const key = day.toISOString().slice(0, 10);
+    const tenant = topTenants.includes(batch.tenant_id || "unknown") ? (batch.tenant_id || "unknown") : "other";
+    const current = byDay.get(key) || {
+      label: formatShortDate(day),
+      total: 0,
+      tenants: {},
+    };
+    current.total += 1;
+    current.tenants[tenant] = (current.tenants[tenant] || 0) + 1;
+    byDay.set(key, current);
+  });
+
+  return {
+    topTenants,
+    points: Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, value]) => value)
+      .slice(-10),
+  };
+};
+
+const buildFailureRanks = (items: ScraperBatchItem[]) => {
+  const failures = items.filter((item) => {
+    const status = (item.status || "").toLowerCase();
+    return Boolean(item.error) || status.includes("error") || status.includes("fail");
+  });
+  const byShop = new Map<string, number>();
+  const byProduct = new Map<string, number>();
+  failures.forEach((item) => {
+    const shopKey = item.source_shop_key || "unknown shop";
+    const productKey = item.source_product_key || "unknown product";
+    byShop.set(shopKey, (byShop.get(shopKey) || 0) + 1);
+    byProduct.set(productKey, (byProduct.get(productKey) || 0) + 1);
+  });
+  return {
+    total: failures.length,
+    shops: Array.from(byShop.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([label, value]) => ({ label, value })),
+    products: Array.from(byProduct.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([label, value]) => ({ label, value })),
+  };
+};
+
 const buildStatusSeries = (rows: ScraperBatch[]) => {
   const counts = rows.reduce(
     (acc, batch) => {
@@ -143,6 +220,92 @@ const HorizontalBars = ({ items }: { items: { label: string; value: number }[] }
           </div>
         );
       })}
+    </div>
+  );
+};
+
+const SourcePerformance = ({ items }: { items: { label: string; total: number; complete: number; error: number; queued: number }[] }) => (
+  <div style={{ display: "grid", gap: 12 }}>
+    {items.length === 0 && <p className="muted">No source data yet.</p>}
+    {items.map((item) => {
+      const success = item.total ? Math.round((item.complete / item.total) * 100) : 0;
+      const error = item.total ? Math.round((item.error / item.total) * 100) : 0;
+      return (
+        <div key={item.label} style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ display: "grid" }}>
+              <strong style={{ fontSize: 14 }}>{item.label}</strong>
+              <span className="muted">{item.total} batches · {item.complete} complete · {item.error} errored</span>
+            </div>
+            <span className="badge info">{success}% / {error}%</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, height: 12, borderRadius: 999, overflow: "hidden", background: chartTrack }}>
+            <div style={{ width: `${success}%`, minWidth: item.complete ? 10 : 0, background: "linear-gradient(90deg, var(--success), rgba(34,197,94,0.35))" }} />
+            <div style={{ width: `${error}%`, minWidth: item.error ? 10 : 0, background: "linear-gradient(90deg, var(--danger), rgba(248,113,113,0.35))" }} />
+            <div style={{ flex: 1, background: "rgba(255,255,255,0.03)" }} />
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
+
+const TenantTimeline = ({
+  points,
+  tenants,
+}: {
+  points: TenantTimelinePoint[];
+  tenants: string[];
+}) => {
+  const colors = ["var(--accent)", "var(--accent-2)", "var(--success)", "rgba(248,113,113,0.9)", "rgba(148,163,184,0.88)"];
+  const lookup = new Map<string, string>();
+  tenants.forEach((tenant, index) => lookup.set(tenant, colors[index % colors.length]));
+  lookup.set("other", "rgba(100,116,139,0.88)");
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {points.length === 0 && <p className="muted">No tenant activity yet.</p>}
+      {points.map((point) => {
+        const total = Math.max(1, point.total);
+        const keys = [...tenants, "other"].filter((tenant) => (point.tenants[tenant] || 0) > 0);
+        return (
+          <div key={point.label} style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <strong style={{ fontSize: 13 }}>{point.label}</strong>
+              <span className="badge info">{point.total} batches</span>
+            </div>
+            <div style={{ display: "flex", gap: 6, height: 14, borderRadius: 999, overflow: "hidden", background: chartTrack }}>
+              {keys.map((tenant) => {
+                const value = point.tenants[tenant] || 0;
+                const color = lookup.get(tenant) || "rgba(255,255,255,0.16)";
+                return (
+                  <div
+                    key={tenant}
+                    style={{
+                      width: `${(value / total) * 100}%`,
+                      minWidth: value ? 10 : 0,
+                      background: `linear-gradient(90deg, ${color}, rgba(255,255,255,0.12))`,
+                    }}
+                    title={`${tenant}: ${value}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {tenants.map((tenant, index) => {
+          const color = colors[index % colors.length];
+          return (
+            <span key={tenant} className="badge" style={{ background: `${color}22`, color }}>
+              {tenant}
+            </span>
+          );
+        })}
+        <span className="badge" style={{ background: "rgba(100,116,139,0.18)", color: "rgba(226,232,240,0.9)" }}>
+          other
+        </span>
+      </div>
     </div>
   );
 };
@@ -224,6 +387,9 @@ export const Scrapers = () => {
     return Math.round((errored / total) * 100);
   }, [batches]);
   const latestBatch = batches[0];
+  const sourcePerformance = useMemo(() => buildSourcePerformance(batches), [batches]);
+  const tenantTimeline = useMemo(() => buildTenantTimeline(batches), [batches]);
+  const failureRanks = useMemo(() => buildFailureRanks(items), [items]);
 
   const submitIngest = async () => {
     if (!selectedFile && !csvUrl) {
@@ -502,6 +668,29 @@ export const Scrapers = () => {
         </div>
       </div>
 
+      <div className="card-grid">
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h3>Source Performance</h3>
+              <p className="muted">Success and error ratio by source_name.</p>
+            </div>
+            <span className="badge info">{sourcePerformance.length} sources</span>
+          </div>
+          <SourcePerformance items={sourcePerformance} />
+        </div>
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h3>Tenant Throughput</h3>
+              <p className="muted">Daily batch volume across the busiest tenants.</p>
+            </div>
+            <span className="badge info">{tenantTimeline.topTenants.length} tenants</span>
+          </div>
+          <TenantTimeline points={tenantTimeline.points} tenants={tenantTimeline.topTenants} />
+        </div>
+      </div>
+
       {status && <div className="card" style={{ borderColor: "rgba(248,113,113,0.35)", color: "#fecaca" }}>{status}</div>}
 
       <div className="card" style={{ overflowX: "auto" }}>
@@ -602,6 +791,28 @@ export const Scrapers = () => {
                 <p className="muted">Each row is mapped to a shop, product, and seller-product record when possible.</p>
               </div>
               <span className="badge info">{items.length} items</span>
+            </div>
+            <div className="card-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 16 }}>
+              <div className="card" style={{ background: "rgba(8,10,18,0.45)" }}>
+                <div className="card-header" style={{ marginBottom: 10 }}>
+                  <div>
+                    <h3>Top Failing Shops</h3>
+                    <p className="muted">Rows with errors or failed status grouped by shop key.</p>
+                  </div>
+                  <span className="badge danger">{failureRanks.shops.length} shops</span>
+                </div>
+                <HorizontalBars items={failureRanks.shops} />
+              </div>
+              <div className="card" style={{ background: "rgba(8,10,18,0.45)" }}>
+                <div className="card-header" style={{ marginBottom: 10 }}>
+                  <div>
+                    <h3>Top Failing Products</h3>
+                    <p className="muted">Problem rows grouped by product key.</p>
+                  </div>
+                  <span className="badge danger">{failureRanks.products.length} products</span>
+                </div>
+                <HorizontalBars items={failureRanks.products} />
+              </div>
             </div>
             <table className="table">
               <thead>
