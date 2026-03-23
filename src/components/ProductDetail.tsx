@@ -393,6 +393,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const activeProduct = React.useMemo(() => ({ ...product, ...productDetail }), [product, productDetail]);
   const productId = activeProduct.id;
   const sellerId = (activeProduct as any).seller_id || activeProduct.sellerId || (productDetail as any).seller_id || product.sellerId;
+  const sourceOrigin = String((activeProduct as any)?.sourceOrigin || (activeProduct as any)?.source_origin || (product as any)?.sourceOrigin || (product as any)?.source_origin || '').toLowerCase();
+  const sourceLabel = (activeProduct as any)?.sourceLabel || (activeProduct as any)?.source_label || (product as any)?.sourceLabel || (product as any)?.source_label || '';
+  const isPubliclyCollected = sourceOrigin === 'publicly_collected';
   const primaryMedia = resolveMediaUrl(media) || activeProduct.mediaUrl;
   const externalProductUrl = normalizeExternalUrl(
     (activeProduct as any).product_url
@@ -1621,7 +1624,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         <div className="p-6">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h1 className="text-2xl font-black text-zinc-900 mb-1">{activeProduct.name}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl font-black text-zinc-900 mb-1">{activeProduct.name}</h1>
+                {isPubliclyCollected && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">
+                    <ShieldCheck className="w-3 h-3" />
+                    Publicly collected
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase tracking-tight text-zinc-500">
                   {activeProduct.category}
@@ -1637,6 +1648,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               <Heart className="w-6 h-6" />
             </button>
           </div>
+
+          {isPubliclyCollected && (
+            <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">Publicly collected data</p>
+              <p className="mt-1 text-xs font-medium text-sky-800">
+                This listing was collected from a public web source{sourceLabel ? `: ${sourceLabel}` : ''}. Please verify details before purchase.
+              </p>
+            </div>
+          )}
 
           <p className="text-zinc-500 text-sm leading-relaxed mb-6">
             {activeProduct.description}

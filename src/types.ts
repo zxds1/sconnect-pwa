@@ -43,6 +43,8 @@ export type Product = {
     lng: number;
     address: string;
   };
+  sourceOrigin?: 'seller' | 'publicly_collected' | string;
+  sourceLabel?: string;
   reviews?: Review[];
   competitorPrice?: number;
   priceHistory?: PricePoint[];
