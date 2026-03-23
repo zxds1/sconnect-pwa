@@ -14,6 +14,7 @@ export interface RewardsLedgerEntry {
   ledger_id?: string;
   seller_id?: string;
   type?: string;
+  payout_type?: string;
   reason?: string;
   amount?: number;
   balance_after?: number;
@@ -111,6 +112,7 @@ export interface RewardsQrScanRequest {
   quantity?: number;
   stock_status?: string;
   repeat_purchase?: string;
+  location_tag?: string;
   cleanliness?: number;
   verification_method?: string;
   gps_distance_m?: number;
@@ -120,8 +122,24 @@ export interface RewardsQrScanRequest {
 export interface RewardsQrScanResponse {
   scan_id?: string;
   raw_stars?: number;
+  raw_rewards?: number;
   rewards_issued?: number;
   stars_awarded?: number;
+  layer?: number;
+  layer_label?: string;
+  reward_texture?: string;
+  location_tag?: string;
+  scan_streak?: number;
+  streak_cap?: number;
+  time_bonus?: number;
+  time_label?: string;
+  place_bonus?: number;
+  place_label?: string;
+  passport_zone?: string;
+  passport_count?: number;
+  passport_threshold?: number;
+  passport_bonus?: number;
+  growth_score?: number;
   balance?: number;
   stars_total?: number;
   rank?: number;
@@ -133,6 +151,18 @@ export interface RewardsQrScanResponse {
     note?: string;
   }>;
   created_at?: string;
+}
+
+export interface RewardsClaimResponse {
+  visitor_id?: string;
+  claimed_balance?: number;
+  claimed_pending?: number;
+  claimed_stars?: number;
+  claimed_scans?: number;
+  wallet_balance?: number;
+  stars_total?: number;
+  already_claimed?: boolean;
+  claimed_at?: string;
 }
 
 const unwrapList = <T>(data: any): T[] => {
@@ -211,7 +241,7 @@ export const verifyRewardsGps = async (payload: { lat_enc: string; lng_enc: stri
 
 export const listFraudAlerts = async (): Promise<RewardsFraudAlert[]> => unwrapList(await apiFetch('/v1/rewards/fraud-alerts'));
 
-export const redeemRewards = async (payload: { amount: number }): Promise<RewardsLedgerEntry> =>
+export const redeemRewards = async (payload: { amount: number; payout_type?: string }): Promise<RewardsLedgerEntry> =>
   apiFetch('/v1/rewards/redeem', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -225,6 +255,12 @@ export const listRewardsLeaderboard = async (): Promise<RewardsLeaderboardEntry[
 
 export const submitRewardsQrScan = async (payload: RewardsQrScanRequest): Promise<RewardsQrScanResponse> =>
   apiFetch('/v1/rewards/qr/scan', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const claimGuestRewards = async (payload: { visitor_id: string }): Promise<RewardsClaimResponse> =>
+  apiFetch('/v1/rewards/claim', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

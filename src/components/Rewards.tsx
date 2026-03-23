@@ -3,6 +3,7 @@ import { Crown, Trophy, ArrowRight, Star, Sparkles, QrCode, MapPin, Wallet, Came
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import {
   createReferral,
+  claimGuestRewards,
   getRewardsBalance,
   getRewardsLedger,
   getRewardStreaks,
@@ -46,22 +47,25 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   const [leaderboard, setLeaderboard] = useState<RewardsLeaderboardEntry[]>([]);
   const currentStars = Number(starsSummary?.stars_total ?? 0);
   const currentRank = Number(starsSummary?.rank ?? 0);
-  const [activeTab, setActiveTab] = useState<'stars' | 'wallet' | 'receipts'>('stars');
   const [buyerCoins, setBuyerCoins] = useState(0);
   const [buyerPayouts, setBuyerPayouts] = useState<Array<{ id: string; amount: number; reason: string; timestamp: number }>>([]);
   const [milestones, setMilestones] = useState<Array<{ stars: number; label: string }>>([]);
-  const [walletOffers, setWalletOffers] = useState<Array<{ label: string; cost: number }>>([]);
+  const [walletOffers, setWalletOffers] = useState<Array<{ type: string; label: string; cost: number; description?: string }>>([]);
+  const [economicsConfig, setEconomicsConfig] = useState<{ daily_earn_cap?: number; monthly_earn_cap?: number; streak_cap_days?: number; reward_texture?: string; passport_label?: string; redeem_hint?: string } | null>(null);
+  const [receiptRewardsConfig, setReceiptRewardsConfig] = useState<{ currency?: string; daily_min?: number; daily_max?: number; streak_bonus?: number; streak_days?: number } | null>(null);
   const [walletHint, setWalletHint] = useState('');
   const [referralConfig, setReferralConfig] = useState<{ currency?: string; shop?: number; supplier?: number; next_bonus_invites?: number; next_bonus_amount?: number; pair_bonus_amount?: number } | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrStep, setQrStep] = useState<'scan' | 'product' | 'price' | 'reward'>('scan');
-  const [survey, setSurvey] = useState({ price: '', stock: 'Full', repeat: 'Yes', cleanliness: 4, product: '' });
+  const [survey, setSurvey] = useState({ price: '', stock: 'Full', repeat: 'Yes', cleanliness: 4, product: '', locationTag: '' });
   const [quantity, setQuantity] = useState(1);
   const [sellerId, setSellerId] = useState('');
   const [qrPayload, setQrPayload] = useState('');
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'found' | 'error'>('idle');
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<RewardsQrScanResponse | null>(null);
+  const [guestClaimStatus, setGuestClaimStatus] = useState<string | null>(null);
+  const [guestClaimed, setGuestClaimed] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scanActiveRef = useRef(false);
@@ -73,6 +77,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   const [fraudWarning, setFraudWarning] = useState<string | null>(null);
   const [receiptUploads, setReceiptUploads] = useState<Array<{ id: string; merchantName: string; totalAmount: number; rewardIssued: number; status: string }>>([]);
   const [receiptStreak, setReceiptStreak] = useState(0);
+  const [scanStreak, setScanStreak] = useState(0);
   const [referralPhone, setReferralPhone] = useState('');
   const [referralsCount, setReferralsCount] = useState(0);
   const [showReceiptQueue, setShowReceiptQueue] = useState(false);
@@ -96,7 +101,6 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
 
   useEffect(() => {
     if (openQrOnMount) {
-      setActiveTab('wallet');
       setShowQrModal(true);
       setQrStep('scan');
       onOpenQrHandled?.();
@@ -120,9 +124,11 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
       getOpsConfig('rewards.milestones').catch(() => null),
       getOpsConfig('rewards.wallet_offers').catch(() => null),
       getOpsConfig('rewards.wallet_copy').catch(() => null),
+      getOpsConfig('rewards.economics').catch(() => null),
+      getOpsConfig('rewards.receipts').catch(() => null),
       getOpsConfig('rewards.referrals').catch(() => null),
     ])
-      .then(([milestonesResp, offersResp, walletCopyResp, referralsResp]) => {
+      .then(([milestonesResp, offersResp, walletCopyResp, economicsResp, receiptsResp, referralsResp]) => {
         if (!active) return;
         const items = Array.isArray(milestonesResp?.value) ? milestonesResp.value : [];
         setMilestones(items);
@@ -130,13 +136,17 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         setWalletOffers(
           offers
             .map((item: any) => ({
+              type: String(item?.type || item?.payout_type || item?.label || '').toLowerCase().replace(/\s+/g, '-'),
               label: String(item?.label || ''),
               cost: Number(item?.cost ?? 0),
+              description: String(item?.description || ''),
             }))
             .filter((item: any) => item.label && Number.isFinite(item.cost) && item.cost > 0)
         );
         const hint = String((walletCopyResp as any)?.value?.wallet_hint || '');
         setWalletHint(hint);
+        setEconomicsConfig((economicsResp as any)?.value ?? null);
+        setReceiptRewardsConfig((receiptsResp as any)?.value ?? null);
         setReferralConfig((referralsResp as any)?.value ?? null);
       })
       .catch(() => {
@@ -144,6 +154,8 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         setMilestones([]);
         setWalletOffers([]);
         setWalletHint('');
+        setEconomicsConfig(null);
+        setReceiptRewardsConfig(null);
         setReferralConfig(null);
       });
     return () => {
@@ -176,7 +188,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         setBuyerPayouts((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
           id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
           amount: Number(entry.amount || 0),
-          reason: entry.type || entry.reason || 'Reward',
+          reason: formatLedgerReason(entry),
           timestamp: new Date(entry.created_at || Date.now()).getTime()
         })));
         setReceiptUploads((receiptsResp || []).map((rec: RewardsReceipt) => ({
@@ -188,6 +200,8 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         })));
         const receiptStreakEntry = (streaksResp || []).find((s: RewardsStreak) => s.type === 'receipt');
         setReceiptStreak(Number(receiptStreakEntry?.count || 0));
+        const scanStreakEntry = (streaksResp || []).find((s: RewardsStreak) => s.type === 'scan');
+        setScanStreak(Number(scanStreakEntry?.count || 0));
         setReferralsCount((referralsResp || []).length);
         const alerts = Array.isArray(fraudResp) ? fraudResp : [];
         setFraudAlerts(alerts as RewardsFraudAlert[]);
@@ -222,7 +236,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
     setBuyerPayouts((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
       id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
       amount: Number(entry.amount || 0),
-      reason: entry.reason || entry.type || 'Reward',
+      reason: formatLedgerReason(entry),
       timestamp: new Date(entry.created_at || Date.now()).getTime()
     })));
   };
@@ -252,6 +266,8 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
     })));
     const receiptStreakEntry = (streaksResp || []).find((s: RewardsStreak) => s.type === 'receipt');
     setReceiptStreak(Number(receiptStreakEntry?.count || 0));
+    const scanStreakEntry = (streaksResp || []).find((s: RewardsStreak) => s.type === 'scan');
+    setScanStreak(Number(scanStreakEntry?.count || 0));
     setReceiptItems(Array.isArray(receiptItemsResp) ? (receiptItemsResp as ReceiptInventoryItem[]) : []);
     setSellerProducts(Array.isArray(sellerProductsResp) ? (sellerProductsResp as SellerProduct[]) : []);
   };
@@ -510,6 +526,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   };
 
   const openReceiptScanner = async () => {
+    if (!isLoggedIn) {
+      setReceiptUploadStatus('Log in to scan receipts.');
+      return;
+    }
     if (receiptScanOpen || receiptUploading) return;
     setReceiptUploadStatus(null);
     setReceiptScanText(null);
@@ -566,6 +586,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   };
 
   const handleReceiptFileSelected = async (file?: File | null) => {
+    if (!isLoggedIn) {
+      setReceiptUploadStatus('Log in to upload receipts.');
+      return;
+    }
     if (!file) return;
     setReceiptUploading(true);
     setReceiptScanSubmitting(true);
@@ -601,10 +625,93 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
     }
   }, []);
 
+  const authToken = useMemo(() => {
+    try {
+      return getAuthItem('soko:auth_token') || '';
+    } catch {
+      return '';
+    }
+  }, []);
+
+  const visitorId = useMemo(() => {
+    try {
+      return getAuthItem('soko:visitor_id') || '';
+    } catch {
+      return '';
+    }
+  }, []);
+
+  const isLoggedIn = Boolean(authToken);
+
+  useEffect(() => {
+    if (!isLoggedIn || !visitorId || guestClaimed) {
+      return;
+    }
+    let active = true;
+    const claim = async () => {
+      try {
+        const resp = await claimGuestRewards({ visitor_id: visitorId });
+        if (!active) return;
+        setGuestClaimed(true);
+        if (resp?.already_claimed) {
+          setGuestClaimStatus('Guest rewards already claimed to this account.');
+        } else if ((resp?.claimed_balance ?? 0) > 0 || (resp?.claimed_stars ?? 0) > 0) {
+          setGuestClaimStatus(
+            `Claimed ${resp.claimed_balance ?? 0} SC and ${resp.claimed_stars ?? 0} stars from this device.`
+          );
+        } else {
+          setGuestClaimStatus('No guest rewards to claim on this device.');
+        }
+        const [balanceResp, ledgerResp, starsResp, leaderboardResp, streaksResp] = await Promise.allSettled([
+          getRewardsBalance(),
+          getRewardsLedger(),
+          getRewardsStarsSummary(),
+          listRewardsLeaderboard(),
+          getRewardStreaks(),
+        ]);
+        if (balanceResp.status === 'fulfilled') {
+          applyBalanceFromResponse(balanceResp.value);
+        }
+        if (ledgerResp.status === 'fulfilled') {
+          applyLedgerFromResponse(ledgerResp.value || []);
+        }
+        if (starsResp.status === 'fulfilled') {
+          setStarsSummary(starsResp.value as RewardsStarsSummary);
+        }
+        if (leaderboardResp.status === 'fulfilled') {
+          setLeaderboard(Array.isArray(leaderboardResp.value) ? (leaderboardResp.value as RewardsLeaderboardEntry[]) : []);
+        }
+        if (streaksResp.status === 'fulfilled') {
+          const scanStreakEntry = (streaksResp.value || []).find((s: RewardsStreak) => s.type === 'scan');
+          setScanStreak(Number(scanStreakEntry?.count || 0));
+        }
+      } catch {
+        if (!active) return;
+        setGuestClaimStatus('Unable to claim guest rewards right now.');
+      }
+    };
+    claim();
+    return () => {
+      active = false;
+    };
+  }, [guestClaimed, isLoggedIn, visitorId]);
+
   const formatLeaderboardName = (userId: string) => {
     if (!userId) return 'User';
-    if (userId === currentUserId) return 'YOU';
+    if (userId === currentUserId || (!currentUserId && userId === visitorId)) return 'YOU';
     return `User ${userId.slice(0, 4)}`;
+  };
+
+  const formatLedgerReason = (entry: RewardsLedgerEntry) => {
+    const raw = String(entry.reason || entry.type || 'Reward').toLowerCase();
+    if (raw.startsWith('redeem_')) {
+      const payout = raw.replace('redeem_', '').replace(/_/g, ' ');
+      return `${payout.charAt(0).toUpperCase()}${payout.slice(1)} payout`;
+    }
+    if (raw === 'claim_guest_rewards') return 'Guest rewards claimed';
+    if (raw === 'qr_reward') return 'QR scan reward';
+    if (raw === 'receipt_reward') return 'Receipt reward';
+    return entry.reason || entry.type || 'Reward';
   };
 
   const parseSellerIdFromPayload = (payload: string) => {
@@ -638,6 +745,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
 
 
   const handleReferral = async () => {
+    if (!isLoggedIn) {
+      setGuestClaimStatus('Log in to send referrals.');
+      return;
+    }
     if (!referralPhone.trim()) return;
     try {
       await createReferral({ invitee_phone: referralPhone.trim() });
@@ -652,7 +763,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
       setBuyerPayouts((ledgerResp || []).map((entry: any) => ({
         id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
         amount: Number(entry.amount || 0),
-        reason: entry.reason || entry.type || 'Reward',
+        reason: formatLedgerReason(entry),
         timestamp: new Date(entry.created_at || Date.now()).getTime()
       })));
       setReferralPhone('');
@@ -663,6 +774,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   };
 
   const handleReceiptQueueSync = async () => {
+    if (!isLoggedIn) {
+      setReceiptQueueMessage('Log in to sync receipts.');
+      return;
+    }
     setReceiptQueueLoading(true);
     setReceiptQueueMessage(null);
     try {
@@ -690,6 +805,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   };
 
   const handleVerifyReceiptItem = async (item: ReceiptInventoryItem) => {
+    if (!isLoggedIn) {
+      setError('Log in to verify receipt items.');
+      return;
+    }
     try {
       const target = receiptMergeTargets[item.id] || '';
       await updateReceiptInventoryItem(item.id, { status: 'verified', seller_product_id: target || undefined });
@@ -700,6 +819,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   };
 
   const handleResetReceiptStreak = async () => {
+    if (!isLoggedIn) {
+      setError('Log in to reset receipt streaks.');
+      return;
+    }
     try {
       await resetRewardStreaks({ type: 'receipt' });
       await refreshReceiptsAndStreaks();
@@ -708,9 +831,13 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
     }
   };
 
-  const handleRedeemWallet = async (reward: { label: string; cost: number }) => {
+  const handleRedeemWallet = async (reward: { label: string; cost: number; type?: string }) => {
+    if (!isLoggedIn) {
+      setGuestClaimStatus('Log in to redeem guest rewards.');
+      return;
+    }
     try {
-      await redeemRewards({ amount: reward.cost });
+      await redeemRewards({ amount: reward.cost, payout_type: reward.type });
       await refreshBalanceAndLedger();
     } catch (err: any) {
       setError(`Unable to redeem ${reward.label}.`);
@@ -737,18 +864,30 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         quantity,
         stock_status: survey.stock,
         repeat_purchase: survey.repeat,
+        location_tag: survey.locationTag.trim() || undefined,
         cleanliness: survey.cleanliness,
         gps_distance_m: distanceMeters ?? undefined,
         gps_verified: gpsStatus === 'verified'
       };
       const resp = await submitRewardsQrScan(payload);
       setScanResult(resp);
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate?.([40, 20, 40]);
+        } catch {}
+      }
       if (typeof resp?.balance === 'number') {
         setBuyerCoins(resp.balance);
       } else {
         await refreshBalanceAndLedger();
       }
-      await refreshStarsAndLeaderboard();
+      if (!isLoggedIn) {
+        setGuestClaimStatus('Scan saved on this device. Log in to claim and redeem.');
+      }
+      await Promise.allSettled([
+        refreshStarsAndLeaderboard(),
+        refreshReceiptsAndStreaks(),
+      ]);
       setQrStep('reward');
     } catch (err: any) {
       setError('Unable to submit QR scan.');
@@ -763,8 +902,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black">SC</div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">Stars Dashboard</p>
-              <p className="text-sm font-bold text-zinc-900">Rewards</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">
+                {economicsConfig?.passport_label || 'Rewards Passport'}
+              </p>
+              <p className="text-sm font-bold text-zinc-900">SC Wallet + Scan Rewards</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -776,20 +917,8 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
             </div>
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-2">
-          {[
-            { id: 'stars', label: 'Stars Dashboard' },
-            { id: 'wallet', label: 'SC Wallet' },
-            { id: 'receipts', label: 'Receipts & Rewards' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as 'stars' | 'wallet' | 'receipts')}
-              className={`px-4 py-2 rounded-full text-[10px] font-black ${activeTab === tab.id ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-slate-500">
+          One rewards journey with scans, wallets, receipts, referrals, and progress in a single feed.
         </div>
       </div>
 
@@ -799,17 +928,26 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
             {error}
           </div>
         )}
+        {!isLoggedIn && (
+          <div className="bg-blue-50 border border-blue-100 text-blue-700 text-[11px] font-bold rounded-2xl px-4 py-3">
+            Scan first. Log in later to claim and redeem SC as airtime, data, or M-Pesa.
+          </div>
+        )}
+        {guestClaimStatus && (
+          <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-2xl px-4 py-3">
+            {guestClaimStatus}
+          </div>
+        )}
         {loading && (
           <div className="bg-white rounded-2xl border border-blue-100 p-5 text-[11px] font-bold text-zinc-500">
             Loading rewards...
           </div>
         )}
-        {activeTab === 'receipts' && (
-          <>
+        <>
             <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
               <div className="flex items-center gap-2 mb-3">
                 <Receipt className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Receipt Upload Rewards</h3>
+                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Receipt Capture</h3>
               </div>
               <p className="text-[10px] text-slate-500 font-bold">Scan a receipt to auto-read items and sync inventory.</p>
               <div className="mt-4 space-y-3">
@@ -817,7 +955,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                   <button
                     onClick={openReceiptScanner}
                     className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
-                    disabled={receiptUploading || receiptScanSubmitting}
+                    disabled={!isLoggedIn || receiptUploading || receiptScanSubmitting}
                   >
                     <CameraIcon className="w-4 h-4 inline-block mr-2" />
                     Scan Receipt
@@ -830,14 +968,24 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                       accept="image/*"
                       className="hidden"
                       onChange={(e) => {
+                        if (!isLoggedIn) {
+                          setReceiptUploadStatus('Log in to upload receipts.');
+                          e.currentTarget.value = '';
+                          return;
+                        }
                         const file = e.target.files?.[0];
                         e.currentTarget.value = '';
                         handleReceiptFileSelected(file);
                       }}
-                      disabled={receiptUploading || receiptScanSubmitting}
+                      disabled={!isLoggedIn || receiptUploading || receiptScanSubmitting}
                     />
                   </label>
                 </div>
+                {!isLoggedIn && (
+                  <div className="p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
+                    Receipt capture unlocks after login.
+                  </div>
+                )}
                 {receiptUploadStatus && (
                   <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
                     {receiptUploadStatus}
@@ -854,7 +1002,15 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                   </div>
                 )}
                 <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
-                  Streak: {receiptStreak} days • Bonus at 7 days (KES 50) and 30 days (KES 200)
+                  Receipt streak: {receiptStreak} days
+                  {receiptRewardsConfig
+                    ? ` • Bonus at ${receiptRewardsConfig.streak_days ?? '—'} days (${receiptRewardsConfig.currency ? `${receiptRewardsConfig.currency} ` : ''}${receiptRewardsConfig.streak_bonus ?? '—'})`
+                    : ' • Receipt rewards configured in ops.'}
+                  {receiptRewardsConfig?.daily_min !== undefined && receiptRewardsConfig?.daily_max !== undefined
+                    ? ` • Daily range ${receiptRewardsConfig.currency ? `${receiptRewardsConfig.currency} ` : ''}${receiptRewardsConfig.daily_min}–${receiptRewardsConfig.daily_max}`
+                    : ''}
+                  <br />
+                  Scan streak: {scanStreak} day{scanStreak === 1 ? '' : 's'} • Cap {economicsConfig?.streak_cap_days ?? 7}
                 </div>
                 <button
                   onClick={async () => {
@@ -967,14 +1123,21 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                   placeholder="Friend's phone number"
                   value={referralPhone}
                   onChange={(e) => setReferralPhone(e.target.value)}
+                  disabled={!isLoggedIn}
                 />
                 <button
                   onClick={handleReferral}
                   className="px-4 py-3 bg-amber-500 text-white rounded-xl text-[10px] font-black"
+                  disabled={!isLoggedIn}
                 >
                   Invite
                 </button>
               </div>
+              {!isLoggedIn && (
+                <div className="mt-3 p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
+                  Referral rewards unlock after login.
+                </div>
+              )}
               <div className="mt-3 text-[10px] font-bold text-slate-600">
                 {referralConfig ? (
                   <>
@@ -992,11 +1155,9 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               </div>
             </section>
 
-          </>
-        )}
+        </>
 
-        {activeTab === 'wallet' && (
-          <>
+        <>
             <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -1017,6 +1178,13 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               <p className="mt-3 text-[10px] text-slate-500 font-bold">
                 {walletHint || 'Scan QR codes to earn SC rewards.'}
               </p>
+              {economicsConfig && (
+                <div className="mt-3 p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-600">
+                  Caps: {economicsConfig.daily_earn_cap ?? '—'} SC/day • {economicsConfig.monthly_earn_cap ?? '—'} SC/month
+                  {economicsConfig.streak_cap_days ? ` • Streak cap ${economicsConfig.streak_cap_days} days` : ''}
+                  {economicsConfig.redeem_hint ? ` • ${economicsConfig.redeem_hint}` : ''}
+                </div>
+              )}
             </section>
 
             <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
@@ -1024,6 +1192,11 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                 <Wallet className="w-4 h-4 text-emerald-600" />
                 <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Redeem SC</h3>
               </div>
+              {!isLoggedIn && (
+                <div className="mb-3 p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
+                  Redemption requires login. Guest scans are saved to this device until you sign in.
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3 text-[10px] font-bold">
                 {walletOffers.length === 0 && (
                   <div className="col-span-2 p-3 bg-slate-50 rounded-2xl text-slate-500">
@@ -1032,12 +1205,20 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                 )}
                 {walletOffers.map(reward => (
                   <button
-                    key={reward.label}
-                    onClick={() => handleRedeemWallet(reward)}
-                    className="p-3 bg-blue-50 rounded-2xl text-blue-700 hover:bg-blue-100"
+                    key={reward.type || reward.label}
+                    onClick={() => {
+                      if (!isLoggedIn) {
+                        setGuestClaimStatus('Log in to redeem guest rewards.');
+                        return;
+                      }
+                      handleRedeemWallet(reward);
+                    }}
+                    disabled={!isLoggedIn}
+                    className={`p-3 rounded-2xl text-left ${isLoggedIn ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
                   >
-                      {reward.label}
-                    </button>
+                    <div className="font-black">{reward.label}</div>
+                    <div className="text-[9px] text-blue-500">{reward.cost} SC{reward.description ? ` • ${reward.description}` : ''}</div>
+                  </button>
                 ))}
               </div>
             </section>
@@ -1087,11 +1268,9 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                 </div>
               </section>
 
-          </>
-        )}
+        </>
 
-          {activeTab === 'stars' && (
-          <>
+        <>
         {/* Leaderboard */}
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -1157,7 +1336,9 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
             <Trophy className="w-4 h-4 text-blue-600" />
-            <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Reward Unlocks</h3>
+            <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">
+              {economicsConfig?.passport_label || 'Reward Unlocks'}
+            </h3>
           </div>
           <div className="space-y-3">
             {milestones.length === 0 && (
@@ -1186,7 +1367,9 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         {/* Footer CTA */}
         <section className="bg-blue-600 text-white rounded-3xl p-5 flex items-center justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-widest text-blue-100">Rewards</p>
+            <p className="text-xs font-black uppercase tracking-widest text-blue-100">
+              {economicsConfig?.passport_label || 'Rewards'}
+            </p>
             <p className="text-sm font-bold">
               {nextMilestone ? `Free Pro in ${Math.max(0, nextMilestone.stars - currentStars)}⭐` : 'Earn stars to unlock rewards'}
             </p>
@@ -1197,17 +1380,19 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         </section>
 
         </>
-        )}
       </div>
 
       {showQrModal && (
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
           <div className="w-full max-w-sm bg-white rounded-3xl overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between">
-              <div className="text-xs font-black text-slate-800">QR Scan (Unlimited)</div>
+              <div className="text-xs font-black text-slate-800">QR Scan and Earn</div>
               <button onClick={closeQrModal} className="text-slate-400" aria-label="Close QR scanner">✕</button>
             </div>
             <div className="p-5 space-y-4">
+              <div className="p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
+                Earn on this device now. Log in later to claim and redeem.
+              </div>
               {qrStep === 'scan' && (
                 <>
                   <div className="space-y-3">
@@ -1354,6 +1539,12 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                       value={survey.product}
                       onChange={(e) => setSurvey(prev => ({ ...prev, product: e.target.value }))}
                     />
+                    <input
+                      className="p-3 bg-slate-100 rounded-xl text-slate-900 w-full"
+                      placeholder="Location tag like Eastlands, CBD, or your market"
+                      value={survey.locationTag}
+                      onChange={(e) => setSurvey(prev => ({ ...prev, locationTag: e.target.value }))}
+                    />
                   </div>
                   <button
                     onClick={() => setQrStep('price')}
@@ -1441,7 +1632,17 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               {qrStep === 'reward' && (
                 <>
                   <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-700 text-[10px] font-bold">
-                    ✅ Scan complete! +{scanResult?.rewards_issued ?? 0} SC • Balance: {buyerCoins} SC
+                    ✅ Scan complete! +{scanResult?.rewards_issued ?? 0} SC
+                    {typeof scanResult?.raw_rewards === 'number' && scanResult.raw_rewards !== scanResult?.rewards_issued
+                      ? ` (from ${scanResult.raw_rewards} raw)`
+                      : ''}
+                    • Balance: {buyerCoins} SC
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
+                    Layer {scanResult?.layer ?? 1}: {scanResult?.layer_label || 'Casual'} • {scanResult?.reward_texture || economicsConfig?.reward_texture || 'Airtime Surge'}
+                    <br />
+                    Scan streak: {scanResult?.scan_streak ?? scanStreak} day{(scanResult?.scan_streak ?? scanStreak) === 1 ? '' : 's'}
+                    {scanResult?.streak_cap ? ` • Cap ${scanResult.streak_cap}` : ''}
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
                     {walletOffers.slice(0, 2).map((offer) => (
@@ -1460,7 +1661,34 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                     {typeof scanResult?.raw_stars === 'number' && scanResult.raw_stars !== scanResult?.stars_awarded
                       ? ` (from ${scanResult.raw_stars} raw)`
                       : ''}
-                    • Product: {survey.product || 'Item'} • Qty: {quantity} • Repeat: {survey.repeat}.
+                    • Product: {survey.product || 'Item'} • Qty: {quantity} • Repeat: {survey.repeat}
+                    {(scanResult?.location_tag || survey.locationTag) ? ` • Location: ${scanResult?.location_tag || survey.locationTag}` : ''}
+                    {economicsConfig?.reward_texture ? ` • ${economicsConfig.reward_texture}` : ''}.
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
+                    <div className="p-3 bg-slate-50 rounded-2xl text-slate-700">
+                      Time bonus
+                      <div className="mt-1 text-base font-black text-slate-900">+{Number(scanResult?.time_bonus ?? 0).toFixed(2)}</div>
+                      <div className="mt-1 text-[10px] text-slate-500">{scanResult?.time_label || 'No time bonus'}</div>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-2xl text-slate-700">
+                      Place bonus
+                      <div className="mt-1 text-base font-black text-slate-900">+{Number(scanResult?.place_bonus ?? 0).toFixed(2)}</div>
+                      <div className="mt-1 text-[10px] text-slate-500">{scanResult?.place_label || 'No place bonus'}</div>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-2xl text-slate-700">
+                      Passport
+                      <div className="mt-1 text-base font-black text-slate-900">+{Number(scanResult?.passport_bonus ?? 0).toFixed(2)}</div>
+                      <div className="mt-1 text-[10px] text-slate-500">
+                        {scanResult?.passport_zone || economicsConfig?.passport_label || 'Shop Passport'}
+                        {scanResult?.passport_threshold ? ` • ${scanResult.passport_count ?? 0}/${scanResult.passport_threshold}` : ''}
+                      </div>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-2xl text-slate-700">
+                      Growth score
+                      <div className="mt-1 text-base font-black text-slate-900">{Number(scanResult?.growth_score ?? 0).toFixed(2)}</div>
+                      <div className="mt-1 text-[10px] text-slate-500">Seller growth signal from this scan</div>
+                    </div>
                   </div>
                   {Array.isArray(scanResult?.breakdown) && scanResult.breakdown.length > 0 && (
                     <div className="p-3 bg-white rounded-2xl border border-zinc-200 text-[10px] text-zinc-700">
@@ -1485,13 +1713,18 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                       Final score capped at {scanResult.stars_awarded} stars from {scanResult.raw_stars} raw stars.
                     </div>
                   )}
+                  {typeof scanResult?.raw_rewards === 'number' && typeof scanResult?.rewards_issued === 'number' && scanResult.raw_rewards > scanResult.rewards_issued && (
+                    <div className="p-3 bg-amber-50 rounded-2xl text-[10px] text-amber-800 font-bold">
+                      SC cap applied: {scanResult.rewards_issued} issued from {scanResult.raw_rewards} raw credits.
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       setQrStep('scan');
                       closeQrModal();
                       setQrPayload('');
                       setSellerId('');
-                      setSurvey({ price: '', stock: 'Full', repeat: 'Yes', cleanliness: 4, product: '' });
+                      setSurvey({ price: '', stock: 'Full', repeat: 'Yes', cleanliness: 4, product: '', locationTag: '' });
                       setQuantity(1);
                       setGpsStatus('idle');
                       setDistanceMeters(null);
