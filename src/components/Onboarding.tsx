@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronRight, CheckCircle2, Info, TrendingUp, Sparkles, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ChevronRight, Info, ShoppingBag, Sparkles, Store, TrendingUp, X } from 'lucide-react';
 import { completeOnboarding, recordOnboardingEvent } from '../lib/onboardingApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 
@@ -26,9 +26,10 @@ type Slide = {
 const DEFAULT_SLIDES: Slide[] = [
   {
     title: 'Welcome to Sconnect',
-    subtitle: 'Find and sell with confidence.',
-    highlight: 'Live demand insights',
-    tooltip: 'Demand signals appear once your shop is active.',
+    subtitle: 'Buyers discover, compare, and earn rewards. Sellers grow visibility and reach more customers.',
+    highlight: 'Connected commerce for both sides',
+    tooltip: 'Sconnect brings everyday buying and selling into one place.',
+    summary: 'One platform for shopping, selling, and growing together.',
     preview: 'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
     type: 'welcome'
   },
@@ -271,13 +272,101 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onFinish }) => {
                   </div>
                 )}
 
-                <div className="mt-5">
-                  <div className="relative h-40 rounded-2xl overflow-hidden border border-blue-100">
-                    <img src={slide.preview} alt="Preview" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 via-transparent to-transparent" />
-                    <div className="absolute bottom-2 left-2 text-[10px] font-black uppercase tracking-widest text-white/90">Preview</div>
+                {slide.type === 'welcome' ? (
+                  <div className="mt-5 space-y-4">
+                    <div className="rounded-[28px] bg-gradient-to-br from-blue-600 via-sky-500 to-cyan-400 p-[1px] shadow-[0_20px_60px_rgba(37,99,235,0.18)]">
+                      <div className="rounded-[27px] overflow-hidden bg-white/95 backdrop-blur">
+                        <div className="grid gap-3 p-4 md:grid-cols-[1fr_auto_1fr] md:p-5">
+                          <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase tracking-[0.28em] text-blue-600">Buyer</span>
+                              <ShoppingBag className="w-4 h-4 text-blue-600" />
+                            </div>
+                            <div className="mt-4 h-24 rounded-2xl bg-white border border-slate-100 p-3 flex flex-col justify-between">
+                              <div>
+                                <div className="text-sm font-black text-slate-900">Discover and compare</div>
+                                <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                                  Find products, compare prices, and see rewards as you shop.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] font-black text-blue-600">
+                                <span className="px-2 py-1 rounded-full bg-blue-50">Search</span>
+                                <span className="px-2 py-1 rounded-full bg-blue-50">Compare</span>
+                                <span className="px-2 py-1 rounded-full bg-blue-50">Earn</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-center py-2 md:py-0">
+                            <div className="relative flex flex-col items-center">
+                              <div className="absolute inset-0 -m-6 rounded-full bg-blue-200/60 blur-xl" />
+                              <div className="relative w-16 h-16 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black shadow-lg">
+                                SC
+                              </div>
+                              <div className="mt-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
+                                <ArrowRight className="w-3 h-3 text-blue-600" />
+                                Connected commerce
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-3xl border border-slate-950 bg-slate-950 p-4 text-white">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase tracking-[0.28em] text-cyan-300">Seller</span>
+                              <Store className="w-4 h-4 text-cyan-300" />
+                            </div>
+                            <div className="mt-4 h-24 rounded-2xl bg-white/5 border border-white/10 p-3 flex flex-col justify-between">
+                              <div>
+                                <div className="text-sm font-black">Sell and grow</div>
+                                <p className="mt-1 text-[10px] leading-4 text-slate-300">
+                                  Reach more customers, manage products, and track demand.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] font-black text-cyan-300">
+                                <span className="px-2 py-1 rounded-full bg-white/10">Visibility</span>
+                                <span className="px-2 py-1 rounded-full bg-white/10">Insights</span>
+                                <span className="px-2 py-1 rounded-full bg-white/10">Growth</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-4 md:px-5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {['Buy better', 'Sell smarter', 'Grow together', 'Rewards built in'].map((label) => (
+                              <span key={label} className="px-3 py-1.5 rounded-full bg-white border border-blue-100 text-[10px] font-black text-slate-700">
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-3 text-[10px] font-bold leading-4 text-slate-500">
+                            Sconnect is the connected marketplace where buyers discover products, sellers reach customers, and commerce moves in one place.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { title: 'For buyers', value: 'Discover, compare, and earn rewards.' },
+                        { title: 'For sellers', value: 'List products, grow visibility, and sell more.' }
+                      ].map((item) => (
+                        <div key={item.title} className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3">
+                          <div className="text-[9px] font-black uppercase tracking-[0.24em] text-blue-600">{item.title}</div>
+                          <div className="mt-1 text-[10px] font-bold leading-4 text-slate-600">{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="mt-5">
+                    <div className="relative h-40 rounded-2xl overflow-hidden border border-blue-100">
+                      <img src={slide.preview} alt="Preview" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 via-transparent to-transparent" />
+                      <div className="absolute bottom-2 left-2 text-[10px] font-black uppercase tracking-widest text-white/90">Preview</div>
+                    </div>
+                  </div>
+                )}
 
                 {slide.type === 'stars' && (
                   <div className="mt-5 space-y-3">

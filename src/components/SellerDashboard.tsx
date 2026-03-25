@@ -33,6 +33,12 @@ import {
   getSellerPeakHours,
   getSellerDataQuality,
   getSellerConversionSeries,
+  getSellerPerformanceAnalysis,
+  getSellerProductPerformance,
+  getSellerPricingCompetitiveAnalysis,
+  getSellerCategoryHealthAnalysis,
+  getSellerDemandStockAnalysis,
+  getSellerActionRecommendations,
   getSellerTopProducts,
   getSellerSalesVelocity,
   getSellerSalesSeries,
@@ -57,7 +63,13 @@ import {
   type TopProductItem,
   type SalesSeriesItem,
   type SalesVelocityItem,
-  type SellerAlert
+  type SellerAlert,
+  type PerformanceAnalysis,
+  type ProductPerformanceAnalysis,
+  type PricingCompetitiveAnalysis,
+  type CategoryHealthAnalysis,
+  type DemandStockAnalysis,
+  type ActionRecommendations
 } from '../lib/sellerAnalyticsApi';
 import { buildWsUrl } from '../lib/realtime';
 import {
@@ -757,6 +769,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [analyticsConversionSeries, setAnalyticsConversionSeries] = useState<ConversionSeriesItem[]>([]);
   const [analyticsTopProducts, setAnalyticsTopProducts] = useState<TopProductItem[]>([]);
   const [analyticsDataQuality, setAnalyticsDataQuality] = useState<DataQuality | null>(null);
+  const [analyticsPerformanceV2, setAnalyticsPerformanceV2] = useState<PerformanceAnalysis | null>(null);
+  const [analyticsProductPerformanceV2, setAnalyticsProductPerformanceV2] = useState<ProductPerformanceAnalysis | null>(null);
+  const [analyticsPricingV2, setAnalyticsPricingV2] = useState<PricingCompetitiveAnalysis | null>(null);
+  const [analyticsCategoryHealthV2, setAnalyticsCategoryHealthV2] = useState<CategoryHealthAnalysis | null>(null);
+  const [analyticsDemandStockV2, setAnalyticsDemandStockV2] = useState<DemandStockAnalysis | null>(null);
+  const [analyticsActionsV2, setAnalyticsActionsV2] = useState<ActionRecommendations | null>(null);
   const [, setAnalyticsStatus] = useState<string | null>(null);
   const [salesSeriesDays, setSalesSeriesDays] = useState<number | undefined>(undefined);
   const [salesVelocityDays, setSalesVelocityDays] = useState<number | undefined>(undefined);
@@ -1472,7 +1490,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
     const loadOnce = async () => {
       try {
-        const [summary, funnel, inventory, buyers, market, anomalies, channelMix, demographics, marketDemand, marketTrending, trendingSuppliers, liveBuyers, peakHours, salesSeries, inventorySeries, conversionSeries, dataQuality, topProducts, stockRecommendations] = await Promise.all([
+        const [summary, funnel, inventory, buyers, market, anomalies, channelMix, demographics, marketDemand, marketTrending, trendingSuppliers, liveBuyers, peakHours, salesSeries, inventorySeries, conversionSeries, dataQuality, topProducts, stockRecommendations, performanceV2, productPerformanceV2, pricingV2, categoryHealthV2, demandStockV2, actionsV2] = await Promise.all([
           getSellerKpiSummary(),
           getSellerFunnel(),
           getSellerInventoryInsight(),
@@ -1494,7 +1512,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             backendSeriesDays(topProductsDays),
             Number.isFinite(topProductsLimit) ? topProductsLimit : undefined
           ),
-          listSellerRecommendations('stock')
+          listSellerRecommendations('stock'),
+          getSellerPerformanceAnalysis(backendSeriesDays(salesSeriesDays)),
+          getSellerProductPerformance(30, 20),
+          getSellerPricingCompetitiveAnalysis(30, 30),
+          getSellerCategoryHealthAnalysis(30),
+          getSellerDemandStockAnalysis(),
+          getSellerActionRecommendations()
         ]);
         if (cancelled) return;
         setAnalyticsSummary(summary);
@@ -1516,6 +1540,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setAnalyticsDataQuality(dataQuality);
         setAnalyticsTopProducts(topProducts);
         setSellerRecommendations(stockRecommendations);
+        setAnalyticsPerformanceV2(performanceV2);
+        setAnalyticsProductPerformanceV2(productPerformanceV2);
+        setAnalyticsPricingV2(pricingV2);
+        setAnalyticsCategoryHealthV2(categoryHealthV2);
+        setAnalyticsDemandStockV2(demandStockV2);
+        setAnalyticsActionsV2(actionsV2);
       } catch (err: any) {
         if (!cancelled) setAnalyticsStatus(err?.message || 'Unable to load analytics.');
       }
@@ -2837,6 +2867,49 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     })
     .filter((item): item is string => Boolean(item))
     .slice(0, 3);
+
+  const performanceGrowthPct = Number(analyticsPerformanceV2?.sales_growth_pct ?? 0);
+  const performanceTopCategories = (analyticsPerformanceV2?.category_revenue_share || [])
+    .slice(0, 3)
+    .map((item) => ({
+      name: item.category || 'Category',
+      share: Number(item.share_pct ?? 0),
+      revenue: Number(item.revenue ?? 0),
+    }));
+
+  const demandStockItems = analyticsDemandStockV2?.items || [];
+  const stockoutRiskItems = demandStockItems
+    .filter((item) => item.stockout_risk)
+    .sort((a, b) => Number(a.stock_coverage_days ?? 999) - Number(b.stock_coverage_days ?? 999))
+    .slice(0, 5);
+
+  const pricingOpportunities = (analyticsPricingV2?.items || [])
+    .map((item) => {
+      const market = Number(item.market_avg_price ?? 0);
+      const store = Number(item.store_avg_price ?? 0);
+      if (market <= 0) return null;
+      const deltaPct = ((store - market) / market) * 100;
+      return {
+        name: item.name || 'Product',
+        category: item.category || 'General',
+        deltaPct,
+        store,
+        market,
+      };
+    })
+    .filter((item): item is { name: string; category: string; deltaPct: number; store: number; market: number } => Boolean(item))
+    .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))
+    .slice(0, 4);
+
+  const slowMoverCount = (analyticsProductPerformanceV2?.items || []).filter((item) => item.slow_mover).length;
+  const highGrowthCategoryCount = (analyticsCategoryHealthV2?.items || []).filter((item) => Number(item.growth_pct ?? 0) > 10).length;
+
+  const actionNowCards = [
+    ...(analyticsActionsV2?.stock_more || []).slice(0, 2),
+    ...(analyticsActionsV2?.raise_prices || []).slice(0, 2),
+    ...(analyticsActionsV2?.lower_prices || []).slice(0, 2),
+    ...(analyticsActionsV2?.reduce_drop || []).slice(0, 2),
+  ].slice(0, 6);
 
   const demandHeatmap = marketingHotspots
     .map((h, i) => {
@@ -4311,6 +4384,55 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
 
   const handleOpenProductsTab = () => {
     setActiveTab('products');
+  };
+
+  const findProductForAction = (productId?: string, name?: string) => {
+    if (!productId && !name) return null;
+    const byId = myProducts.find((p) => p.id === productId || p.productId === productId);
+    if (byId) return byId;
+    if (!name) return null;
+    const target = name.trim().toLowerCase();
+    return myProducts.find((p) => p.name.trim().toLowerCase() === target) || null;
+  };
+
+  const handleActionCard = (item: { action?: string; product_id?: string; name?: string; value?: number }) => {
+    const action = String(item.action || '').toLowerCase();
+    const product = findProductForAction(item.product_id, item.name);
+    setActiveTab('products');
+    if (!product) {
+      setProductsStatus('Open product list to apply this recommendation manually.');
+      return;
+    }
+
+    handleEditProduct(product);
+
+    if (action === 'stock_more') {
+      const suggested = Number(item.value ?? 0);
+      if (Number.isFinite(suggested) && suggested > 0) {
+        const nextStock = Math.max(0, Number(product.stockLevel || 0) + Math.round(suggested));
+        setFormData((prev) => ({ ...prev, stockLevel: nextStock }));
+      }
+      setProductsStatus(`Restock suggestion loaded for ${product.name}.`);
+      return;
+    }
+
+    if (action === 'raise_price' || action === 'lower_price') {
+      const delta = Number(item.value ?? 0);
+      if (Number.isFinite(delta) && delta > 0) {
+        const sign = action === 'raise_price' ? 1 : -1;
+        const nextPrice = Math.max(1, Number(product.price || 0) + sign * delta);
+        setFormData((prev) => ({ ...prev, price: nextPrice.toFixed(2) }));
+      }
+      setProductsStatus(`Price recommendation loaded for ${product.name}.`);
+      return;
+    }
+
+    if (action === 'reduce_drop') {
+      setProductsStatus(`Review ${product.name} for markdown or replacement.`);
+      return;
+    }
+
+    setProductsStatus('Recommendation loaded for review.');
   };
 
   const handleQuickBoost = () => {
@@ -6164,6 +6286,90 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
               </div>
             </div>
+
+            <div className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Core Analyses (v2)</h3>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-black ${performanceGrowthPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    Sales {performanceGrowthPct >= 0 ? '+' : ''}{performanceGrowthPct.toFixed(1)}%
+                  </span>
+                  <span className="text-[10px] font-black text-amber-600">Slow movers {slowMoverCount}</span>
+                  <span className="text-[10px] font-black text-indigo-600">Growing categories {highGrowthCategoryCount}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  <p className="text-[10px] font-black uppercase text-zinc-400 mb-2">Category Revenue Share</p>
+                  <div className="space-y-2 text-[10px] font-bold text-zinc-700">
+                    {performanceTopCategories.length === 0 && <div className="text-zinc-400">No category split yet.</div>}
+                    {performanceTopCategories.map((item) => (
+                      <div key={item.name} className="flex items-center justify-between">
+                        <span>{item.name}</span>
+                        <span>{item.share.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  <p className="text-[10px] font-black uppercase text-zinc-400 mb-2">Stock-Out Risks (&lt;3 days)</p>
+                  <div className="space-y-2 text-[10px] font-bold text-zinc-700">
+                    {stockoutRiskItems.length === 0 && <div className="text-zinc-400">No immediate stock-out risk.</div>}
+                    {stockoutRiskItems.map((item) => (
+                      <div key={`${item.seller_product_id || item.product_id || item.name}`} className="flex items-center justify-between">
+                        <span className="truncate pr-2">{item.name || item.product_id || 'Product'}</span>
+                        <span>{Number(item.stock_coverage_days ?? 0).toFixed(1)}d</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-2xl">
+                  <p className="text-[10px] font-black uppercase text-zinc-400 mb-2">Pricing Gaps vs Market</p>
+                  <div className="space-y-2 text-[10px] font-bold text-zinc-700">
+                    {pricingOpportunities.length === 0 && <div className="text-zinc-400">No pricing delta data yet.</div>}
+                    {pricingOpportunities.map((item) => (
+                      <div key={`${item.name}-${item.category}`} className="flex items-center justify-between">
+                        <span className="truncate pr-2">{item.name}</span>
+                        <span className={item.deltaPct >= 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                          {item.deltaPct >= 0 ? '+' : ''}{item.deltaPct.toFixed(1)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-[10px] font-black uppercase text-zinc-400 mb-2">Do This Now</p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                  {actionNowCards.length === 0 && (
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
+                      No urgent actions generated yet.
+                    </div>
+                  )}
+                  {actionNowCards.map((item, idx) => (
+                    <div key={`${item.action || 'action'}-${item.product_id || item.name || idx}`} className="p-3 bg-zinc-50 rounded-2xl">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-black text-zinc-800 uppercase tracking-widest">{String(item.action || 'action').replace('_', ' ')}</p>
+                        {item.value !== undefined && Number.isFinite(Number(item.value)) && (
+                          <span className="text-[10px] font-black text-indigo-600">{Number(item.value).toFixed(1)}</span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[10px] font-bold text-zinc-700">{item.name || item.product_id || item.category || 'Item'}</p>
+                      <p className="mt-1 text-[10px] text-zinc-500">{item.reason || 'Action generated from analytics rules.'}</p>
+                      <div className="mt-2">
+                        <button
+                          onClick={() => handleActionCard(item)}
+                          className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-[10px] font-black"
+                        >
+                          Apply In Products
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-black text-zinc-900">Intelligence Hub</h2>
               <div className="flex items-center gap-2">

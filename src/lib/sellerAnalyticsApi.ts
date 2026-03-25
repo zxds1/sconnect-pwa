@@ -181,6 +181,99 @@ export type DataQuality = {
   anomaly_rate?: number;
 };
 
+export type PerformanceAnalysis = {
+  seller_id?: string;
+  window_days?: number;
+  total_sales_kes?: number;
+  transaction_count?: number;
+  average_basket_kes?: number;
+  sales_growth_pct?: number;
+  category_revenue_share?: Array<{ category?: string; revenue?: number; share_pct?: number }>;
+  hourly_patterns?: Array<{ hour?: number; revenue?: number; orders?: number }>;
+  weekday_patterns?: Array<{ weekday?: string; revenue?: number; orders?: number }>;
+};
+
+export type ProductPerformanceItem = {
+  seller_product_id?: string;
+  product_id?: string;
+  name?: string;
+  category?: string;
+  revenue?: number;
+  units_sold?: number;
+  velocity_per_day?: number;
+  growth_pct?: number;
+  days_since_last_sale?: number;
+  slow_mover?: boolean;
+};
+
+export type ProductPerformanceAnalysis = {
+  seller_id?: string;
+  window_days?: number;
+  items?: ProductPerformanceItem[];
+};
+
+export type PricingCompetitiveItem = {
+  seller_product_id?: string;
+  product_id?: string;
+  name?: string;
+  category?: string;
+  store_avg_price?: number;
+  market_avg_price?: number;
+  market_min_price?: number;
+  market_max_price?: number;
+  price_position?: string;
+  price_index?: number;
+  velocity_per_day?: number;
+};
+
+export type PricingCompetitiveAnalysis = {
+  seller_id?: string;
+  window_days?: number;
+  items?: PricingCompetitiveItem[];
+};
+
+export type CategoryHealthItem = {
+  category?: string;
+  revenue_share_pct?: number;
+  growth_pct?: number;
+  avg_items?: number;
+  velocity_per_day?: number;
+};
+
+export type CategoryHealthAnalysis = {
+  seller_id?: string;
+  window_days?: number;
+  items?: CategoryHealthItem[];
+};
+
+export type DemandStockItem = {
+  seller_product_id?: string;
+  product_id?: string;
+  name?: string;
+  category?: string;
+  avg_daily_units_30d?: number;
+  stock_level?: number;
+  stock_coverage_days?: number;
+  stockout_risk?: boolean;
+  overstock_risk?: boolean;
+  reorder_point?: number;
+  recommended_reorder?: number;
+};
+
+export type DemandStockAnalysis = {
+  seller_id?: string;
+  items?: DemandStockItem[];
+};
+
+export type ActionRecommendations = {
+  seller_id?: string;
+  generated_at?: string;
+  stock_more?: Array<{ action?: string; product_id?: string; name?: string; category?: string; value?: number; reason?: string }>;
+  reduce_drop?: Array<{ action?: string; product_id?: string; name?: string; category?: string; value?: number; reason?: string }>;
+  raise_prices?: Array<{ action?: string; product_id?: string; name?: string; category?: string; value?: number; reason?: string }>;
+  lower_prices?: Array<{ action?: string; product_id?: string; name?: string; category?: string; value?: number; reason?: string }>;
+};
+
 const unwrapList = <T>(data: any): T[] => {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
@@ -262,3 +355,31 @@ export const getSellerTopProducts = async (days?: number, limit?: number): Promi
 
 export const getSellerDataQuality = async (): Promise<DataQuality> =>
   apiFetch('/v1/seller/data-quality');
+
+export const getSellerPerformanceAnalysis = async (days?: number): Promise<PerformanceAnalysis> =>
+  apiFetch(`/v1/analytics/performance${days ? `?days=${days}` : ''}`);
+
+export const getSellerProductPerformance = async (days?: number, limit?: number): Promise<ProductPerformanceAnalysis> => {
+  const params = new URLSearchParams();
+  if (days && days > 0) params.set('days', String(days));
+  if (limit && limit > 0) params.set('limit', String(limit));
+  const query = params.toString();
+  return apiFetch(`/v1/analytics/products${query ? `?${query}` : ''}`);
+};
+
+export const getSellerPricingCompetitiveAnalysis = async (days?: number, limit?: number): Promise<PricingCompetitiveAnalysis> => {
+  const params = new URLSearchParams();
+  if (days && days > 0) params.set('days', String(days));
+  if (limit && limit > 0) params.set('limit', String(limit));
+  const query = params.toString();
+  return apiFetch(`/v1/analytics/pricing${query ? `?${query}` : ''}`);
+};
+
+export const getSellerCategoryHealthAnalysis = async (days?: number): Promise<CategoryHealthAnalysis> =>
+  apiFetch(`/v1/analytics/categories${days ? `?days=${days}` : ''}`);
+
+export const getSellerDemandStockAnalysis = async (): Promise<DemandStockAnalysis> =>
+  apiFetch('/v1/analytics/demand-stock');
+
+export const getSellerActionRecommendations = async (): Promise<ActionRecommendations> =>
+  apiFetch('/v1/analytics/recommendations');
