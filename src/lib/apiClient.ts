@@ -44,8 +44,21 @@ const getHeaderValue = (headers: HeadersInit | undefined, key: string) => {
   }
 };
 
-const getBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
-const getTenantId = () => getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
+const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
+const getBaseUrl = () => {
+  const configured = getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
+  return configured ? trimTrailingSlash(configured) : '';
+};
+const getGuestTenantId = () => getEnv('VITE_GUEST_TENANT_ID') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001';
+const getTenantId = (opts?: { token?: string; visitorId?: string }) => {
+  const explicit = getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
+  if (explicit) return explicit;
+  const token = opts?.token ?? getAuthToken();
+  if (token) return undefined;
+  const visitorId = opts?.visitorId ?? getVisitorId();
+  if (visitorId) return getGuestTenantId();
+  return undefined;
+};
 const getUserId = () => getAuthItem('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
 const getAuthToken = () => getAuthItem('soko:auth_token') ?? getEnv('VITE_AUTH_TOKEN') ?? '';
 const getRole = () => getAuthItem('soko:role') ?? getEnv('VITE_ROLE') ?? '';
@@ -65,12 +78,12 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
     'Content-Type': 'application/json',
   };
 
-  const tenantId = getTenantId();
   const userId = getUserId();
   const token = getAuthToken();
   const role = getRole();
   const correlationId = getCorrelationId();
   const visitorId = !token ? getVisitorId() : undefined;
+  const tenantId = getTenantId({ token, visitorId });
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
   if (userId) headers['X-User-Id'] = userId;
@@ -175,10 +188,9 @@ const parseError = async (res: Response): Promise<ApiError> => {
 
 export const apiFetch = async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
   const baseUrl = getBaseUrl();
-  if (!baseUrl) {
-    throw new Error('Service unavailable. Please try again later.');
-  }
-  const tenantId = getTenantId();
+  const token = getAuthToken();
+  const visitorId = !token ? getVisitorId() : undefined;
+  const tenantId = getTenantId({ token, visitorId });
   if (!tenantId) {
     throw new Error('Tenant ID is required. Please select your tenant.');
   }
@@ -233,10 +245,9 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
 
 export const apiFetchRaw = async (path: string, options: RequestInit = {}): Promise<Response> => {
   const baseUrl = getBaseUrl();
-  if (!baseUrl) {
-    throw new Error('Service unavailable. Please try again later.');
-  }
-  const tenantId = getTenantId();
+  const token = getAuthToken();
+  const visitorId = !token ? getVisitorId() : undefined;
+  const tenantId = getTenantId({ token, visitorId });
   if (!tenantId) {
     throw new Error('Tenant ID is required. Please select your tenant.');
   }

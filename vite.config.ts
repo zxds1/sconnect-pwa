@@ -24,6 +24,7 @@ if (!globalAny.global.crypto) {
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const isDev = mode === 'development';
+  const gatewayTarget = env.VITE_GATEWAY_URL || env.VITE_API_BASE_URL || 'http://localhost:8000';
   return {
     plugins: [
       react(),
@@ -83,6 +84,13 @@ export default defineConfig(({mode}) => {
     server: {
       port: 3000,
       hmr: process.env.DISABLE_HMR !== 'true',
+      proxy: {
+        '/v1': {
+          target: gatewayTarget,
+          changeOrigin: true,
+          ws: true,
+        },
+      },
     },
     build: {
       chunkSizeWarningLimit: 2200,
