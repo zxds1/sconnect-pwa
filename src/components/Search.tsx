@@ -36,6 +36,7 @@ import {
   queuePhotoSearch,
   queueVideoSearch,
   queueVoiceSearch,
+  getSearchMediaJob,
   createSearchAlert,
   updateSearchAlert,
   deleteSearchAlert,
@@ -53,6 +54,7 @@ import {
   searchTrending,
   type SearchAlert,
   type SearchDocumentMatch,
+  type SearchMediaJob,
   type SearchResult,
   type SearchResponse,
   type MediaSearchRequest,
@@ -806,6 +808,17 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     setSearchProducts(hydrated);
   }, [hydrateProductsFromResults]);
 
+  const waitForMediaJob = React.useCallback(async (jobId: string) => {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const job = await getSearchMediaJob(jobId);
+      if (job.status === 'completed' || job.status === 'failed') {
+        return job;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    }
+    throw new Error('Media job timed out.');
+  }, []);
+
   useEffect(() => {
     let ignore = false;
     const load = async () => {
@@ -1035,12 +1048,16 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
           mime_type: file.type
         };
         if (mediaCancelRef.current) return;
-        await queueVideoSearch(payload);
+        const job: SearchMediaJob = await queueVideoSearch(payload);
         if (mediaCancelRef.current) return;
-        if (query) {
+        const finished = await waitForMediaJob(job.id);
+        if (mediaCancelRef.current) return;
+        if (finished.status === 'completed' && finished.result) {
+          await applySearchResponse(finished.result);
+        } else if (finished.error_text) {
+          setMediaError(finished.error_text);
+        } else if (query) {
           runSearch(query);
-        } else {
-          setMediaError('Video uploaded. Add a text query to refine results.');
         }
         return;
       }
@@ -1073,7 +1090,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
         mediaStatusTimerRef.current = null;
       }, mediaCancelRef.current ? 2500 : 8000);
     }
-  }, [applySearchResponse, fileToDataUrl, mediaUploading, runSearch, searchQuery]);
+  }, [applySearchResponse, fileToDataUrl, mediaUploading, runSearch, searchQuery, waitForMediaJob]);
 
   const cancelMediaSearch = () => {
     if (!mediaUploading) return;

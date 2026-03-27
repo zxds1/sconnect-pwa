@@ -10,6 +10,7 @@ const navItems = [
   { path: "/experiments", label: "Experiments" },
   { path: "/ops-configs", label: "Ops Configs" },
   { path: "/assistant-models", label: "Assistant Models" },
+  { path: "/search-ops", label: "Search Ops" },
   { path: "/supplier-applications", label: "Supplier Applications" },
   { path: "/partnerships", label: "Partnership APIs" },
   { path: "/scrapers", label: "Scraper Control" },

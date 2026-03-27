@@ -102,6 +102,7 @@ export const Dashboard = () => {
     { title: "Experiments", count: experiments.length, href: "/experiments", note: "A/B and staged releases." },
     { title: "Ops Configs", count: "Live", href: "/ops-configs", note: "Platform configuration values." },
     { title: "Assistant Models", count: "Managed", href: "/assistant-models", note: "Prompt and model governance." },
+    { title: "Search Ops", count: cacheMetrics?.cache_hit_rate_pct ?? "Live", href: "/search-ops", note: "Embeddings, reindex jobs, and async media queue." },
     { title: "Supplier Apps", count: "Queue", href: "/supplier-applications", note: "Onboarding review flow." },
     { title: "Security", count: "Watch", href: "/security", note: "Controls, alerts, and overview." },
   ];

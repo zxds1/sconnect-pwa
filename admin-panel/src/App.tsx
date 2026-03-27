@@ -11,6 +11,7 @@ import { Tenants } from "./pages/Tenants";
 import { Flags } from "./pages/Flags";
 import { Experiments } from "./pages/Experiments";
 import { OpsConfigs } from "./pages/OpsConfigs";
+import { SearchOps } from "./pages/SearchOps";
 import { Alerts } from "./pages/Alerts";
 import { Security } from "./pages/Security";
 import { Compliance } from "./pages/Compliance";
@@ -48,6 +49,7 @@ export default function App() {
         { name: "experiments" },
         { name: "ops-configs" },
         { name: "assistant-models" },
+        { name: "search-ops" },
         { name: "supplier-applications" },
         { name: "partnerships" },
         { name: "scrapers" },
@@ -70,6 +72,7 @@ export default function App() {
               <Route path="/experiments" element={<Experiments />} />
               <Route path="/ops-configs" element={<OpsConfigs />} />
               <Route path="/assistant-models" element={<AssistantModels />} />
+              <Route path="/search-ops" element={<SearchOps />} />
               <Route path="/supplier-applications" element={<SupplierApplications />} />
               <Route path="/partnerships" element={<Partnerships />} />
               <Route path="/scrapers" element={<Scrapers />} />
