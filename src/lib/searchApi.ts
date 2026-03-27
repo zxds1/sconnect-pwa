@@ -14,8 +14,21 @@ export type SearchResult = {
 
 export type SearchResponse = {
   query_id?: string;
+  intent?: string;
   results?: SearchResult[];
+  matches?: SearchDocumentMatch[];
   cached?: boolean;
+};
+
+export type SearchDocumentMatch = {
+  entity_type: string;
+  entity_id: string;
+  title?: string;
+  body?: string;
+  image_url?: string;
+  score?: number;
+  distance?: number;
+  payload?: Record<string, any>;
 };
 
 export type IntelligenceSeller = {
@@ -107,6 +120,7 @@ export type MediaSearchRequest = {
   language?: string;
   media_key?: string;
   media_url?: string;
+  image_data?: string;
   mime_type?: string;
   duration_sec?: number;
 };
@@ -336,8 +350,8 @@ export const searchNearby = async (payload: {
 export const queueVoiceSearch = async (payload?: MediaSearchRequest): Promise<SearchJob & SearchResponse> =>
   apiFetch('/v1/search/voice', { method: 'POST', body: payload ? JSON.stringify(payload) : undefined });
 
-export const queuePhotoSearch = async (payload?: MediaSearchRequest): Promise<SearchJob & SearchResponse> =>
-  apiFetch('/v1/search/photo', { method: 'POST', body: payload ? JSON.stringify(payload) : undefined });
+export const queuePhotoSearch = async (payload?: MediaSearchRequest): Promise<SearchResponse> =>
+  apiFetch('/v1/search/photo', { method: 'POST', body: JSON.stringify(payload || {}) });
 
 export const queueVideoSearch = async (payload?: MediaSearchRequest): Promise<SearchJob & SearchResponse> =>
   apiFetch('/v1/search/video', { method: 'POST', body: payload ? JSON.stringify(payload) : undefined });
@@ -345,8 +359,8 @@ export const queueVideoSearch = async (payload?: MediaSearchRequest): Promise<Se
 export const queueOCRSearch = async (payload?: MediaSearchRequest): Promise<SearchJob & SearchResponse> =>
   apiFetch('/v1/search/ocr', { method: 'POST', body: payload ? JSON.stringify(payload) : undefined });
 
-export const queueHybridSearch = async (payload?: MediaSearchRequest): Promise<SearchJob & SearchResponse> =>
-  apiFetch('/v1/search/hybrid', { method: 'POST', body: payload ? JSON.stringify(payload) : undefined });
+export const queueHybridSearch = async (payload?: MediaSearchRequest): Promise<SearchResponse> =>
+  apiFetch('/v1/search/hybrid', { method: 'POST', body: JSON.stringify(payload || {}) });
 
 export const listSavedSearches = async (): Promise<SavedSearch[]> =>
   unwrapList(await apiFetch('/v1/search/saved'));

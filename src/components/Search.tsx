@@ -33,7 +33,6 @@ import {
   updateWatchlistItem,
   deleteWatchlistItem,
   queueHybridSearch,
-  queueOCRSearch,
   queuePhotoSearch,
   queueVideoSearch,
   queueVoiceSearch,
@@ -53,7 +52,9 @@ import {
   searchRecommendations,
   searchTrending,
   type SearchAlert,
+  type SearchDocumentMatch,
   type SearchResult,
+  type SearchResponse,
   type MediaSearchRequest,
   type PathPoint,
   type RecordedPath,
@@ -211,6 +212,8 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   const [trendingQueries, setTrendingQueries] = useState<string[]>([]);
   const [savedLocations, setSavedLocations] = useState<UserLocation[]>([]);
   const [searchQueryId, setSearchQueryId] = useState<string | null>(null);
+  const [searchIntent, setSearchIntent] = useState<string>('');
+  const [semanticMatches, setSemanticMatches] = useState<SearchDocumentMatch[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sellerMeta, setSellerMeta] = useState<Record<string, { rating?: number; verified?: boolean; location?: { lat?: number; lng?: number; address?: string } }>>({});
@@ -706,9 +709,17 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     const mediaKey = await uploadToPresignedUrl(file, presign, signal);
     return {
       mediaKey,
-      mediaUrl: presign?.url
+      mediaUrl: presign?.file_url || presign?.url
     };
   };
+
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => reject(new Error('Unable to read media file.'));
+      reader.readAsDataURL(file);
+    });
 
   const buildProductFromSearch = (result: SearchResult, detail?: any): Product => {
     const sellerId = result.seller_id || detail?.seller_id || detail?.sellerId || '';
@@ -783,6 +794,17 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     );
     return products.filter((p) => p.id);
   }, [loadSellerProfiles]);
+
+  const applySearchResponse = React.useCallback(async (response: SearchResponse, runId?: number) => {
+    if (runId !== undefined && runId !== searchRunRef.current) return;
+    setSearchQueryId(response.query_id || null);
+    setSearchIntent(response.intent || '');
+    setSemanticMatches(response.matches || []);
+    const results = response.results || [];
+    const hydrated = await hydrateProductsFromResults(results);
+    if (runId !== undefined && runId !== searchRunRef.current) return;
+    setSearchProducts(hydrated);
+  }, [hydrateProductsFromResults]);
 
   useEffect(() => {
     let ignore = false;
@@ -938,6 +960,8 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     if (!query.trim()) {
       setSearchProducts([]);
       setSearchQueryId(null);
+      setSearchIntent('');
+      setSemanticMatches([]);
       setSearchError(null);
       return;
     }
@@ -956,22 +980,19 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
         locationConsent: Boolean(isNearMeActive && userCoords)
       });
       if (runId !== searchRunRef.current) return;
-      setSearchQueryId(response.query_id || null);
-      const results = response.results || [];
-      const hydrated = await hydrateProductsFromResults(results);
-      if (runId !== searchRunRef.current) return;
-      setSearchProducts(hydrated);
+      await applySearchResponse(response, runId);
       const recent = await listRecentSearches();
       if (runId === searchRunRef.current) setRecentSearches(recent);
     } catch (err: any) {
       if (runId === searchRunRef.current) {
         setSearchError(err?.message || 'Search failed');
         setSearchProducts([]);
+        setSemanticMatches([]);
       }
     } finally {
       if (runId === searchRunRef.current) setSearchLoading(false);
     }
-  }, [hydrateProductsFromResults, isNearMeActive, maxDistance, userCoords]);
+  }, [applySearchResponse, isNearMeActive, maxDistance, userCoords]);
 
   const handleMediaFile = React.useCallback(async (file: File) => {
     if (mediaUploading) return;
@@ -989,7 +1010,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
       setMediaError('Unsupported media type.');
       return;
     }
-    setMediaStatus(isVideo ? 'Video search queued' : 'Image search queued (OCR + visual)');
+    setMediaStatus(isVideo ? 'Video search queued' : 'Analyzing image search...');
     if (isVideo) {
       if (videoPreviewRef.current) {
         URL.revokeObjectURL(videoPreviewRef.current);
@@ -1002,17 +1023,17 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     try {
       const controller = new AbortController();
       mediaAbortRef.current = controller;
-      const context = isVideo ? 'search_video' : 'search_photo';
-      const uploaded = await uploadMediaFile(file, context, controller.signal);
       if (mediaCancelRef.current) return;
       const query = searchQuery.trim();
-      const payload: MediaSearchRequest = {
-        query: query || undefined,
-        media_key: uploaded.mediaKey || undefined,
-        media_url: uploaded.mediaUrl || undefined,
-        mime_type: file.type
-      };
       if (isVideo) {
+        const uploaded = await uploadMediaFile(file, 'search_video', controller.signal);
+        if (mediaCancelRef.current) return;
+        const payload: MediaSearchRequest = {
+          query: query || undefined,
+          media_key: uploaded.mediaKey || undefined,
+          media_url: uploaded.mediaUrl || undefined,
+          mime_type: file.type
+        };
         if (mediaCancelRef.current) return;
         await queueVideoSearch(payload);
         if (mediaCancelRef.current) return;
@@ -1024,16 +1045,16 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
         return;
       }
       if (mediaCancelRef.current) return;
-      await Promise.allSettled([
-        queueOCRSearch(payload),
-        query ? queueHybridSearch(payload) : queuePhotoSearch(payload)
-      ]);
+      const imageData = await fileToDataUrl(file);
       if (mediaCancelRef.current) return;
-      if (query) {
-        runSearch(query);
-      } else {
-        setMediaError('Image processed. Add a text query to refine results.');
-      }
+      const imagePayload: MediaSearchRequest = {
+        query: query || undefined,
+        image_data: imageData,
+        mime_type: file.type
+      };
+      const response = await (query ? queueHybridSearch(imagePayload) : queuePhotoSearch(imagePayload));
+      if (mediaCancelRef.current) return;
+      await applySearchResponse(response);
     } catch (err: any) {
       if (mediaCancelRef.current || err?.name === 'AbortError') {
         setMediaStatus('Media search canceled.');
@@ -1052,7 +1073,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
         mediaStatusTimerRef.current = null;
       }, mediaCancelRef.current ? 2500 : 8000);
     }
-  }, [mediaUploading, runSearch, searchQuery]);
+  }, [applySearchResponse, fileToDataUrl, mediaUploading, runSearch, searchQuery]);
 
   const cancelMediaSearch = () => {
     if (!mediaUploading) return;
@@ -1975,6 +1996,27 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     });
   }, [getShopDistanceKm, locationQuery, shopResults, userCoords]);
 
+  const getIntentLabel = (intent: string) => {
+    const normalized = intent.replace(/_/g, ' ').trim();
+    if (!normalized) return '';
+    return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
+  const openSemanticMatch = (match: SearchDocumentMatch) => {
+    if (match.entity_type === 'seller_profile') {
+      const sellerId = String(match.payload?.seller_id || match.entity_id || '');
+      if (sellerId) onShopOpen(sellerId);
+      return;
+    }
+    const canonicalId = match.entity_type === 'canonical_product'
+      ? match.entity_id
+      : String(match.payload?.canonical_id || '');
+    if (canonicalId) {
+      const product = filteredProducts.find((item) => item.id === canonicalId);
+      if (product) onProductOpen(product);
+    }
+  };
+
   const sortedRecommendedProducts = useMemo(() => {
     const items = [...recommendedProducts];
     if (!userCoords) return items;
@@ -2309,9 +2351,16 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
         )}
         {/* View Toggle */}
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">
-            {searchLoading ? 'Searching...' : `${filteredProducts.length} Results Found`}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">
+              {searchLoading ? 'Searching...' : `${filteredProducts.length} Results Found`}
+            </h3>
+            {searchIntent && (
+              <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[9px] font-black uppercase tracking-widest">
+                {getIntentLabel(searchIntent)}
+              </span>
+            )}
+          </div>
           <div className="flex bg-zinc-200/50 p-1 rounded-xl">
             <button 
               onClick={() => setViewMode('grid')}
@@ -2622,6 +2671,52 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
           </>
         ) : (
           <>
+            {semanticMatches.length > 0 && (
+              <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Related Matches</h3>
+                  <span className="text-[10px] text-zinc-400 font-bold">{semanticMatches.length} semantic hits</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {semanticMatches.map((match) => {
+                    const canOpen = match.entity_type === 'seller_profile' || match.entity_type === 'canonical_product' || match.entity_type === 'seller_product';
+                    return (
+                      <button
+                        key={`${match.entity_type}-${match.entity_id}`}
+                        type="button"
+                        onClick={() => canOpen && openSemanticMatch(match)}
+                        className={`p-3 rounded-2xl border text-left transition-colors ${canOpen ? 'border-zinc-100 bg-zinc-50 hover:border-indigo-200' : 'border-zinc-100 bg-zinc-50/70 cursor-default'}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          {match.image_url ? (
+                            <img src={match.image_url} alt={match.title || 'Match'} className="w-12 h-12 rounded-2xl object-cover" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-2xl bg-zinc-200" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="px-2 py-0.5 rounded-full bg-white text-[8px] font-black uppercase tracking-widest text-zinc-500">
+                                {match.entity_type.replace(/_/g, ' ')}
+                              </span>
+                              {typeof match.score === 'number' && (
+                                <span className="text-[9px] font-black text-emerald-600">
+                                  {Math.round(match.score * 100)}%
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs font-bold text-zinc-900 line-clamp-1">{match.title || 'Related result'}</p>
+                            {match.body && (
+                              <p className="text-[10px] text-zinc-500 line-clamp-2 mt-1">{match.body}</p>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Saved Searches */}
             {savedSearches.length > 0 && (
               <div className="mb-6 bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
