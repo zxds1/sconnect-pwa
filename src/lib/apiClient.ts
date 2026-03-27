@@ -45,11 +45,53 @@ const getHeaderValue = (headers: HeadersInit | undefined, key: string) => {
 };
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
-const getBaseUrl = () => {
-  const configured = getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
-  return configured ? trimTrailingSlash(configured) : '';
+const isDevRuntime = () => {
+  try {
+    return Boolean((import.meta as any).env?.DEV);
+  } catch {
+    return false;
+  }
 };
-const getGuestTenantId = () => getEnv('VITE_GUEST_TENANT_ID') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001';
+
+const isLocalHost = (hostname: string) => hostname === 'localhost' || hostname === '127.0.0.1';
+
+const resolveRuntimeBaseUrl = () => {
+  if (typeof window === 'undefined') return 'http://localhost:8000';
+  const { protocol, hostname } = window.location;
+  return `${protocol}//${hostname}:8000`;
+};
+
+const normalizeBaseUrl = (value: string) => {
+  const raw = trimTrailingSlash(value || '');
+  if (!raw) return isDevRuntime() ? '' : resolveRuntimeBaseUrl();
+  if (typeof window === 'undefined') return raw;
+
+  if (raw.startsWith('/')) {
+    return trimTrailingSlash(`${window.location.origin}${raw}`);
+  }
+
+  try {
+    const parsed = new URL(raw);
+    const browserHost = window.location.hostname;
+    // In local dev we prefer relative /v1 requests so Vite proxy handles backend routing.
+    if (isDevRuntime() && isLocalHost(parsed.hostname)) {
+      return '';
+    }
+    if (isLocalHost(parsed.hostname) && !isLocalHost(browserHost)) {
+      return isDevRuntime() ? '' : `${parsed.protocol}//${browserHost}:${parsed.port || '8000'}`;
+    }
+    return trimTrailingSlash(parsed.toString());
+  } catch {
+    return raw;
+  }
+};
+
+const getBaseUrl = () => {
+  if (isDevRuntime()) return '';
+  const configured = getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
+  return normalizeBaseUrl(configured);
+};
+const getGuestTenantId = () => getEnv('VITE_GUEST_TENANT_ID') ?? getEnv('VITE_TENANT_ID') ?? '';
 const getTenantId = (opts?: { token?: string; visitorId?: string }) => {
   const explicit = getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
   if (explicit) return explicit;
@@ -73,7 +115,25 @@ const getCorrelationId = () => {
   return candidate;
 };
 
-const buildHeaders = (extra?: HeadersInit): HeadersInit => {
+const clearAuthSession = () => {
+  const keys = [
+    'soko:auth_token',
+    'soko:refresh_token',
+    'soko:user_id',
+    'soko:role',
+    'soko:session_id',
+  ];
+  for (const key of keys) {
+    setAuthItem(key, '');
+  }
+};
+
+const isAuthBootstrapPath = (path: string) => {
+  const pathOnly = path.split('?')[0];
+  return /^\/v1\/auth\/(?:login|register|password\/reset\/request|password\/reset\/confirm)(?:\/|$)/.test(pathOnly);
+};
+
+const buildHeaders = (extra?: HeadersInit, opts?: { suppressUserContext?: boolean }): HeadersInit => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -82,15 +142,15 @@ const buildHeaders = (extra?: HeadersInit): HeadersInit => {
   const token = getAuthToken();
   const role = getRole();
   const correlationId = getCorrelationId();
-  const visitorId = !token ? getVisitorId() : undefined;
+  const visitorId = !token && !opts?.suppressUserContext ? getVisitorId() : undefined;
   const tenantId = getTenantId({ token, visitorId });
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
-  if (userId) headers['X-User-Id'] = userId;
+  if (!opts?.suppressUserContext && userId) headers['X-User-Id'] = userId;
   if (visitorId) headers['X-Visitor-Id'] = visitorId;
   if (correlationId) headers['X-Correlation-Id'] = correlationId;
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (role) headers['X-Role'] = role;
+  if (!opts?.suppressUserContext && token) headers['Authorization'] = `Bearer ${token}`;
+  if (!opts?.suppressUserContext && role) headers['X-Role'] = role;
   return {
     ...headers,
     ...(extra ?? {}),
@@ -176,8 +236,15 @@ const parseError = async (res: Response): Promise<ApiError> => {
     const body = await res.json();
     if (body?.error) {
       error.code = body.error.code;
+      const message = typeof body.error.message === 'string' ? body.error.message.trim() : '';
+      if (message && message !== 'Request failed.' && message !== 'Something went wrong.') {
+        error.message = message;
+      }
     }
   } catch {}
+  if (error.message) {
+    return error;
+  }
   if (res.status >= 500) {
     error.message = 'Service temporarily unavailable.';
   } else {
@@ -186,17 +253,38 @@ const parseError = async (res: Response): Promise<ApiError> => {
   return error;
 };
 
+const maybeHandleExpiredSession = (requestHeaders: HeadersInit, res: Response, errorCode?: string) => {
+  const authHeader = getHeaderValue(requestHeaders, 'Authorization') ?? '';
+  const hadBearerToken = /^Bearer\s+\S+/i.test(authHeader);
+  const tokenFailureCode = String(errorCode || '').toLowerCase();
+  const isTokenFailure =
+    tokenFailureCode === 'invalid_token'
+    || tokenFailureCode === 'token_expired'
+    || tokenFailureCode === 'expired_token';
+
+  if (!(res.status === 401 && hadBearerToken && isTokenFailure)) {
+    return false;
+  }
+
+  clearAuthSession();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('soko:auth-required'));
+  }
+  return true;
+};
+
 export const apiFetch = async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
   const baseUrl = getBaseUrl();
+  const suppressUserContext = isAuthBootstrapPath(path);
   const token = getAuthToken();
-  const visitorId = !token ? getVisitorId() : undefined;
+  const visitorId = !token && !suppressUserContext ? getVisitorId() : undefined;
   const tenantId = getTenantId({ token, visitorId });
-  if (!tenantId) {
-    throw new Error('Tenant ID is required. Please select your tenant.');
+  if (!tenantId && !suppressUserContext) {
+    throw new Error('Username is required. Please enter your username.');
   }
 
   const method = (options.method || 'GET').toUpperCase();
-  const requestHeaders = buildHeaders(options.headers);
+  const requestHeaders = buildHeaders(options.headers, { suppressUserContext });
   const cachePolicy = method === 'GET' ? getCachePolicy(path) : null;
   const locationConsent = getHeaderValue(requestHeaders, 'X-Location-Consent') ?? '';
   const cacheKey = buildApiCacheKey({
@@ -221,7 +309,11 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
   });
 
   if (!res.ok) {
-    throw await parseError(res);
+    const error = await parseError(res);
+    if (maybeHandleExpiredSession(requestHeaders, res, error.code)) {
+      error.message = 'Session expired. Please sign in again.';
+    }
+    throw error;
   }
 
   if (res.status === 204) {
@@ -245,16 +337,27 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
 
 export const apiFetchRaw = async (path: string, options: RequestInit = {}): Promise<Response> => {
   const baseUrl = getBaseUrl();
+  const suppressUserContext = isAuthBootstrapPath(path);
   const token = getAuthToken();
-  const visitorId = !token ? getVisitorId() : undefined;
+  const visitorId = !token && !suppressUserContext ? getVisitorId() : undefined;
   const tenantId = getTenantId({ token, visitorId });
-  if (!tenantId) {
-    throw new Error('Tenant ID is required. Please select your tenant.');
+  if (!tenantId && !suppressUserContext) {
+    throw new Error('Username is required. Please enter your username.');
   }
-  return fetch(`${baseUrl}${path}`, {
+  const requestHeaders = buildHeaders(options.headers, { suppressUserContext });
+  const res = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: buildHeaders(options.headers),
+    headers: requestHeaders,
   });
+  if (!res.ok) {
+    try {
+      const parsed = await parseError(res.clone());
+      if (maybeHandleExpiredSession(requestHeaders, res, parsed.code)) {
+        // Let callers keep reading the original response while the app session is reset.
+      }
+    } catch {}
+  }
+  return res;
 };
 
 export const getApiBaseUrl = () => getBaseUrl();

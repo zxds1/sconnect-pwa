@@ -24,6 +24,7 @@ import { Rewards } from './components/Rewards';
 import { Onboarding } from './components/Onboarding';
 import { Assistant } from './components/Assistant';
 import { GroupBuys } from './components/GroupBuys';
+import { MediaUploadPreviewHost } from './components/MediaUploadPreviewHost';
 import { PullToRefresh } from './components/PullToRefresh';
 import { Product } from './types';
 import { completeOnboarding, getOnboardingState } from './lib/onboardingApi';
@@ -322,9 +323,15 @@ export default function App() {
       try {
         const session = await getSessionInfo();
         const role = String(session?.role || '').toLowerCase();
-        if (!alive || !role) return;
+        if (!alive) return;
         try {
-          setAuthItem('soko:role', role);
+          if (session?.tenant_id) {
+            setAuthItem('soko:tenant_id', session.tenant_id);
+            setAuthItem('soko:username', session.tenant_id);
+          }
+          if (role) {
+            setAuthItem('soko:role', role);
+          }
           if (session?.session_id) {
             setAuthItem('soko:session_id', session.session_id);
           }
@@ -340,11 +347,17 @@ export default function App() {
   useEffect(() => {
     const handleUpdate = () => setUpdateReady(true);
     const handleOffline = () => setOfflineReady(true);
+    const handleAuthRequired = () => {
+      setAuthPromptMessage('Session expired. Please sign in again.');
+      setView('login');
+    };
     window.addEventListener('soko:sw-update', handleUpdate);
     window.addEventListener('soko:sw-ready', handleOffline);
+    window.addEventListener('soko:auth-required', handleAuthRequired);
     return () => {
       window.removeEventListener('soko:sw-update', handleUpdate);
       window.removeEventListener('soko:sw-ready', handleOffline);
+      window.removeEventListener('soko:auth-required', handleAuthRequired);
     };
   }, []);
 
@@ -699,6 +712,23 @@ export default function App() {
     setView('profile');
   };
 
+  const resetTransientUiState = () => {
+    setSelectedProduct(null);
+    setSelectedSellerId(null);
+    setIsChatOpen(false);
+    setIsProductDetailOpen(false);
+    setSupportChatMode(null);
+    setOpenRewardsQrOnMount(false);
+    setNavigationPreset(null);
+    setSearchAction(null);
+  };
+
+  const handleAuthSuccess = (nextView: AppView) => {
+    setAuthPromptMessage(null);
+    resetTransientUiState();
+    setView(nextView);
+  };
+
   const openSupportChat = (mode: 'duka' | 'seller-ai' | 'brand') => {
     setSupportChatMode(mode);
     pushBrowserState(view, { kind: 'support-chat', mode });
@@ -736,6 +766,7 @@ export default function App() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-black overflow-x-hidden flex flex-col font-sans">
+      <MediaUploadPreviewHost />
       {/* Main Content Area */}
       <main className="flex-1 min-h-0 relative overflow-y-auto overflow-x-hidden">
         <PullToRefresh onRefresh={() => window.location.reload()}>
@@ -749,6 +780,7 @@ export default function App() {
               className="h-full w-full"
             >
               <Feed 
+                onBack={goBack}
                 onChatOpen={handleChatOpen}
                 onProductOpen={handleProductOpen}
                 onSellerOpen={handleShopClick}
@@ -764,7 +796,7 @@ export default function App() {
               exit={{ opacity: 0 }}
               className="h-full w-full bg-white z-40"
             >
-              <Shops onShopClick={handleShopClick} />
+              <Shops onBack={goBack} onShopClick={handleShopClick} />
             </motion.div>
           )}
 
@@ -777,6 +809,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <SearchView 
+                onBack={goBack}
                 onProductOpen={handleProductOpen} 
                 comparisonList={comparisonList}
                 onAddToComparison={handleAddToComparison}
@@ -844,8 +877,7 @@ export default function App() {
                 onRegisterOpen={() => setView('register')}
                 onResetOpen={() => setView('password-reset')}
                 onAuthenticated={() => {
-                  setAuthPromptMessage(null);
-                  setView(authReturnView);
+                  handleAuthSuccess(authReturnView);
                 }}
                 contextMessage={authPromptMessage}
               />
@@ -864,8 +896,17 @@ export default function App() {
                 onBack={goBack}
                 onLoginOpen={() => setView('login')}
                 onAuthenticated={() => {
-                  setAuthPromptMessage(null);
-                  setView('auth-onboarding');
+                  const intent = (getAuthItem('soko:account_intent') || '').toLowerCase();
+                  if (intent === 'seller') {
+                    setPendingSellerFastTrack(true);
+                    handleAuthSuccess('profile');
+                    return;
+                  }
+                  if (intent === 'buyer') {
+                    handleAuthSuccess('assistant');
+                    return;
+                  }
+                  handleAuthSuccess('auth-onboarding');
                 }}
                 contextMessage={authPromptMessage}
               />
@@ -900,9 +941,9 @@ export default function App() {
                 onFinish={(intent) => {
                   if (intent === 'seller') {
                     setPendingSellerFastTrack(true);
-                    setView('profile');
+                    handleAuthSuccess('profile');
                   } else {
-                    setView('assistant');
+                    handleAuthSuccess('assistant');
                   }
                 }}
               />
@@ -935,6 +976,7 @@ export default function App() {
               className="h-full w-full bg-white z-40"
             >
               <Rewards
+                onBack={goBack}
                 openQrOnMount={openRewardsQrOnMount}
                 onOpenQrHandled={() => setOpenRewardsQrOnMount(false)}
                 onOpenQrRequested={openRewardsQr}
@@ -1041,7 +1083,6 @@ export default function App() {
                 onOpenSellerStudio={handleOpenSellerStudio}
                 onSellerAccountCreated={() => {
                   setIsSellerAccount(true);
-                  setView('seller');
                 }}
                 sellerFastTrack={pendingSellerFastTrack}
                 onSellerFastTrackConsumed={() => setPendingSellerFastTrack(false)}
@@ -1259,15 +1300,6 @@ export default function App() {
             </div>
           ))}
         </div>
-      )}
-
-      {view !== 'assistant' && view !== 'login' && view !== 'register' && view !== 'password-reset' && view !== 'auth-onboarding' && (
-        <button
-          onClick={goBack}
-          className="fixed bottom-6 left-6 z-[90] bg-zinc-900 text-white px-4 py-3 rounded-full text-xs font-bold shadow-2xl"
-        >
-          Back
-        </button>
       )}
 
       {supportChatMode && (

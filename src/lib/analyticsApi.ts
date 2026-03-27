@@ -99,25 +99,25 @@ export const getDataSummary = async (): Promise<DataSummary> => apiFetch('/v1/da
 export const getDataUsage = async (): Promise<DataUsageResponse> => apiFetch('/v1/data/usage');
 
 export const requestDataExport = async (payload?: { export_type?: string; verification_method?: string; recent_login_at?: string; format?: string; scope?: string }): Promise<ExportResponse> =>
-  apiFetch('/v1/data/exports', {
+  apiFetch('/v1/data/export', {
     method: 'POST',
     body: JSON.stringify(payload ?? {}),
   });
 
-export const getDataExports = async (): Promise<ExportListResponse> => apiFetch('/v1/data/exports');
+export const getDataExports = async (): Promise<ExportListResponse> => apiFetch('/v1/data/export');
 
-export const getDataExportById = async (id: string): Promise<ExportResponse> => apiFetch(`/v1/data/exports/${id}`);
+export const getDataExportById = async (id: string): Promise<ExportResponse> => apiFetch(`/v1/data/export/${id}`);
 
-export const getConsents = async (): Promise<ConsentsResponse> => apiFetch('/v1/consents');
+export const getConsents = async (): Promise<ConsentsResponse> => apiFetch('/v1/settings/consents');
 
 export const updateConsentByType = async (type: string, payload: Partial<ConsentRecord>): Promise<ConsentRecord> =>
-  apiFetch(`/v1/consents/${type}`, {
-    method: 'PUT',
+  apiFetch(`/v1/settings/consents/${encodeURIComponent(type)}`, {
+    method: 'POST',
     body: JSON.stringify(payload),
   });
 
 export const requestDataDeletion = async (payload?: { reason?: string; verification_method?: string; mfa?: boolean; verified_device?: boolean; support_ticket_id?: string }) =>
-  apiFetch('/v1/data/deletion', {
+  apiFetch('/v1/data/delete', {
     method: 'POST',
     body: JSON.stringify(payload ?? {}),
   });

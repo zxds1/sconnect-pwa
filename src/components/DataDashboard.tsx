@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, Trash2, ShieldCheck, Database, CalendarDays, FileText, Eye, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Download, Trash2, ShieldCheck, Database, CalendarDays, FileText, Eye, CheckCircle2 } from 'lucide-react';
 import {
   getDataSummary,
   getDataUsage,
@@ -13,7 +13,6 @@ import {
   type ConsentRecord,
   type ExportResponse,
 } from '../lib/analyticsApi';
-import { buildWsUrl } from '../lib/realtime';
 
 interface DataDashboardProps {
   onBack?: () => void;
@@ -35,7 +34,6 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
 
   useEffect(() => {
     let isMounted = true;
-    let ws: WebSocket | null = null;
 
     const loadOnce = async () => {
       setLoading(true);
@@ -65,44 +63,9 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
       }
     };
 
-    const connect = () => {
-      ws = new WebSocket(buildWsUrl('/v1/data/ws'));
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload?.type !== 'data:update') return;
-          const data = payload?.data || {};
-          const summaryResp = data.summary || {};
-          setSummary({
-            searches: summaryResp.searches ?? 0,
-            receipts: summaryResp.receipts ?? 0,
-            purchases: summaryResp.purchases ?? 0,
-            reviews: summaryResp.reviews ?? 0,
-          });
-          setUsage(Array.isArray(data.usage) ? data.usage : []);
-          setConsents(Array.isArray(data.consents) ? data.consents : []);
-          setExports(Array.isArray(data.exports) ? data.exports : []);
-          setLoading(false);
-        } catch {
-          // ignore parse errors
-        }
-      };
-      ws.onerror = () => {
-        if (!isMounted) return;
-        setError('Live data connection failed. Showing last known data.');
-        loadOnce();
-      };
-      ws.onclose = () => {
-        if (!isMounted) return;
-        setError('Live data connection disconnected.');
-      };
-    };
-
     loadOnce();
-    connect();
     return () => {
       isMounted = false;
-      if (ws) ws.close();
     };
   }, []);
 
@@ -140,16 +103,16 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
 
   return (
     <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">
-      <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-10 flex items-center justify-between">
+      <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-10 flex items-center gap-3">
+        {onBack && (
+          <button onClick={onBack} className="p-2 rounded-full hover:bg-zinc-100 transition-colors" aria-label="Go back">
+            <ArrowLeft className="w-5 h-5 text-zinc-900" />
+          </button>
+        )}
         <div>
           <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Data Dashboard</p>
           <h1 className="text-xl font-bold text-zinc-900">Your Data, Your Control</h1>
         </div>
-        {onBack && (
-          <button onClick={onBack} className="px-4 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
-            Back
-          </button>
-        )}
       </div>
 
       <div className="p-6 space-y-6">

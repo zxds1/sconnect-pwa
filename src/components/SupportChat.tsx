@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Send, X, Loader2, Paperclip, Mic, Star, Sparkles, ShieldCheck, Minus, Camera } from 'lucide-react';
+import { CameraCaptureOverlay } from './CameraCaptureOverlay';
 import {
   createChatMessage,
   createChatThread,
@@ -9,6 +10,7 @@ import {
   listChatMessages
 } from '../lib/supportApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { requestMediaUploadPreview } from '../lib/mediaPreview';
 import { createThread, listMessages, streamThreadMessage, transcribeAudio } from '../lib/assistantApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 
@@ -490,6 +492,11 @@ export const SupportChat: React.FC<{
 
   const uploadAttachmentFile = async (file: File) => {
     if (!file || !threadId) return;
+    const approvedFile = await requestMediaUploadPreview(file, {
+      title: 'Preview support attachment',
+      description: 'Review the image or video before sending it to support.',
+      confirmLabel: 'Send attachment'
+    });
     setUploading(true);
     setErrorMessage(null);
     setStatusMessage(null);
@@ -504,18 +511,18 @@ export const SupportChat: React.FC<{
         throw new Error('Unable to create support ticket for attachment.');
       }
       const presign = await requestUploadPresign({
-        file_name: file.name,
-        mime_type: file.type || 'application/octet-stream',
-        content_length: file.size,
+        file_name: approvedFile.name,
+        mime_type: approvedFile.type || 'application/octet-stream',
+        content_length: approvedFile.size,
         context: 'support'
       });
-      const s3Key = await uploadToPresignedUrl(file, presign);
+      const s3Key = await uploadToPresignedUrl(approvedFile, presign);
       await createSupportTicketAttachment(currentTicketId, {
         s3_key: s3Key,
-        file_name: file.name,
-        mime_type: file.type || 'application/octet-stream'
+        file_name: approvedFile.name,
+        mime_type: approvedFile.type || 'application/octet-stream'
       });
-      await createChatMessage(threadId, { role: 'user', content: `Uploaded attachment: ${file.name}` });
+      await createChatMessage(threadId, { role: 'user', content: `Uploaded attachment: ${approvedFile.name}` });
       const items = await listChatMessages(threadId);
       setMessages(
         items.map((item: any, index: number) => ({
@@ -973,45 +980,21 @@ export const SupportChat: React.FC<{
         </div>
       </div>
     </motion.div>
-    {showCamera && (
-      <div className="fixed inset-0 z-[60] bg-black/80 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 text-white">
-          <span className="text-sm font-bold">Camera</span>
-          <button
-            onClick={closeCamera}
-            className="rounded-full px-2 py-1 text-white/80 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/30"
-            aria-label="Close camera"
-          >
-            Close
-          </button>
-        </div>
-        <div className="flex-1 flex items-center justify-center px-4">
-          <div className="w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden border border-white/10">
-            <video ref={cameraVideoRef} className="w-full h-full object-cover" playsInline muted />
-          </div>
-        </div>
-        {cameraError && (
-          <div className="px-4 pb-2 text-red-200 text-[10px] font-bold text-center">{cameraError}</div>
-        )}
-        <div className="flex items-center justify-center gap-4 px-4 pb-6">
-          <button
-            onClick={closeCamera}
-            className="px-4 py-2 rounded-full bg-white/10 text-white text-[10px] font-black focus:outline-none focus:ring-2 focus:ring-white/30"
-            aria-label="Cancel camera"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCapturePhoto}
-            disabled={cameraBusy}
-            className="px-6 py-2 rounded-full bg-emerald-500 text-white text-[10px] font-black disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-            aria-label="Capture photo"
-          >
-            Capture
-          </button>
-        </div>
-      </div>
-    )}
+    <CameraCaptureOverlay
+      open={showCamera}
+      videoRef={cameraVideoRef}
+      title="Capture Support Evidence"
+      subtitle="Take a clear photo of the issue, damaged item, QR problem, or screen error before sending it to support."
+      hint="Keep text readable and place the key issue near the center guides."
+      statusLabel="Support evidence mode"
+      captureLabel="Send This Photo"
+      closeLabel="Cancel"
+      busy={cameraBusy}
+      error={cameraError}
+      onClose={closeCamera}
+      onCapture={handleCapturePhoto}
+      zIndexClass="z-[70]"
+    />
     </>
   );
 };

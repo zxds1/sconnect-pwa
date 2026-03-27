@@ -838,16 +838,18 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
 
   if (!loading && formattedProducts.length === 0) {
     return (
-      <div className="h-full bg-white flex flex-col items-center justify-center p-6 text-center">
-        <BarChart3 className="w-16 h-16 text-zinc-200 mb-4" />
-        <h2 className="text-xl font-bold text-zinc-900 mb-2">Comparison List Empty</h2>
-        <p className="text-sm text-zinc-500 mb-6">Add products from search or detail views to compare them side-by-side.</p>
-        <button 
-          onClick={onClose}
-          className="px-6 py-3 bg-zinc-900 text-white rounded-xl font-bold text-sm"
-        >
-          Go Back
-        </button>
+      <div className="h-full bg-white flex flex-col">
+        <div className="p-4 border-b bg-white flex items-center gap-3 sticky top-0 z-10">
+          <button onClick={onClose} className="p-2 hover:bg-zinc-100 rounded-full" aria-label="Go back">
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+          <h1 className="text-xl font-bold">Product Comparison</h1>
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+          <BarChart3 className="w-16 h-16 text-zinc-200 mb-4" />
+          <h2 className="text-xl font-bold text-zinc-900 mb-2">Comparison List Empty</h2>
+          <p className="text-sm text-zinc-500">Add products from search or detail views to compare them side-by-side.</p>
+        </div>
       </div>
     );
   }
@@ -975,13 +977,16 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose, onProdu
               const priceBand = priceBandMeta(offer?.price_position);
               const sellerMode = offer?.seller_mode || 'seller';
               const sellerIndicator = (() => {
+                const visualMarkerLabel = offer?.visual_marker
+                  ? (/^https?:\/\//i.test(String(offer.visual_marker)) ? 'Photo marker' : String(offer.visual_marker))
+                  : 'Marker';
                 switch (sellerMode) {
                   case 'fixed_shop':
                     return 'Fixed Shop · Address + hours';
                   case 'open_market_stall':
-                    return `Stall · ${offer?.market_name || 'Market'} · ${offer?.visual_marker || 'Marker'}`;
+                    return `Stall · ${offer?.market_name || 'Market'} · ${visualMarkerLabel}`;
                   case 'ground_trader':
-                    return `Ground Trader · ${offer?.visual_marker || 'Marker'} · WhatsApp`;
+                    return `Ground Trader · ${visualMarkerLabel} · WhatsApp`;
                   case 'solopreneur':
                     return `Solopreneur · Delivery ${offer?.delivery_radius_km ?? '—'} km`;
                   case 'hybrid':

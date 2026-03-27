@@ -115,6 +115,28 @@ export type ProductMappingItem = {
   sync_enabled?: boolean;
 };
 
+export type MappingSuggestionCandidate = {
+  canonical_sku: string;
+  name: string;
+  confidence: number;
+  reason: string;
+};
+
+export type MappingSuggestion = {
+  external_sku: string;
+  external_title?: string;
+  platform: string;
+  status: 'mapped' | 'suggested' | 'needs_review' | string;
+  reason?: string;
+  confidence?: number;
+  canonical_sku?: string;
+  canonical_name?: string;
+  price?: number;
+  stock?: number;
+  sync_enabled?: boolean;
+  candidates?: MappingSuggestionCandidate[];
+};
+
 const unwrapList = <T>(data: any): T[] => {
   if (Array.isArray(data)) return data;
   if (data?.items && Array.isArray(data.items)) return data.items;
@@ -180,6 +202,9 @@ export const bulkProductMappings = async (items: ProductMappingItem[]) =>
 
 export const getConnectionStatus = async (id: string) =>
   apiFetch(`/v1/seller/connections/${id}/status`);
+
+export const getConnectionMappingSuggestions = async (id: string): Promise<MappingSuggestion[]> =>
+  unwrapList(await apiFetch(`/v1/seller/connections/${id}/mapping-suggestions`));
 
 export const triggerConnectionSync = async (id: string) =>
   apiFetch(`/v1/seller/sync/now/${id}`, { method: 'POST' });

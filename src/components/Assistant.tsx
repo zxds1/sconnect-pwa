@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users, MapPin, ExternalLink, SlidersHorizontal } from 'lucide-react';
+import { Sparkles, Send, Search, ShoppingBag, ArrowRightLeft, User, Trophy, Plug, Mic, Plus, BadgeCheck, TrendingUp, Camera, Users, MapPin, ExternalLink, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { Product } from '../types';
+import { CameraCaptureOverlay } from './CameraCaptureOverlay';
 import {
   createMessage,
   createMessageFeedback,
@@ -19,6 +20,7 @@ import {
   updateThread
 } from '../lib/assistantApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { requestMediaUploadPreview } from '../lib/mediaPreview';
 import {
   getSellerBuyerInsight,
   getSellerFunnel,
@@ -54,7 +56,7 @@ import { getCompareList } from '../lib/compareApi';
 import { getComparisonPreferences } from '../lib/settingsApi';
 import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
 import { listNotifications, type NotificationListResponse } from '../lib/notificationsApi';
-import { getAuthItem } from '../lib/authStorage';
+import { getAccountLabel, getAuthItem } from '../lib/authStorage';
 
 type AssistantAction = {
   label: string;
@@ -86,6 +88,7 @@ type AssistantChat = {
   messages: AssistantMessage[];
   updatedAt: number;
   pinned?: boolean;
+  draft?: boolean;
 };
 
 type SummaryStat = Record<string, any>;
@@ -225,6 +228,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const [messageFeedbackSaving, setMessageFeedbackSaving] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
   const isVisitor = !getAuthItem('soko:auth_token');
+  const accountLabel = getAccountLabel();
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
   const activeMessages = activeChat?.messages || [];
@@ -240,6 +244,18 @@ export const Assistant: React.FC<AssistantProps> = ({
     return label.includes(modelSearch.trim().toLowerCase());
   });
   const [showNewMemberIntro, setShowNewMemberIntro] = useState(false);
+  const isGhostChat = (chat: AssistantChat) =>
+    !chat.draft && chat.messages.length === 0 && chat.title.trim().toLowerCase() === 'new chat';
+  const visibleChats = useMemo(
+    () =>
+      chats
+        .filter((chat) => !isGhostChat(chat))
+        .sort((a, b) => {
+          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+          return b.updatedAt - a.updatedAt;
+        }),
+    [chats]
+  );
 
   useEffect(() => {
     let active = true;
@@ -341,7 +357,7 @@ export const Assistant: React.FC<AssistantProps> = ({
   const competitorMedian = marketBenchmarks?.competitor_median_price;
   const conversionRate = sellerKpis?.conversion_rate
     ?? (sellerFunnel?.sessions ? (toNumber(sellerFunnel.payment_success) / Math.max(1, toNumber(sellerFunnel.sessions))) : 0);
-  const roas = marketingKpis?.roas;
+  const roas = toNumber(marketingKpis?.roas);
   const repeatRate = buyerInsight?.repeat_rate ?? sellerKpis?.repeat_rate_d30;
   const fulfillmentIssues = anomalies.filter(a => {
     const type = (a.type || '').toLowerCase();
@@ -663,14 +679,6 @@ export const Assistant: React.FC<AssistantProps> = ({
   const canAccessSeller = isSellerAccount === true;
   const [suggestionChips, setSuggestionChips] = useState<Array<{ label: string; value: string }>>([]);
 
-  const mapThreadToChat = (thread: any): AssistantChat => ({
-    id: thread.id,
-    title: thread.title || 'New chat',
-    messages: [],
-    updatedAt: thread.updated_at ? new Date(thread.updated_at).getTime() : Date.now(),
-    pinned: !!thread.pinned
-  });
-
   const agentStatusLabels: Record<string, string> = {
     orchestrator: 'Orchestrator: Coordinating agents…',
     discovery: 'Discovery: Comparing offers…',
@@ -948,7 +956,7 @@ export const Assistant: React.FC<AssistantProps> = ({
             };
           case 'open_profile':
             return {
-              label: label || 'Open Profile',
+              label: label || (accountLabel ? `Open ${accountLabel}` : 'Open Profile'),
               onClick: () => onOpenProfile()
             };
           default:
@@ -976,6 +984,25 @@ export const Assistant: React.FC<AssistantProps> = ({
       metadata: msg.metadata || {},
       actions: buildActionsFromMetadata(msg.metadata)
     }));
+
+  const deriveChatTitle = (thread: any, messages: AssistantMessage[]) => {
+    const rawTitle = String(thread?.title || '').trim();
+    if (rawTitle && rawTitle.toLowerCase() !== 'new chat') return rawTitle;
+    const firstUserMessage = messages.find((message) => message.role === 'user' && message.content.trim());
+    if (firstUserMessage?.content) {
+      return firstUserMessage.content.trim().slice(0, 28);
+    }
+    return 'New chat';
+  };
+
+  const mapThreadToChat = (thread: any, messages: AssistantMessage[] = []): AssistantChat => ({
+    id: thread.id,
+    title: deriveChatTitle(thread, messages),
+    messages,
+    updatedAt: thread.updated_at ? new Date(thread.updated_at).getTime() : Date.now(),
+    pinned: !!thread.pinned,
+    draft: false
+  });
 
   const guessMediaType = (url: string): 'image' | 'video' | 'audio' | 'file' => {
     const lower = url.toLowerCase();
@@ -1348,11 +1375,20 @@ export const Assistant: React.FC<AssistantProps> = ({
     };
   };
 
+  const isReferenceRecord = (value: any): value is Record<string, any> =>
+    !!value && typeof value === 'object' && !Array.isArray(value);
+
+  const getSafeReferences = (metadata?: Record<string, any>): AssistantReference[] =>
+    (Array.isArray(metadata?.references) ? metadata.references : []).filter(isReferenceRecord) as AssistantReference[];
+
+  const getSafeReferenceItems = (reference?: AssistantReference | Record<string, any>) =>
+    (Array.isArray(reference?.data?.items) ? reference.data.items : []).filter(isReferenceRecord);
+
   const renderAssistantLocationCards = (metadata?: Record<string, any>) => {
-    const references = Array.isArray(metadata?.references) ? metadata.references : [];
+    const references = getSafeReferences(metadata);
     const rawItems: any[] = [];
     references.forEach((ref: any) => {
-      const items = Array.isArray(ref?.data?.items) ? ref.data.items : [];
+      const items = getSafeReferenceItems(ref);
       items.forEach((item: any) => {
         if (isLocationLikeItem(item)) rawItems.push(item);
       });
@@ -1474,12 +1510,12 @@ export const Assistant: React.FC<AssistantProps> = ({
   };
 
   const renderAssistantReferenceCards = (metadata?: Record<string, any>) => {
-    const references = Array.isArray(metadata?.references) ? metadata.references : [];
+    const references = getSafeReferences(metadata);
     if (!references.length) return null;
     return (
       <div className="grid gap-2 sm:grid-cols-2">
         {references.slice(0, 4).map((ref: any, idx: number) => {
-          const items = Array.isArray(ref?.data?.items) ? ref.data.items : [];
+          const items = getSafeReferenceItems(ref);
           if (!items.length) return null;
           const kindLabel = referenceCardLabel(items[0]);
           const tone = referenceCardTone(kindLabel);
@@ -1624,13 +1660,18 @@ export const Assistant: React.FC<AssistantProps> = ({
   };
 
   const uploadAssistantMedia = async (file: File) => {
+    const approvedFile = await requestMediaUploadPreview(file, {
+      title: 'Preview assistant attachment',
+      description: 'Check the image or video before sending it to the assistant.',
+      confirmLabel: 'Attach media'
+    });
     const presign = await requestUploadPresign({
-      file_name: file.name,
-      mime_type: file.type || 'application/octet-stream',
-      content_length: file.size,
+      file_name: approvedFile.name,
+      mime_type: approvedFile.type || 'application/octet-stream',
+      content_length: approvedFile.size,
       context: 'assistant_media'
     });
-    const mediaKey = await uploadToPresignedUrl(file, presign);
+    const mediaKey = await uploadToPresignedUrl(approvedFile, presign);
     const mediaUrl = presign?.file_url || presign?.url || '';
     if (!mediaUrl) {
       throw new Error('Missing media URL');
@@ -1842,7 +1883,7 @@ export const Assistant: React.FC<AssistantProps> = ({
       const items = await listMessages(threadId);
       setChats((prev) => prev.map((chat) => (
         chat.id === threadId
-          ? { ...chat, messages: toAssistantMessages(items), updatedAt: Date.now() }
+          ? { ...chat, messages: toAssistantMessages(items), updatedAt: Date.now(), draft: false }
           : chat
       )));
     } catch {}
@@ -1869,6 +1910,40 @@ export const Assistant: React.FC<AssistantProps> = ({
     } catch {
       return false;
     }
+  };
+
+  const createAndActivateChat = async () => {
+    const created = await createThread({ title: 'New chat' });
+    const newChat = { ...mapThreadToChat(created, []), draft: true };
+    setChats((prev) => [newChat, ...prev.filter((chat) => chat.id !== newChat.id)]);
+    setActiveChatId(newChat.id);
+    return newChat.id;
+  };
+
+  const ensureActiveChatId = async () => {
+    if (activeChatId) return activeChatId;
+    const existingId = visibleChats[0]?.id;
+    if (existingId) {
+      setActiveChatId(existingId);
+      return existingId;
+    }
+    return createAndActivateChat();
+  };
+
+  const deleteChatLocally = (chatId: string) => {
+    setChats((prev) => {
+      const next = prev.filter((chat) => chat.id !== chatId);
+      if (activeChatId === chatId) {
+        const nextVisible = next
+          .filter((chat) => !isGhostChat(chat))
+          .sort((a, b) => {
+            if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+            return b.updatedAt - a.updatedAt;
+          })[0];
+        setActiveChatId(nextVisible?.id || '');
+      }
+      return next;
+    });
   };
 
   const openMessageFeedback = (messageId: string) => {
@@ -1918,7 +1993,6 @@ export const Assistant: React.FC<AssistantProps> = ({
   };
 
   const handleAssistantMedia = React.useCallback(async (file: File) => {
-    if (!activeChatId) return;
     if (mediaUploading) return;
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
@@ -1929,6 +2003,7 @@ export const Assistant: React.FC<AssistantProps> = ({
     setMediaUploading(true);
     setMediaError(null);
     try {
+      const threadId = await ensureActiveChatId();
       const uploaded = await uploadAssistantMedia(file);
       const query = input.trim();
       let prompt = query || 'Analyze this media and suggest the best next actions.';
@@ -1966,7 +2041,7 @@ export const Assistant: React.FC<AssistantProps> = ({
       }
       setInput('');
       setIsStreaming(true);
-      const apiOk = await sendStreamMessage(activeChatId, prompt, metadata);
+      const apiOk = await sendStreamMessage(threadId, prompt, metadata);
       if (!apiOk) {
         setMediaError('Assistant is unavailable right now. Please try again.');
       }
@@ -1977,7 +2052,7 @@ export const Assistant: React.FC<AssistantProps> = ({
     } finally {
       setMediaUploading(false);
     }
-  }, [activeChatId, input, mediaUploading, sendStreamMessage, uploadAssistantMedia]);
+  }, [activeChatId, input, mediaUploading, sendStreamMessage, uploadAssistantMedia, visibleChats]);
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -1987,20 +2062,15 @@ export const Assistant: React.FC<AssistantProps> = ({
           listSuggestions()
         ]);
         if (!alive) return;
-        const mapped = (threads || []).map(mapThreadToChat);
-        try {
-          const created = await createThread({ title: 'New chat' });
-          const newChat = mapThreadToChat(created);
-          setChats([newChat, ...mapped]);
-          setActiveChatId(newChat.id);
-        } catch {
-          if (mapped.length) {
-            setChats(mapped);
-            setActiveChatId(mapped[0]?.id || '');
-          } else {
-            onToast('Unable to start assistant chat.');
-          }
-        }
+        const mapped = await Promise.all(
+          (threads || []).map(async (thread: any) => {
+            const items = await listMessages(thread.id).catch(() => []);
+            return mapThreadToChat(thread, toAssistantMessages(items));
+          })
+        );
+        const filtered = mapped.filter((chat) => !isGhostChat(chat));
+        setChats(filtered);
+        setActiveChatId(filtered[0]?.id || '');
         if (suggestions && suggestions.length) {
           const filteredSuggestions = suggestions.filter((s: any) => {
             const text = String([s?.label, s?.title, s?.name, s?.payload, s?.value].filter(Boolean).join(' ')).toLowerCase();
@@ -2215,10 +2285,10 @@ export const Assistant: React.FC<AssistantProps> = ({
   }, [activeChatId]);
 
 useEffect(() => {
-    if (!activeChatId && chats[0]) {
-      setActiveChatId(chats[0].id);
+    if (!activeChatId && visibleChats[0]) {
+      setActiveChatId(visibleChats[0].id);
     }
-  }, [activeChatId, chats]);
+  }, [activeChatId, visibleChats]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2311,7 +2381,7 @@ useEffect(() => {
     }
     if (cmd === '/profile') {
       onOpenProfile();
-      return 'Opening your profile.';
+      return accountLabel ? `Opening ${accountLabel}.` : 'Opening your profile.';
     }
     if (cmd === '/bag') {
       onOpenBag();
@@ -2335,14 +2405,16 @@ useEffect(() => {
   const handleSend = async () => {
     if (!input.trim()) return;
     const text = input.trim();
+    const threadId = await ensureActiveChatId();
     setChats(prev => prev.map(chat => {
-      if (chat.id !== activeChatId) return chat;
+      if (chat.id !== threadId) return chat;
       const nextTitle = chat.title === 'New chat' ? text.slice(0, 28) : chat.title;
       return {
         ...chat,
         title: nextTitle,
         messages: [...chat.messages, { role: 'user', content: text }],
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        draft: false
       };
     }));
     setInput('');
@@ -2350,19 +2422,20 @@ useEffect(() => {
     if (text.startsWith('/')) {
       const response = await handleCommand(text);
       setChats(prev => prev.map(chat => {
-        if (chat.id !== activeChatId) return chat;
+        if (chat.id !== threadId) return chat;
         return {
           ...chat,
           messages: [...chat.messages, { role: 'assistant', content: response }],
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          draft: false
         };
       }));
-      await sendUserMessage(activeChatId, text);
+      await sendUserMessage(threadId, text);
       return;
     }
 
     setIsStreaming(true);
-    const apiOk = await sendStreamMessage(activeChatId, text);
+    const apiOk = await sendStreamMessage(threadId, text);
     if (!apiOk) {
       onToast('Assistant is unavailable right now. Please try again.');
     }
@@ -2403,7 +2476,7 @@ useEffect(() => {
               />
               <div>
                 <p className="text-sm font-black tracking-tight">Conversations</p>
-                <p className="text-[10px] text-white/50">{chats.length} chats</p>
+                <p className="text-[10px] text-white/50">{visibleChats.length} chats</p>
               </div>
             </div>
           )}
@@ -2449,11 +2522,7 @@ useEffect(() => {
               </div>
             )}
             <div className="space-y-2">
-              {chats
-                .sort((a, b) => {
-                  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-                  return b.updatedAt - a.updatedAt;
-                })
+              {visibleChats
                 .slice(0, 12)
                 .map((chat) => (
                   <div
@@ -2482,19 +2551,16 @@ useEffect(() => {
                       </button>
                       <button
                         onClick={async () => {
-                          setChats(prev => prev.filter(c => c.id !== chat.id));
-                          if (activeChatId === chat.id) {
-                            const next = chats.find(c => c.id !== chat.id);
-                            setActiveChatId(next?.id || '');
-                          }
+                          deleteChatLocally(chat.id);
                           try {
                             await deleteThread(chat.id);
                           } catch {}
                         }}
-                        className="px-2 py-1 bg-white/10 rounded-lg text-[9px] font-semibold tracking-[0.08em]"
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-white/10 rounded-lg text-[9px] font-semibold tracking-[0.08em]"
                         title="Delete chat"
                       >
-                        Del
+                        <Trash2 className="w-3 h-3" />
+                        Delete
                       </button>
                     </div>
                   </div>
@@ -2502,17 +2568,14 @@ useEffect(() => {
             </div>
 
             <div className="mt-4 space-y-2">
-              <button
-                onClick={async () => {
-                  try {
-                    const created = await createThread({ title: 'New chat' });
-                    const newChat = mapThreadToChat(created);
-                    setChats(prev => [newChat, ...prev]);
-                    setActiveChatId(newChat.id);
-                  } catch {
-                    onToast('Unable to start assistant chat.');
-                  }
-                }}
+                <button
+                  onClick={async () => {
+                    try {
+                      await createAndActivateChat();
+                    } catch {
+                      onToast('Unable to start assistant chat.');
+                    }
+                  }}
                 className="w-full px-3 py-2 bg-white/10 rounded-xl text-[10px] font-semibold tracking-[0.08em] flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" /> New chat
@@ -2545,7 +2608,7 @@ useEffect(() => {
                 />
                 <div>
                   <p className="text-sm font-black tracking-tight">Conversations</p>
-                  <p className="text-[10px] text-white/50">{chats.length} chats</p>
+                  <p className="text-[10px] text-white/50">{visibleChats.length} chats</p>
                 </div>
               </div>
               <button
@@ -2581,11 +2644,7 @@ useEffect(() => {
                 </div>
               )}
               <div className="space-y-2">
-                {chats
-                  .sort((a, b) => {
-                    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-                    return b.updatedAt - a.updatedAt;
-                  })
+                {visibleChats
                   .slice(0, 12)
                   .map((chat) => (
                     <div
@@ -2615,6 +2674,19 @@ useEffect(() => {
                         >
                           {chat.pinned ? 'Unpin' : 'Pin'}
                         </button>
+                        <button
+                          onClick={async () => {
+                            deleteChatLocally(chat.id);
+                            try {
+                              await deleteThread(chat.id);
+                            } catch {}
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-white/10 rounded-lg text-[9px] font-semibold tracking-[0.08em]"
+                          title="Delete chat"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Delete
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -2624,10 +2696,7 @@ useEffect(() => {
                 <button
                   onClick={async () => {
                     try {
-                      const created = await createThread({ title: 'New chat' });
-                      const newChat = mapThreadToChat(created);
-                      setChats(prev => [newChat, ...prev]);
-                      setActiveChatId(newChat.id);
+                      await createAndActivateChat();
                       setIsSidebarOpen(false);
                     } catch {
                       onToast('Unable to start assistant chat.');
@@ -2809,6 +2878,7 @@ useEffect(() => {
             )}
             {activeMessages.map((msg, i) => {
               const isUser = msg.role === 'user';
+              const messageReferences = getSafeReferences(msg.metadata);
               return (
                 <div
                   key={msg.id || `msg_${i}`}
@@ -2848,10 +2918,10 @@ useEffect(() => {
                     {msg.role === 'assistant' && renderAssistantLinks(msg.metadata)}
                     {msg.role === 'assistant' && renderAssistantLocationCards(msg.metadata)}
                     {msg.role === 'assistant' && renderAssistantReferenceCards(msg.metadata)}
-                    {msg.role === 'assistant' && Array.isArray(msg.metadata?.references) && msg.metadata.references.length > 0 && (
+                    {msg.role === 'assistant' && messageReferences.length > 0 && (
                       <div className="space-y-2">
                         <div className="flex flex-wrap gap-2">
-                          {(msg.metadata.references as AssistantReference[]).map((ref, idx) => (
+                          {messageReferences.map((ref, idx) => (
                             <span
                               key={`${msg.id || i}-ref-${idx}`}
                             className="px-2 py-1 rounded-full text-[9px] font-semibold tracking-[0.12em] bg-emerald-500/10 text-emerald-200"
@@ -2861,9 +2931,9 @@ useEffect(() => {
                           ))}
                         </div>
                         <div className="space-y-1">
-                          {(msg.metadata.references as AssistantReference[]).map((ref, idx) => {
-                            const items = (ref.data as any)?.items;
-                            if (!Array.isArray(items) || items.length === 0) return null;
+                          {messageReferences.map((ref, idx) => {
+                            const items = getSafeReferenceItems(ref);
+                            if (!items.length) return null;
                             return (
                               <div key={`${msg.id || i}-ref-detail-${idx}`} className="text-[10px] leading-relaxed text-white/70 space-y-1">
                                 {items.slice(0, 3).map((item: any, itemIdx: number) => (
@@ -3122,39 +3192,20 @@ useEffect(() => {
         </div>
       </div>
 
-      {showCamera && (
-        <div className="fixed inset-0 z-[90] bg-black/80 flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 text-white">
-            <span className="text-sm font-bold">Camera</span>
-            <button onClick={closeCamera} className="rounded-full px-2 py-1 text-white/80 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/30" aria-label="Close camera">
-              Close
-            </button>
-          </div>
-          <div className="flex-1 flex items-center justify-center px-4">
-            <div className="w-full max-w-md aspect-[3/4] bg-black rounded-2xl overflow-hidden border border-white/10">
-              <video ref={cameraVideoRef} className="w-full h-full object-cover" playsInline muted />
-            </div>
-          </div>
-          {cameraError && (
-            <div className="px-4 pb-2 text-red-200 text-[10px] font-bold text-center">{cameraError}</div>
-          )}
-          <div className="flex items-center justify-center gap-4 px-4 pb-6">
-            <button
-              onClick={closeCamera}
-              className="px-4 py-2 rounded-full bg-white/10 text-white text-[10px] font-black"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCapturePhoto}
-              disabled={cameraBusy}
-              className="px-6 py-2 rounded-full bg-emerald-500 text-white text-[10px] font-black disabled:opacity-50"
-            >
-              Capture
-            </button>
-          </div>
-        </div>
-      )}
+      <CameraCaptureOverlay
+        open={showCamera}
+        videoRef={cameraVideoRef}
+        title="Capture For Assistant"
+        subtitle="Show the product, shelf, receipt, or problem clearly so the assistant can respond with better context."
+        hint="Fill the frame with the item you want help with and hold steady for one clean shot."
+        statusLabel="Assistant vision ready"
+        captureLabel="Use This Photo"
+        closeLabel="Back"
+        busy={cameraBusy}
+        error={cameraError}
+        onClose={closeCamera}
+        onCapture={handleCapturePhoto}
+      />
       {showModelPicker && (
         <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-slate-950 text-white border border-white/10 rounded-3xl overflow-hidden">

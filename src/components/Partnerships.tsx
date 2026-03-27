@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Building2, Filter, MapPin, RefreshCcw, Search, ShieldCheck, Star } from 'lucide-react';
+import { ArrowLeft, Building2, Filter, MapPin, RefreshCcw, Search, ShieldCheck, Star } from 'lucide-react';
 import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
 
 type DirectoryEntry = {
@@ -166,23 +166,27 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   }, [shopEntries, query, typeFilter, minRating, verifiedOnly, sortBy, geo]);
 
   return (
-    <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">
-      <div className="p-4 bg-white border-b border-zinc-100 sticky top-0 z-10">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-black text-zinc-900">Data Partnerships Directory</p>
-            <p className="text-[10px] text-zinc-500">Public shop directory and discovery filters.</p>
+    <div className="theme-page-shell h-full flex flex-col overflow-y-auto no-scrollbar">
+      <div className="theme-page-header sticky top-0 z-10 border-b p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {onBack && (
+              <button onClick={onBack} className="theme-chip-surface rounded-full border p-2 transition hover:opacity-80" aria-label="Go back">
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            )}
+            <div>
+              <p className="text-sm font-black text-zinc-900">Data Partnerships Directory</p>
+              <p className="text-[10px] text-zinc-500">Public shop directory and discovery filters.</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => loadShops()}
-              className="p-2 rounded-full hover:bg-zinc-100"
+              className="theme-chip-surface rounded-full border p-2 transition hover:opacity-80"
             >
               <RefreshCcw className="w-4 h-4" />
             </button>
-            {onBack && (
-              <button onClick={onBack} className="text-[10px] font-black text-zinc-500">Close</button>
-            )}
           </div>
         </div>
         <div className="mt-3 flex flex-col gap-2">
@@ -193,7 +197,7 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search shops..."
-                className="w-full pl-9 pr-3 py-2 bg-zinc-100 rounded-xl text-[10px] font-bold"
+                className="theme-input-surface w-full rounded-xl border py-2 pl-9 pr-3 text-[10px] font-bold"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -201,7 +205,7 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
-                className="bg-zinc-100 rounded-xl text-[10px] font-bold px-2 py-2"
+                className="theme-input-surface rounded-xl border px-2 py-2 text-[10px] font-bold"
               >
                 <option value="All">All</option>
                 <option value="Shop">Shop</option>
@@ -209,7 +213,7 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               <select
                 value={minRating}
                 onChange={(e) => setMinRating(Number(e.target.value))}
-                className="bg-zinc-100 rounded-xl text-[10px] font-bold px-2 py-2"
+                className="theme-input-surface rounded-xl border px-2 py-2 text-[10px] font-bold"
               >
                 <option value={0}>Any Rating</option>
                 <option value={4}>4.0+</option>
@@ -222,9 +226,9 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
               placeholder="Category filter"
-              className="px-3 py-2 bg-zinc-100 rounded-xl text-[10px] font-bold"
+              className="theme-input-surface rounded-xl border px-3 py-2 text-[10px] font-bold"
             />
-            <label className="flex items-center gap-2 px-3 py-2 bg-zinc-100 rounded-xl text-[10px] font-bold text-zinc-600">
+            <label className="theme-chip-surface flex items-center gap-2 rounded-xl border px-3 py-2 text-[10px] font-bold">
               <input
                 type="checkbox"
                 checked={verifiedOnly}
@@ -236,7 +240,7 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             <select
               value={radiusKm}
               onChange={(e) => setRadiusKm(Number(e.target.value))}
-              className="bg-zinc-100 rounded-xl text-[10px] font-bold px-2 py-2"
+              className="theme-input-surface rounded-xl border px-2 py-2 text-[10px] font-bold"
             >
               <option value={0}>Any Distance</option>
               <option value={2}>2 km</option>
@@ -247,7 +251,7 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as 'popularity' | 'rating' | 'distance')}
-              className="bg-zinc-100 rounded-xl text-[10px] font-bold px-2 py-2"
+              className="theme-input-surface rounded-xl border px-2 py-2 text-[10px] font-bold"
             >
               <option value="popularity">Sort: Popularity</option>
               <option value="rating">Sort: Rating</option>
@@ -271,14 +275,14 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         )}
 
         {shopLoading && (
-          <div className="bg-white rounded-2xl border border-zinc-100 p-5 text-[11px] font-bold text-zinc-500">
+          <div className="theme-panel rounded-2xl border p-5 text-[11px] font-bold text-zinc-500">
             Loading shop directory...
           </div>
         )}
 
         <div className="grid grid-cols-1 gap-3">
           {filtered.map(entry => (
-            <div key={entry.id} className="bg-white rounded-2xl border border-zinc-100 p-4 shadow-sm">
+            <div key={entry.id} className="theme-panel rounded-2xl border p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
@@ -302,14 +306,14 @@ export const Partnerships: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               {entry.systems.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {entry.systems.map(s => (
-                    <span key={s} className="px-2 py-1 bg-zinc-100 rounded-full text-[9px] font-bold text-zinc-600">{s}</span>
+                    <span key={s} className="theme-chip-surface rounded-full border px-2 py-1 text-[9px] font-bold">{s}</span>
                   ))}
                 </div>
               )}
             </div>
           ))}
           {filtered.length === 0 && !shopLoading && (
-            <div className="p-6 bg-white rounded-2xl border border-dashed border-zinc-200 text-center text-[10px] font-bold text-zinc-500">
+            <div className="theme-panel rounded-2xl border border-dashed p-6 text-center text-[10px] font-bold text-zinc-500">
               No shops match your filters.
             </div>
           )}

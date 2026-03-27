@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Crown, Trophy, ArrowRight, Star, Sparkles, QrCode, MapPin, Wallet, Camera as CameraIcon, Receipt, Gift, Upload, ShieldCheck } from 'lucide-react';
+import { Crown, Trophy, ArrowRight, ArrowLeft, Star, Sparkles, QrCode, MapPin, Wallet, Camera as CameraIcon, Receipt, Gift, Upload, ShieldCheck } from 'lucide-react';
+import { CameraCaptureOverlay } from './CameraCaptureOverlay';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import {
   createReferral,
@@ -36,13 +37,31 @@ import { getOpsConfig } from '../lib/opsConfigApi';
 import { getAuthItem } from '../lib/authStorage';
 
 interface RewardsProps {
+  onBack?: () => void;
   openQrOnMount?: boolean;
   onOpenQrHandled?: () => void;
   onOpenQrRequested?: () => void;
   onCloseQrRequested?: () => void;
 }
 
-export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled, onOpenQrRequested, onCloseQrRequested }) => {
+const loadOptionalReceiptItems = async () => {
+  try {
+    return await listReceiptInventoryItems({ status: 'awaiting_verification', limit: 20 });
+  } catch {
+    return [] as ReceiptInventoryItem[];
+  }
+};
+
+const loadOptionalSellerProducts = async (enabled: boolean) => {
+  if (!enabled) return [] as SellerProduct[];
+  try {
+    return await listSellerProducts();
+  } catch {
+    return [] as SellerProduct[];
+  }
+};
+
+export const Rewards: React.FC<RewardsProps> = ({ onBack, openQrOnMount, onOpenQrHandled, onOpenQrRequested, onCloseQrRequested }) => {
   const [starsSummary, setStarsSummary] = useState<RewardsStarsSummary | null>(null);
   const [leaderboard, setLeaderboard] = useState<RewardsLeaderboardEntry[]>([]);
   const currentStars = Number(starsSummary?.stars_total ?? 0);
@@ -98,6 +117,36 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   const receiptVideoRef = useRef<HTMLVideoElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const currentUserId = useMemo(() => {
+    try {
+      return getAuthItem('soko:user_id') || '';
+    } catch {
+      return '';
+    }
+  }, []);
+  const authToken = useMemo(() => {
+    try {
+      return getAuthItem('soko:auth_token') || '';
+    } catch {
+      return '';
+    }
+  }, []);
+  const visitorId = useMemo(() => {
+    try {
+      return getAuthItem('soko:visitor_id') || '';
+    } catch {
+      return '';
+    }
+  }, []);
+  const currentRole = useMemo(() => {
+    try {
+      return String(getAuthItem('soko:role') || '').toLowerCase();
+    } catch {
+      return '';
+    }
+  }, []);
+  const isLoggedIn = Boolean(authToken);
+  const isSellerAccount = currentRole === 'seller';
 
   useEffect(() => {
     if (openQrOnMount) {
@@ -170,20 +219,19 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
       setError(null);
       try {
         const [balanceResp, ledgerResp, receiptsResp, streaksResp, referralsResp, fraudResp, starsResp, leaderboardResp, receiptItemsResp, sellerProductsResp] = await Promise.all([
-          getRewardsBalance(),
-          getRewardsLedger(),
-          listReceipts(),
-          getRewardStreaks(),
-          listReferrals(),
-          listFraudAlerts(),
-          getRewardsStarsSummary(),
-          listRewardsLeaderboard(),
-          listReceiptInventoryItems({ status: 'awaiting_verification', limit: 20 }),
-          listSellerProducts()
+          getRewardsBalance().catch(() => null),
+          getRewardsLedger().catch(() => [] as RewardsLedgerEntry[]),
+          listReceipts().catch(() => [] as RewardsReceipt[]),
+          getRewardStreaks().catch(() => [] as RewardsStreak[]),
+          listReferrals().catch(() => []),
+          listFraudAlerts().catch(() => [] as RewardsFraudAlert[]),
+          getRewardsStarsSummary().catch(() => null),
+          listRewardsLeaderboard().catch(() => [] as RewardsLeaderboardEntry[]),
+          loadOptionalReceiptItems(),
+          loadOptionalSellerProducts(isSellerAccount),
         ]);
         if (!alive) return;
-        const coins = Number(balanceResp?.balance ?? 0);
-        setBuyerCoins(Number.isFinite(coins) ? coins : 0);
+        const coins = Number(balanceResp?.balance ?? balanceResp?.coins ?? balanceResp?.wallet ?? 0);
         setBuyerCoins(Number.isFinite(coins) ? coins : 0);
         setBuyerPayouts((ledgerResp || []).map((entry: RewardsLedgerEntry) => ({
           id: entry.id || entry.ledger_id || `lg_${Math.random().toString(16).slice(2)}`,
@@ -205,13 +253,14 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         setReferralsCount((referralsResp || []).length);
         const alerts = Array.isArray(fraudResp) ? fraudResp : [];
         setFraudAlerts(alerts as RewardsFraudAlert[]);
-        if (alerts.length) {
-          setFraudWarning(alerts[0]?.message || 'Potential fraud detected.');
-        }
-        setStarsSummary(starsResp as RewardsStarsSummary);
+        setFraudWarning(alerts.length ? (alerts[0]?.message || 'Potential fraud detected.') : null);
+        setStarsSummary((starsResp as RewardsStarsSummary) || null);
         setLeaderboard(Array.isArray(leaderboardResp) ? (leaderboardResp as RewardsLeaderboardEntry[]) : []);
         setReceiptItems(Array.isArray(receiptItemsResp) ? (receiptItemsResp as ReceiptInventoryItem[]) : []);
         setSellerProducts(Array.isArray(sellerProductsResp) ? (sellerProductsResp as SellerProduct[]) : []);
+        if (!balanceResp && !starsResp) {
+          setError('Unable to load rewards data.');
+        }
       } catch (err: any) {
         if (!alive) return;
         setError('Unable to load rewards data.');
@@ -223,10 +272,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
     return () => {
       alive = false;
     };
-  }, []);
+  }, [isSellerAccount]);
 
   const applyBalanceFromResponse = (balanceResp: any) => {
-    const coins = Number(balanceResp?.balance ?? 0);
+    const coins = Number(balanceResp?.balance ?? balanceResp?.coins ?? balanceResp?.wallet ?? 0);
     if (Number.isFinite(coins)) {
       setBuyerCoins(coins);
     }
@@ -243,19 +292,26 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
 
   const refreshBalanceAndLedger = async () => {
     const [balanceResp, ledgerResp] = await Promise.all([
-      getRewardsBalance(),
-      getRewardsLedger()
+      getRewardsBalance().catch(() => null),
+      getRewardsLedger().catch(() => null)
     ]);
-    applyBalanceFromResponse(balanceResp);
-    applyLedgerFromResponse(ledgerResp || []);
+    if (balanceResp) {
+      applyBalanceFromResponse(balanceResp);
+    }
+    if (ledgerResp) {
+      applyLedgerFromResponse(ledgerResp || []);
+    }
+    if (!balanceResp && !ledgerResp) {
+      throw new Error('Unable to refresh wallet.');
+    }
   };
 
   const refreshReceiptsAndStreaks = async () => {
     const [receiptsResp, streaksResp, receiptItemsResp, sellerProductsResp] = await Promise.all([
       listReceipts(),
       getRewardStreaks(),
-      listReceiptInventoryItems({ status: 'awaiting_verification', limit: 20 }),
-      listSellerProducts()
+      loadOptionalReceiptItems(),
+      loadOptionalSellerProducts(isSellerAccount)
     ]);
     setReceiptUploads((receiptsResp || []).map((rec: RewardsReceipt) => ({
       id: rec.id || `r_${Math.random().toString(16).slice(2)}`,
@@ -617,32 +673,6 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
     }
   };
 
-  const currentUserId = useMemo(() => {
-    try {
-      return getAuthItem('soko:user_id') || '';
-    } catch {
-      return '';
-    }
-  }, []);
-
-  const authToken = useMemo(() => {
-    try {
-      return getAuthItem('soko:auth_token') || '';
-    } catch {
-      return '';
-    }
-  }, []);
-
-  const visitorId = useMemo(() => {
-    try {
-      return getAuthItem('soko:visitor_id') || '';
-    } catch {
-      return '';
-    }
-  }, []);
-
-  const isLoggedIn = Boolean(authToken);
-
   useEffect(() => {
     if (!isLoggedIn || !visitorId || guestClaimed) {
       return;
@@ -742,6 +772,13 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   const progressPct = nextMilestone
     ? Math.min(100, Math.round((currentStars / nextMilestone.stars) * 100))
     : 0;
+
+  const pageShellClass = 'rewards-page-shell h-full flex flex-col overflow-y-auto no-scrollbar pb-24';
+  const sectionCardClass = 'rewards-card rounded-[28px] border p-5 backdrop-blur';
+  const sectionEyebrowClass = 'rewards-eyebrow text-xs font-black uppercase tracking-[0.24em]';
+  const mutedPanelClass = 'rewards-muted-panel rounded-2xl border';
+  const primaryActionClass = 'rounded-xl bg-[#14532d] px-4 py-2 text-[10px] font-black text-white shadow-[0_12px_30px_rgba(20,83,45,0.18)]';
+  const secondaryActionClass = 'rewards-secondary-action rounded-xl border px-4 py-2 text-[10px] font-black';
 
 
   const handleReferral = async () => {
@@ -895,74 +932,119 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
   };
 
   return (
-    <div className="h-full bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col overflow-y-auto no-scrollbar pb-24">
+    <div className={pageShellClass}>
       {/* Header */}
-      <div className="p-6 bg-white border-b border-blue-100 sticky top-0 z-10">
-        <div className="flex items-center justify-between">
+      <div className="rewards-header sticky top-0 z-10 overflow-hidden border-b px-6 py-5 text-white shadow-[0_18px_45px_rgba(15,23,42,0.18)]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(245,158,11,0.24),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(16,185,129,0.18),transparent_26%)]" />
+        <div className="relative flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black">SC</div>
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/12 text-white backdrop-blur transition hover:bg-white/18"
+                aria-label="Go back"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            )}
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/14 text-sm font-black text-white ring-1 ring-white/15">SC</div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">
-                {economicsConfig?.passport_label || 'Rewards Passport'}
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">
+                {economicsConfig?.passport_label || 'Rewards'}
               </p>
-              <p className="text-sm font-bold text-zinc-900">SC Wallet + Scan Rewards</p>
+              <p className="text-sm font-bold text-white">Earn and use your points</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-blue-600 text-white px-3 py-1.5 rounded-full text-xs font-black">
+            <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/12 px-3 py-1.5 text-xs font-black text-white backdrop-blur">
               <Star className="w-3 h-3" /> {nextMilestone ? `${currentStars}/${nextMilestone.stars}` : currentStars}
             </div>
-            <div className="flex items-center gap-1 bg-yellow-200 text-yellow-900 px-3 py-1.5 rounded-full text-[10px] font-black">
+            <div className="flex items-center gap-1 rounded-full bg-amber-200 px-3 py-1.5 text-[10px] font-black text-amber-950">
               <Crown className="w-3 h-3" /> #{currentRank || '—'}
             </div>
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-slate-500">
+        <div className="relative mt-4 flex items-center gap-2 text-[10px] font-bold text-slate-200">
           One rewards journey with scans, wallets, receipts, referrals, and progress in a single feed.
         </div>
       </div>
 
       <div className="p-6 space-y-8">
         {error && (
-          <div className="bg-red-50 border border-red-100 text-red-700 text-[11px] font-bold rounded-2xl px-4 py-3">
+          <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-[11px] font-bold text-red-700">
             {error}
           </div>
         )}
         {!isLoggedIn && (
-          <div className="bg-blue-50 border border-blue-100 text-blue-700 text-[11px] font-bold rounded-2xl px-4 py-3">
-            Scan first. Log in later to claim and redeem SC as airtime, data, or M-Pesa.
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[11px] font-bold text-amber-900">
+            Start earning now and sign in later to use your points.
           </div>
         )}
         {guestClaimStatus && (
-          <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-2xl px-4 py-3">
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-[11px] font-bold text-emerald-700">
             {guestClaimStatus}
           </div>
         )}
         {loading && (
-          <div className="bg-white rounded-2xl border border-blue-100 p-5 text-[11px] font-bold text-zinc-500">
+          <div className={`${mutedPanelClass} p-5 text-[11px] font-bold text-zinc-500`}>
             Loading rewards...
           </div>
         )}
+        <section className={sectionCardClass}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className={sectionEyebrowClass}>Your Balance</p>
+              <div className="rewards-balance-card mt-3 inline-flex min-w-[184px] flex-col rounded-[24px] px-5 py-4 shadow-[0_18px_40px_rgba(15,23,42,0.16)]">
+                <span className="rewards-balance-accent text-[10px] font-black uppercase tracking-[0.24em]">Available now</span>
+                <span className="mt-2 text-4xl font-black leading-none">{buyerCoins}<span className="rewards-balance-accent ml-2 text-lg">SC</span></span>
+              </div>
+              <p className="mt-2 text-[10px] font-bold text-slate-500">
+                {walletHint || 'Scan shop codes and receipts to earn more points.'}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                onOpenQrRequested?.();
+                setShowQrModal(true);
+                setQrStep('scan');
+              }}
+              className="flex items-center gap-2 rounded-xl bg-[#14532d] px-4 py-3 text-[10px] font-black text-white shadow-[0_12px_30px_rgba(20,83,45,0.18)]"
+            >
+              <QrCode className="w-4 h-4" /> Scan QR
+            </button>
+          </div>
+          {economicsConfig && (
+            <div className={`${mutedPanelClass} mt-4 p-3 text-[10px] font-bold text-slate-600`}>
+              Daily limit: {economicsConfig.daily_earn_cap ?? '—'} SC • Monthly limit: {economicsConfig.monthly_earn_cap ?? '—'} SC
+              {economicsConfig.streak_cap_days ? ` • Streak bonus up to ${economicsConfig.streak_cap_days} days` : ''}
+              {economicsConfig.redeem_hint ? ` • ${economicsConfig.redeem_hint}` : ''}
+            </div>
+          )}
+        </section>
         <>
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+            <section className={sectionCardClass}>
               <div className="flex items-center gap-2 mb-3">
                 <Receipt className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Receipt Capture</h3>
+                <h3 className={sectionEyebrowClass}>Receipt Rewards</h3>
               </div>
-              <p className="text-[10px] text-slate-500 font-bold">Scan a receipt to auto-read items and sync inventory.</p>
+              <p className="text-[10px] font-bold text-slate-500">
+                {isSellerAccount
+                  ? 'Take a photo of a receipt to pull out items and update your shop records.'
+                  : 'Take a photo of your receipt to earn points and keep your shopping record in one place.'}
+              </p>
               <div className="mt-4 space-y-3">
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={openReceiptScanner}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+                    className={primaryActionClass}
                     disabled={!isLoggedIn || receiptUploading || receiptScanSubmitting}
                   >
                     <CameraIcon className="w-4 h-4 inline-block mr-2" />
-                    Scan Receipt
+                    Take Photo
                   </button>
-                  <label className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black cursor-pointer">
+                  <label className={`${secondaryActionClass} cursor-pointer`}>
                     <Upload className="w-4 h-4 inline-block mr-2" />
-                    Upload Receipt
+                    Choose Photo
                     <input
                       type="file"
                       accept="image/*"
@@ -982,30 +1064,30 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                   </label>
                 </div>
                 {!isLoggedIn && (
-                  <div className="p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
-                    Receipt capture unlocks after login.
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[10px] font-bold text-amber-900">
+                    Sign in to add receipts.
                   </div>
                 )}
                 {receiptUploadStatus && (
-                  <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-[10px] font-bold text-emerald-700">
                     {receiptUploadStatus}
                   </div>
                 )}
                 {receiptScanText && (
-                  <div className="p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-600">
-                    OCR Preview: {receiptScanText.slice(0, 120)}{receiptScanText.length > 120 ? '...' : ''}
+                  <div className={`${mutedPanelClass} p-3 text-[10px] font-bold text-slate-600`}>
+                    We found: {receiptScanText.slice(0, 120)}{receiptScanText.length > 120 ? '...' : ''}
                   </div>
                 )}
                 {receiptScanPreview && (
-                  <div className="rounded-2xl overflow-hidden border border-slate-100">
+                  <div className={`${mutedPanelClass} overflow-hidden rounded-2xl`}>
                     <img src={receiptScanPreview} className="w-full h-48 object-cover" alt="receipt preview" />
                   </div>
                 )}
-                <div className="p-3 bg-emerald-50 rounded-2xl text-[10px] font-bold text-emerald-700">
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-[10px] font-bold text-emerald-700">
                   Receipt streak: {receiptStreak} days
                   {receiptRewardsConfig
                     ? ` • Bonus at ${receiptRewardsConfig.streak_days ?? '—'} days (${receiptRewardsConfig.currency ? `${receiptRewardsConfig.currency} ` : ''}${receiptRewardsConfig.streak_bonus ?? '—'})`
-                    : ' • Receipt rewards configured in ops.'}
+                    : ' • Receipt rewards are being set up.'}
                   {receiptRewardsConfig?.daily_min !== undefined && receiptRewardsConfig?.daily_max !== undefined
                     ? ` • Daily range ${receiptRewardsConfig.currency ? `${receiptRewardsConfig.currency} ` : ''}${receiptRewardsConfig.daily_min}–${receiptRewardsConfig.daily_max}`
                     : ''}
@@ -1020,33 +1102,33 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                       await handleReceiptQueueSync();
                     }
                   }}
-                  className="w-full py-3 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black"
+                  className={`${secondaryActionClass} w-full py-3`}
                 >
-                  {showReceiptQueue ? 'Hide' : 'Show'} Offline Receipt Queue
+                  {showReceiptQueue ? 'Hide' : 'Show'} Saved Receipts
                 </button>
                 {showReceiptQueue && (
-                  <div className="p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-600">
+                  <div className={`${mutedPanelClass} p-3 text-[10px] font-bold text-slate-600`}>
                     {receiptQueueLoading
-                      ? 'Syncing offline receipts...'
-                      : receiptQueueMessage || `${receiptQueueCount ?? 0} receipts queued. Will upload automatically when online.`}
+                      ? 'Saving your receipts...'
+                      : receiptQueueMessage || `${receiptQueueCount ?? 0} receipts saved and ready to upload.`}
                   </div>
                 )}
                 <button
                   onClick={handleResetReceiptStreak}
-                  className="w-full py-2 bg-slate-50 text-slate-600 rounded-xl text-[10px] font-black"
+                  className={`${secondaryActionClass} w-full py-2`}
                 >
-                  Reset Receipt Streak
+                  Reset Receipt Progress
                 </button>
               </div>
-              {receiptItems.length > 0 && (
-                <div className="mt-4 bg-white rounded-2xl border border-slate-100 p-4 space-y-3">
+              {isSellerAccount && receiptItems.length > 0 && (
+                <div className={`${sectionCardClass} mt-4 space-y-3 rounded-2xl p-4`}>
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Pending Inventory</p>
                     <span className="text-[10px] font-bold text-slate-500">{receiptItems.length} items</span>
                   </div>
                   <div className="space-y-2">
                     {receiptItems.slice(0, 6).map((item) => (
-                      <div key={item.id} className="p-3 bg-slate-50 rounded-xl flex items-center justify-between gap-2">
+                      <div key={item.id} className={`${mutedPanelClass} flex items-center justify-between gap-2 rounded-xl p-3`}>
                         <div>
                           <p className="text-[10px] font-black text-slate-800">{item.item_name || 'Receipt item'}</p>
                           <p className="text-[9px] font-bold text-slate-500">
@@ -1057,7 +1139,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                           <select
                             value={receiptMergeTargets[item.id] || ''}
                             onChange={(e) => setReceiptMergeTargets(prev => ({ ...prev, [item.id]: e.target.value }))}
-                            className="text-[9px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-1"
+                            className="theme-input-surface rounded-lg border px-2 py-1 text-[9px] font-bold"
                           >
                             <option value="">Auto-match</option>
                             {sellerProducts.slice(0, 50).map((product) => (
@@ -1068,7 +1150,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                           </select>
                           <button
                             onClick={() => handleVerifyReceiptItem(item)}
-                            className="px-3 py-1.5 bg-emerald-600 text-white rounded-full text-[9px] font-black"
+                            className="rounded-full bg-[#14532d] px-3 py-1.5 text-[9px] font-black text-white"
                           >
                             Merge &amp; Verify
                           </button>
@@ -1081,7 +1163,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               {receiptUploads.length > 0 && (
                 <div className="mt-4 space-y-2">
                   {receiptUploads.map(upload => (
-                    <div key={upload.id} className="p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-700">
+                    <div key={upload.id} className={`${mutedPanelClass} rounded-2xl p-3 text-[10px] font-bold text-slate-700`}>
                       <div className="flex items-center justify-between">
                         <div>
                           {upload.merchantName} • KES {upload.totalAmount} • Reward KES {upload.rewardIssued}
@@ -1100,7 +1182,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                             }
                           }}
                           disabled={upload.status === 'queued'}
-                          className={`px-2 py-1 rounded-lg text-[9px] font-black ${upload.status === 'queued' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}
+                          className={`rounded-lg px-2 py-1 text-[9px] font-black ${upload.status === 'queued' ? 'bg-emerald-100 text-emerald-700' : 'rewards-secondary-action border'}`}
                         >
                           {upload.status === 'queued' ? 'Queued' : 'Queue'}
                         </button>
@@ -1112,14 +1194,14 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               )}
             </section>
 
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+            <section className={sectionCardClass}>
               <div className="flex items-center gap-2 mb-3">
                 <Gift className="w-4 h-4 text-amber-500" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Referral Rewards</h3>
+                <h3 className={sectionEyebrowClass}>Invite Friends</h3>
               </div>
               <div className="flex gap-2">
                 <input
-                  className="flex-1 p-3 bg-slate-100 rounded-xl text-[10px] font-bold text-slate-700"
+                  className="theme-input-surface flex-1 rounded-xl border p-3 text-[10px] font-bold"
                   placeholder="Friend's phone number"
                   value={referralPhone}
                   onChange={(e) => setReferralPhone(e.target.value)}
@@ -1127,30 +1209,30 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                 />
                 <button
                   onClick={handleReferral}
-                  className="px-4 py-3 bg-amber-500 text-white rounded-xl text-[10px] font-black"
+                  className="rounded-xl bg-amber-500 px-4 py-3 text-[10px] font-black text-white shadow-[0_12px_28px_rgba(245,158,11,0.22)]"
                   disabled={!isLoggedIn}
                 >
                   Invite
                 </button>
               </div>
               {!isLoggedIn && (
-                <div className="mt-3 p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
-                  Referral rewards unlock after login.
+                <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[10px] font-bold text-amber-900">
+                  Sign in to send invites.
                 </div>
               )}
               <div className="mt-3 text-[10px] font-bold text-slate-600">
                 {referralConfig ? (
                   <>
-                    Referrals: {referralsCount}
+                    Friends invited: {referralsCount}
                     {referralConfig.next_bonus_invites && referralConfig.next_bonus_amount !== undefined && (
                       <> • Next bonus at {referralConfig.next_bonus_invites} invites ({referralConfig.currency ? `${referralConfig.currency} ` : ''}{referralConfig.next_bonus_amount})</>
                     )}
                     {referralConfig.pair_bonus_amount !== undefined && (
-                      <> • Refer a shop: both earn {referralConfig.currency ? `${referralConfig.currency} ` : ''}{referralConfig.pair_bonus_amount}</>
+                      <> • When a friend joins, you both earn {referralConfig.currency ? `${referralConfig.currency} ` : ''}{referralConfig.pair_bonus_amount}</>
                     )}
                   </>
                 ) : (
-                  <>Referrals: {referralsCount} • Referral rewards not configured.</>
+                  <>Friends invited: {referralsCount}</>
                 )}
               </div>
             </section>
@@ -1158,48 +1240,19 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         </>
 
         <>
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">SC Wallet</p>
-                  <p className="text-sm font-bold text-slate-900">Your Balance: {buyerCoins} SC</p>
-                </div>
-                <button
-                  onClick={() => {
-                    onOpenQrRequested?.();
-                    setShowQrModal(true);
-                    setQrStep('scan');
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-xl text-[10px] font-black flex items-center gap-2"
-                >
-                  <QrCode className="w-4 h-4" /> Scan QR
-                </button>
-              </div>
-              <p className="mt-3 text-[10px] text-slate-500 font-bold">
-                {walletHint || 'Scan QR codes to earn SC rewards.'}
-              </p>
-              {economicsConfig && (
-                <div className="mt-3 p-3 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-600">
-                  Caps: {economicsConfig.daily_earn_cap ?? '—'} SC/day • {economicsConfig.monthly_earn_cap ?? '—'} SC/month
-                  {economicsConfig.streak_cap_days ? ` • Streak cap ${economicsConfig.streak_cap_days} days` : ''}
-                  {economicsConfig.redeem_hint ? ` • ${economicsConfig.redeem_hint}` : ''}
-                </div>
-              )}
-            </section>
-
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+            <section className={sectionCardClass}>
               <div className="flex items-center gap-2 mb-4">
                 <Wallet className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Redeem SC</h3>
+                <h3 className={sectionEyebrowClass}>Use Your Points</h3>
               </div>
               {!isLoggedIn && (
-                <div className="mb-3 p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-blue-700">
-                  Redemption requires login. Guest scans are saved to this device until you sign in.
+                <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[10px] font-bold text-amber-900">
+                  Sign in to use your points.
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3 text-[10px] font-bold">
                 {walletOffers.length === 0 && (
-                  <div className="col-span-2 p-3 bg-slate-50 rounded-2xl text-slate-500">
+                  <div className={`col-span-2 ${mutedPanelClass} p-3 text-slate-500`}>
                     No redemption offers configured yet.
                   </div>
                 )}
@@ -1214,18 +1267,18 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                       handleRedeemWallet(reward);
                     }}
                     disabled={!isLoggedIn}
-                    className={`p-3 rounded-2xl text-left ${isLoggedIn ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                    className={`rounded-2xl border p-3 text-left ${isLoggedIn ? 'border-emerald-100 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100' : 'rewards-muted-panel text-slate-400 cursor-not-allowed'}`}
                   >
                     <div className="font-black">{reward.label}</div>
-                    <div className="text-[9px] text-blue-500">{reward.cost} SC{reward.description ? ` • ${reward.description}` : ''}</div>
+                    <div className="text-[9px] text-emerald-700">{reward.cost} SC{reward.description ? ` • ${reward.description}` : ''}</div>
                   </button>
                 ))}
               </div>
             </section>
 
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+            <section className={sectionCardClass}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">SC Wallet History</h3>
+                <h3 className={sectionEyebrowClass}>Recent Activity</h3>
                 <button
                   onClick={refreshBalanceAndLedger}
                   className="text-[10px] font-bold text-zinc-400"
@@ -1235,10 +1288,10 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               </div>
               <div className="space-y-2 text-[10px] font-bold text-slate-600">
                 {buyerPayouts.length === 0 && (
-                  <div className="p-3 bg-slate-50 rounded-2xl text-slate-500">No wallet activity yet.</div>
+                  <div className={`${mutedPanelClass} p-3 text-slate-500`}>No activity yet.</div>
                 )}
                 {buyerPayouts.map(p => (
-                  <div key={p.id} className="p-3 bg-slate-50 rounded-2xl flex items-center justify-between">
+                  <div key={p.id} className={`flex items-center justify-between ${mutedPanelClass} p-3`}>
                     <span>{p.reason}</span>
                     <span className={p.amount >= 0 ? 'text-emerald-600' : 'text-red-500'}>
                       {p.amount >= 0 ? '+' : ''}{p.amount} SC
@@ -1248,21 +1301,21 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               </div>
             </section>
 
-            <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+            <section className={sectionCardClass}>
                 <div className="flex items-center gap-2 mb-3">
                   <ShieldCheck className="w-4 h-4 text-amber-500" />
-                  <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Anti-Fraud Checks</h3>
+                  <h3 className={sectionEyebrowClass}>Safety Notices</h3>
                 </div>
                 <div className="space-y-2 text-[10px] font-bold text-slate-600">
                   {fraudAlerts.length === 0 && (
-                    <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-700">No active fraud alerts.</div>
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-emerald-700">Everything looks good.</div>
                   )}
                   {fraudAlerts.map((alert, idx) => (
                     <div
                       key={alert.id || `fraud_${idx}`}
-                      className="p-3 rounded-2xl bg-amber-50"
+                      className="rounded-2xl border border-amber-200 bg-amber-50 p-3"
                     >
-                      {alert?.details || alert?.type || 'Fraud alert'}
+                      {alert?.details || alert?.type || 'Notice'}
                     </div>
                   ))}
                 </div>
@@ -1274,8 +1327,8 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         {/* Leaderboard */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Leaderboard</h3>
-            <div className="text-[10px] text-zinc-500 font-bold">Live</div>
+            <h3 className={sectionEyebrowClass}>Leaderboard</h3>
+            <div className="text-[10px] text-zinc-500 font-bold">Updated</div>
           </div>
           <div className="space-y-2">
             {leaderboard.map((leader) => {
@@ -1283,7 +1336,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
               const rank = leader.rank ?? 0;
               const stars = Number(leader.stars_total ?? 0);
               return (
-                <div key={`${leader.user_id}-${rank}`} className="flex items-center p-3 bg-white rounded-2xl border border-blue-100 shadow-sm">
+                <div key={`${leader.user_id}-${rank}`} className="rewards-card flex items-center rounded-2xl border p-3 shadow-[0_14px_35px_rgba(15,23,42,0.05)]">
                   <div
                     className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black ${
                       rank === 1
@@ -1291,17 +1344,17 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                         : rank === 2
                         ? 'bg-zinc-200'
                         : rank === 3
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-blue-50'
+                        ? 'bg-emerald-600 text-white'
+                        : 'rewards-secondary-action border'
                     }`}
                   >
                     {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🥴'}
                   </div>
                   <div className="ml-3">
-                    <p className={`text-sm font-bold ${name === 'YOU' ? 'text-blue-600' : 'text-zinc-800'}`}>{name}</p>
+                    <p className={`text-sm font-bold ${name === 'YOU' ? 'text-emerald-700' : 'text-zinc-800'}`}>{name}</p>
                     <p className="text-[10px] text-zinc-400">Rank #{rank || '—'}</p>
                   </div>
-                  <span className="ml-auto text-blue-600 font-black text-sm">{stars}⭐</span>
+                  <span className="ml-auto text-emerald-700 font-black text-sm">{stars}⭐</span>
                 </div>
               );
             })}
@@ -1309,45 +1362,45 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         </section>
 
         {/* Progress */}
-        <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+        <section className={sectionCardClass}>
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50">
                 📊
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-blue-500">Progress</p>
+                <p className={sectionEyebrowClass}>Progress</p>
                 <p className="text-[10px] text-zinc-500">
                   {nextMilestone ? `${currentStars}/${nextMilestone.stars} ⭐ → ${nextMilestone.label}` : `${currentStars} ⭐`}
                 </p>
               </div>
             </div>
-            <div className="w-full bg-blue-50 rounded-full h-3">
+            <div className={`${mutedPanelClass} h-3 w-full rounded-full`}>
               <div
                 className="h-3 rounded-full"
-                style={{ width: `${progressPct}%`, background: 'linear-gradient(90deg, #1976D2, #42A5F5)' }}
+                style={{ width: `${progressPct}%`, background: 'linear-gradient(90deg, #b45309, #16a34a)' }}
               />
             </div>
-            <div className="mt-3 text-[10px] font-bold text-blue-600">{progressPct}% complete</div>
+            <div className="mt-3 text-[10px] font-bold text-emerald-700">{progressPct}% complete</div>
           </div>
         </section>
 
         {/* Reward Unlocks */}
-        <section className="bg-white rounded-3xl border border-blue-100 shadow-sm p-5">
+        <section className={sectionCardClass}>
           <div className="flex items-center gap-2 mb-4">
-            <Trophy className="w-4 h-4 text-blue-600" />
-            <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">
-              {economicsConfig?.passport_label || 'Reward Unlocks'}
+            <Trophy className="w-4 h-4 text-amber-600" />
+            <h3 className={sectionEyebrowClass}>
+              {economicsConfig?.passport_label || 'Coming Up'}
             </h3>
           </div>
           <div className="space-y-3">
             {milestones.length === 0 && (
-              <div className="p-3 bg-blue-50 rounded-2xl text-[10px] font-bold text-zinc-500">
-                Milestones not configured yet.
+              <div className={`${mutedPanelClass} p-3 text-[10px] font-bold text-zinc-500`}>
+                More rewards are coming soon.
               </div>
             )}
             {milestones.map((milestone) => (
-              <div key={milestone.stars} className="p-3 bg-blue-50 rounded-2xl flex items-center justify-between">
+              <div key={milestone.stars} className={`${mutedPanelClass} flex items-center justify-between rounded-2xl p-3`}>
                 <div>
                   <p className="text-sm font-bold text-zinc-900">{milestone.label}</p>
                   <p className="text-[10px] text-zinc-500">{milestone.stars} stars required</p>
@@ -1355,7 +1408,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                 {currentStars >= milestone.stars ? (
                   <span className="text-[10px] font-black text-emerald-600">Unlocked</span>
                 ) : (
-                  <button className="text-[10px] font-black text-blue-600 flex items-center gap-1">
+                  <button className="flex items-center gap-1 text-[10px] font-black text-amber-700">
                     Earn <ArrowRight className="w-3 h-3" />
                   </button>
                 )}
@@ -1365,9 +1418,9 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         </section>
 
         {/* Footer CTA */}
-        <section className="bg-blue-600 text-white rounded-3xl p-5 flex items-center justify-between">
+        <section className="flex items-center justify-between rounded-[28px] bg-[linear-gradient(135deg,#111827_0%,#1f2937_55%,#14532d_100%)] p-5 text-white shadow-[0_20px_45px_rgba(15,23,42,0.14)]">
           <div>
-            <p className="text-xs font-black uppercase tracking-widest text-blue-100">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-amber-200">
               {economicsConfig?.passport_label || 'Rewards'}
             </p>
             <p className="text-sm font-bold">
@@ -1397,11 +1450,32 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                 <>
                   <div className="space-y-3">
                     {scannerSupported ? (
-                      <div className="h-44 bg-slate-100 rounded-2xl overflow-hidden flex items-center justify-center">
+                      <div className="relative h-52 overflow-hidden rounded-[1.75rem] border border-slate-200 bg-slate-950">
                         {cameraActive ? (
-                          <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
+                          <>
+                            <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
+                            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.1),rgba(2,6,23,0.5))]" />
+                            <div className="pointer-events-none absolute inset-4 rounded-[1.3rem] border border-white/15">
+                              <div className="absolute left-3 top-3 h-8 w-8 rounded-tl-xl border-l-4 border-t-4 border-cyan-300/90" />
+                              <div className="absolute right-3 top-3 h-8 w-8 rounded-tr-xl border-r-4 border-t-4 border-cyan-300/90" />
+                              <div className="absolute bottom-3 left-3 h-8 w-8 rounded-bl-xl border-b-4 border-l-4 border-cyan-300/90" />
+                              <div className="absolute bottom-3 right-3 h-8 w-8 rounded-br-xl border-b-4 border-r-4 border-cyan-300/90" />
+                            </div>
+                            <div className="absolute left-3 top-3 rounded-full bg-slate-950/70 px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em] text-cyan-200 backdrop-blur-md">
+                              Scanner Live
+                            </div>
+                            <div className="absolute bottom-3 left-1/2 w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-2xl border border-white/10 bg-slate-950/65 px-3 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur-md">
+                              Hold the QR inside the frame until it is detected.
+                            </div>
+                          </>
                         ) : (
-                          <div className="text-[10px] font-bold text-slate-400">Camera idle</div>
+                          <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.18),transparent_32%),linear-gradient(180deg,#0f172a,#111827)] px-4 text-center">
+                            <div className="rounded-full border border-cyan-300/20 bg-white/10 px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em] text-cyan-200">
+                              Scanner Idle
+                            </div>
+                            <p className="mt-3 text-sm font-black text-white">Ready to scan a rewards QR</p>
+                            <p className="mt-1 text-[10px] font-bold text-slate-300">Start the scanner and point your camera at the shop QR code.</p>
+                          </div>
                         )}
                       </div>
                     ) : (
@@ -1429,7 +1503,7 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
                         Clear
                       </button>
                     </div>
-                    <div className="text-[10px] text-slate-500 font-bold">
+                    <div className="rounded-2xl bg-slate-100 px-3 py-2 text-[10px] text-slate-600 font-bold">
                       Status: {scanStatus === 'scanning' ? 'Scanning…' : scanStatus === 'found' ? 'QR detected' : scanStatus === 'error' ? 'Scanner error' : 'Idle'}
                     </div>
                     {scanError && (
@@ -1742,30 +1816,20 @@ export const Rewards: React.FC<RewardsProps> = ({ openQrOnMount, onOpenQrHandled
         </div>
       )}
 
-      {receiptScanOpen && (
-        <div className="fixed inset-0 z-[90] bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-black w-full max-w-md rounded-3xl overflow-hidden">
-            <div className="relative">
-              <video ref={receiptVideoRef} className="w-full h-96 object-cover" autoPlay playsInline muted />
-              <button
-                onClick={closeReceiptScanner}
-                className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white"
-              >
-                X
-              </button>
-            </div>
-            <div className="p-4 flex items-center justify-between">
-              <span className="text-xs text-white font-bold">Receipt Scanner</span>
-              <button
-                onClick={captureReceipt}
-                className="px-4 py-2 bg-white text-black rounded-xl text-xs font-bold"
-              >
-                Capture
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CameraCaptureOverlay
+        open={receiptScanOpen}
+        videoRef={receiptVideoRef}
+        title="Scan Receipt"
+        subtitle="Capture the full receipt in one frame so OCR can read the shop, totals, and line items."
+        hint="Flatten the receipt, avoid glare, and keep all four corners visible."
+        statusLabel="Receipt scanner ready"
+        captureLabel="Use Receipt Photo"
+        closeLabel="Cancel"
+        busy={receiptUploading}
+        error={receiptUploadStatus?.includes('Unable to access camera') ? receiptUploadStatus : null}
+        onClose={closeReceiptScanner}
+        onCapture={captureReceipt}
+      />
     </div>
   );
 };

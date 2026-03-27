@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { Search, Star, MapPin, ArrowRight, BadgeCheck } from 'lucide-react';
+import { Search, Star, MapPin, ArrowRight, ArrowLeft, BadgeCheck } from 'lucide-react';
 import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
 
 interface ShopsProps {
+  onBack?: () => void;
   onShopClick: (sellerId: string) => void;
 }
 
-export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
+export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
   const [query, setQuery] = useState('');
   const [shops, setShops] = useState<ShopDirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,7 +61,14 @@ export const Shops: React.FC<ShopsProps> = ({ onShopClick }) => {
     <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">
       {/* Header */}
       <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-10">
-        <h1 className="text-2xl font-bold text-zinc-900 mb-4">Discover Shops</h1>
+        <div className="mb-4 flex items-center gap-3">
+          {onBack && (
+            <button onClick={onBack} className="p-2 rounded-full hover:bg-zinc-100 transition-colors" aria-label="Go back">
+              <ArrowLeft className="w-5 h-5 text-zinc-900" />
+            </button>
+          )}
+          <h1 className="text-2xl font-bold text-zinc-900">Discover Shops</h1>
+        </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
           <input 

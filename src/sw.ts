@@ -10,6 +10,7 @@ declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<Record<string, any>>;
 };
 
+void self.skipWaiting();
 clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST || []);

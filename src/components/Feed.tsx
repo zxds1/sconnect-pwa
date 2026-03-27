@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, MessageCircle, Share2, ShoppingBag, ChevronDown, Music2, Volume2, VolumeX, Plus, Star, Sparkles, ArrowRight, Copy, Send, User, Radio, Check } from 'lucide-react';
+import { Heart, MessageCircle, Share2, ShoppingBag, ChevronDown, Music2, Volume2, VolumeX, Plus, Star, Sparkles, ArrowRight, ArrowLeft, Copy, Send, User, Radio, Check } from 'lucide-react';
 import { Product } from '../types';
 import { addCartItem } from '../lib/cartApi';
 import { getProduct } from '../lib/catalogApi';
 import { getShopProfile } from '../lib/shopDirectoryApi';
+import { listSellerProducts, type SellerProduct } from '../lib/sellerProductsApi';
 import {
   createPost,
   followSeller,
@@ -31,6 +32,7 @@ import { getVideoDurationSeconds, uploadMediaFile } from '../lib/mediaUpload';
 import { VideoTrimModal } from './VideoTrimModal';
 
 interface FeedProps {
+  onBack?: () => void;
   onChatOpen: (product: Product) => void;
   onProductOpen: (product: Product) => void;
   onSellerOpen: (sellerId: string) => void;
@@ -63,6 +65,22 @@ type LiveItem = {
   startsAt?: string;
   status?: string;
   viewerCount?: number;
+};
+
+type ShopPostProductOption = {
+  sellerProductId: string;
+  productId: string;
+  name: string;
+  description: string;
+  price: string;
+  category: string;
+  mediaUrl: string;
+  tags: string;
+  neighborhoodId: string;
+  stockLevel: number;
+  stockStatus: string;
+  isFeatured: boolean;
+  updatedAt: string;
 };
 
 const normalizeFeedItem = (item: any): FeedItem | null => {
@@ -119,7 +137,42 @@ const guessMediaType = (url: string): 'video' | 'image' => {
   return 'image';
 };
 
-export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerOpen }) => {
+const toTagString = (value: unknown): string => {
+  if (!Array.isArray(value)) return '';
+  return value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .join(', ');
+};
+
+const getProductMediaUrl = (product: any): string => {
+  const media = Array.isArray(product?.media) ? product.media[0] : null;
+  return product?.media_url || product?.mediaUrl || product?.image_url || media?.media_url || media?.url || '';
+};
+
+const mapShopProductOption = (sellerProduct: SellerProduct, product: any): ShopPostProductOption | null => {
+  const productId = sellerProduct.product_id || product?.id;
+  if (!productId) return null;
+
+  const priceCandidate = sellerProduct.current_price ?? product?.price ?? product?.unit_price ?? product?.current_price;
+
+  return {
+    sellerProductId: sellerProduct.id,
+    productId,
+    name: sellerProduct.alias || product?.name || product?.title || '',
+    description: product?.description || '',
+    price: priceCandidate !== undefined && priceCandidate !== null ? String(priceCandidate) : '',
+    category: sellerProduct.category_id || product?.category_id || product?.category || '',
+    mediaUrl: getProductMediaUrl(product),
+    tags: toTagString(product?.tags),
+    neighborhoodId: sellerProduct.neighborhood || '',
+    stockLevel: Number(sellerProduct.stock_level ?? 0),
+    stockStatus: sellerProduct.stock_status || '',
+    isFeatured: Boolean(sellerProduct.is_featured),
+    updatedAt: sellerProduct.updated_at || ''
+  };
+};
+
+export const Feed: React.FC<FeedProps> = ({ onBack, onChatOpen, onProductOpen, onSellerOpen }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isMuted, setIsMuted] = useState(true);
   const [shareProduct, setShareProduct] = useState<FeedItem | null>(null);
@@ -137,6 +190,13 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   const postMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [postMediaUploading, setPostMediaUploading] = useState(false);
   const [postTrimFile, setPostTrimFile] = useState<File | null>(null);
+  const [shopProducts, setShopProducts] = useState<ShopPostProductOption[]>([]);
+  const [shopProductsLoading, setShopProductsLoading] = useState(false);
+  const [shopProductsError, setShopProductsError] = useState<string | null>(null);
+  const [selectedShopProductId, setSelectedShopProductId] = useState('');
+  const [shopProductSearch, setShopProductSearch] = useState('');
+  const [shopProductCategoryFilter, setShopProductCategoryFilter] = useState('all');
+  const [shopProductSort, setShopProductSort] = useState<'featured' | 'recent' | 'price_low' | 'price_high' | 'stock_low'>('featured');
   const [items, setItems] = useState<FeedItem[]>([]);
   const [trending, setTrending] = useState<FeedItem[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveItem[]>([]);
@@ -164,6 +224,75 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
   const containerRef = useRef<HTMLDivElement>(null);
 
   const getItemKey = (item: FeedItem) => item.postId || item.productId || item.liveId || item.id;
+
+  const shopProductCategories = useMemo(
+    () =>
+      Array.from(new Set(shopProducts.map((item) => item.category).filter((value) => value && value.trim().length > 0))).sort((a, b) =>
+        a.localeCompare(b)
+      ),
+    [shopProducts]
+  );
+
+  const filteredShopProducts = useMemo(() => {
+    const query = shopProductSearch.trim().toLowerCase();
+    const filtered = shopProducts.filter((item) => {
+      const matchesCategory = shopProductCategoryFilter === 'all' || item.category === shopProductCategoryFilter;
+      if (!matchesCategory) return false;
+      if (!query) return true;
+      const haystack = [item.name, item.description, item.category, item.tags]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+    const toPrice = (item: ShopPostProductOption) => {
+      const value = Number(item.price);
+      return Number.isFinite(value) ? value : null;
+    };
+    return [...filtered].sort((a, b) => {
+      if (shopProductSort === 'price_low') {
+        const aPrice = toPrice(a);
+        const bPrice = toPrice(b);
+        if (aPrice === null && bPrice === null) return a.name.localeCompare(b.name);
+        if (aPrice === null) return 1;
+        if (bPrice === null) return -1;
+        return aPrice - bPrice;
+      }
+      if (shopProductSort === 'price_high') {
+        const aPrice = toPrice(a);
+        const bPrice = toPrice(b);
+        if (aPrice === null && bPrice === null) return a.name.localeCompare(b.name);
+        if (aPrice === null) return 1;
+        if (bPrice === null) return -1;
+        return bPrice - aPrice;
+      }
+      if (shopProductSort === 'stock_low') {
+        return a.stockLevel - b.stockLevel || a.name.localeCompare(b.name);
+      }
+      if (shopProductSort === 'recent') {
+        return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
+      }
+      if (a.isFeatured !== b.isFeatured) {
+        return a.isFeatured ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [shopProducts, shopProductCategoryFilter, shopProductSearch, shopProductSort]);
+
+  const applyShopProductToPost = (shopProduct: ShopPostProductOption) => {
+    setSelectedShopProductId(shopProduct.productId);
+    setPostForm((prev) => ({
+      ...prev,
+      name: shopProduct.name,
+      description: shopProduct.description,
+      price: shopProduct.price,
+      category: shopProduct.category,
+      mediaUrl: shopProduct.mediaUrl,
+      tags: shopProduct.tags,
+      productId: shopProduct.productId,
+      neighborhoodId: shopProduct.neighborhoodId || prev.neighborhoodId
+    }));
+  };
 
   const loadFeed = async (activeTab: 'for_you' | 'following' | 'live') => {
     setLoading(true);
@@ -324,6 +453,43 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
     };
   }, [trending.length]);
 
+  useEffect(() => {
+    if (!showCreatePost) return;
+
+    let alive = true;
+    const loadShopProducts = async () => {
+      setShopProductsLoading(true);
+      setShopProductsError(null);
+      try {
+        const sellerProducts = await listSellerProducts();
+        const options = await Promise.all(
+          sellerProducts.map(async (sellerProduct) => {
+            try {
+              const product = sellerProduct.product_id ? await getProduct(sellerProduct.product_id) : null;
+              return mapShopProductOption(sellerProduct, product);
+            } catch {
+              return mapShopProductOption(sellerProduct, null);
+            }
+          })
+        );
+        if (!alive) return;
+        setShopProducts(options.filter((item): item is ShopPostProductOption => !!item));
+      } catch (err: any) {
+        if (!alive) return;
+        setShopProducts([]);
+        setShopProductsError(err?.message || 'Unable to load shop products.');
+      } finally {
+        if (alive) setShopProductsLoading(false);
+      }
+    };
+
+    loadShopProducts();
+
+    return () => {
+      alive = false;
+    };
+  }, [showCreatePost]);
+
   const handleShare = async (item: FeedItem) => {
     try {
       const targetId = item.postId || item.productId || item.id;
@@ -381,6 +547,10 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
         product_id: postForm.productId || undefined
       });
       setShowCreatePost(false);
+      setSelectedShopProductId('');
+      setShopProductSearch('');
+      setShopProductCategoryFilter('all');
+      setShopProductSort('featured');
       setPostForm({ name: '', description: '', price: '', category: '', mediaUrl: '', tags: '', productId: '', neighborhoodId: '' });
       loadFeed(tab);
     } catch (err: any) {
@@ -737,6 +907,15 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
 
   return (
     <div className="relative h-full w-full bg-black overflow-hidden select-none">
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="absolute left-4 top-[calc(env(safe-area-inset-top)+1rem)] z-20 rounded-full border border-white/20 bg-black/35 p-3 text-white backdrop-blur-md transition hover:bg-black/45"
+          aria-label="Go back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+      )}
       <div 
         ref={containerRef}
         onScroll={handleScroll}
@@ -1267,11 +1446,193 @@ export const Feed: React.FC<FeedProps> = ({ onChatOpen, onProductOpen, onSellerO
             >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold">Create Post</h3>
-                <button onClick={() => setShowCreatePost(false)} className="p-2 rounded-full hover:bg-zinc-100">
+                <button
+                  onClick={() => {
+                    setShowCreatePost(false);
+                    setSelectedShopProductId('');
+                    setShopProductSearch('');
+                    setShopProductCategoryFilter('all');
+                    setShopProductSort('featured');
+                  }}
+                  className="p-2 rounded-full hover:bg-zinc-100"
+                >
                   <ChevronDown className="w-5 h-5" />
                 </button>
               </div>
               <div className="space-y-3">
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-[0.24em] text-zinc-500">Post From Shop</p>
+                      <p className="text-xs font-semibold text-zinc-700">Choose an existing shop product to prefill this post.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {selectedShopProductId && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedShopProductId('')}
+                          className="text-[11px] font-bold text-zinc-500 hover:text-zinc-700"
+                        >
+                          Clear pick
+                        </button>
+                      )}
+                      {shopProductsLoading && <span className="text-[11px] font-bold text-zinc-500">Loading…</span>}
+                    </div>
+                  </div>
+                  <p className="text-[11px] font-semibold text-zinc-500">
+                    Pick from your catalog and we’ll fill the post below. You can still edit anything after selecting.
+                  </p>
+                  {shopProducts.length > 0 && (
+                    <div className="space-y-2">
+                      <input
+                        className="w-full rounded-xl border border-zinc-200 bg-white p-3 text-xs font-semibold text-zinc-900 placeholder:text-zinc-400"
+                        placeholder="Search products by name, category, or tags"
+                        value={shopProductSearch}
+                        onChange={(e) => setShopProductSearch(e.target.value)}
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          className="w-full rounded-xl border border-zinc-200 bg-white p-3 text-xs font-semibold text-zinc-900"
+                          value={shopProductSort}
+                          onChange={(e) => setShopProductSort(e.target.value as typeof shopProductSort)}
+                        >
+                          <option value="featured">Sort: Featured first</option>
+                          <option value="recent">Sort: Recently added</option>
+                          <option value="price_low">Sort: Lowest price</option>
+                          <option value="price_high">Sort: Highest price</option>
+                          <option value="stock_low">Sort: Low stock first</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShopProductSearch('');
+                            setShopProductCategoryFilter('all');
+                            setShopProductSort('featured');
+                          }}
+                          className="rounded-xl bg-white px-3 py-3 text-xs font-black text-zinc-700 ring-1 ring-zinc-200"
+                        >
+                          Reset filters
+                        </button>
+                      </div>
+                      {shopProductCategories.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShopProductCategoryFilter('all')}
+                            className={`rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] ${
+                              shopProductCategoryFilter === 'all'
+                                ? 'bg-zinc-900 text-white'
+                                : 'bg-white text-zinc-600 ring-1 ring-zinc-200'
+                            }`}
+                          >
+                            All
+                          </button>
+                          {shopProductCategories.map((category) => (
+                            <button
+                              key={category}
+                              type="button"
+                              onClick={() => setShopProductCategoryFilter(category)}
+                              className={`rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] ${
+                                shopProductCategoryFilter === category
+                                  ? 'bg-zinc-900 text-white'
+                                  : 'bg-white text-zinc-600 ring-1 ring-zinc-200'
+                              }`}
+                            >
+                              {category}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {shopProductsError && (
+                    <p className="text-[11px] font-semibold text-amber-700">{shopProductsError}</p>
+                  )}
+                  {!shopProductsLoading && !shopProductsError && shopProducts.length === 0 && (
+                    <p className="text-[11px] font-semibold text-zinc-500">No shop products found yet. You can still post manually.</p>
+                  )}
+                  {!shopProductsLoading && shopProducts.length > 0 && filteredShopProducts.length === 0 && (
+                    <p className="rounded-xl bg-white px-3 py-2 text-[11px] font-semibold text-zinc-500 ring-1 ring-zinc-200">
+                      No products match that search yet. Try a different name or category.
+                    </p>
+                  )}
+                  {!shopProductsLoading && filteredShopProducts.length > 0 && (
+                    <div className="grid gap-3 max-h-64 overflow-y-auto pr-1">
+                      {filteredShopProducts.map((item) => {
+                        const selected = selectedShopProductId === item.productId;
+                        const stockTone =
+                          item.stockLevel <= 0 || item.stockStatus.toLowerCase() === 'out_of_stock'
+                            ? 'bg-rose-100 text-rose-700'
+                            : item.stockLevel <= 5
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-emerald-100 text-emerald-700';
+                        const stockLabel =
+                          item.stockLevel > 0
+                            ? `${item.stockLevel} in stock`
+                            : item.stockStatus
+                              ? item.stockStatus.replace(/_/g, ' ')
+                              : 'Stock unknown';
+                        return (
+                          <button
+                            key={item.sellerProductId}
+                            type="button"
+                            onClick={() => applyShopProductToPost(item)}
+                            className={`w-full rounded-2xl border p-3 text-left transition ${
+                              selected
+                                ? 'border-zinc-900 bg-zinc-900 text-white shadow-lg shadow-zinc-300/60'
+                                : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl ${selected ? 'bg-zinc-800' : 'bg-zinc-100'}`}>
+                                {item.mediaUrl ? (
+                                  guessMediaType(item.mediaUrl) === 'video' ? (
+                                    <video src={item.mediaUrl} className="h-full w-full object-cover" muted playsInline />
+                                  ) : (
+                                    <img src={item.mediaUrl} alt={item.name || 'Shop product'} className="h-full w-full object-cover" />
+                                  )
+                                ) : (
+                                  <div className={`flex h-full w-full items-center justify-center ${selected ? 'text-zinc-300' : 'text-zinc-400'}`}>
+                                    <ShoppingBag className="h-6 w-6" />
+                                  </div>
+                                )}
+                                {item.isFeatured && (
+                                  <div className="absolute left-2 top-2 rounded-full bg-amber-400 px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-950">
+                                    Featured
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1 space-y-2">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-black">{item.name || 'Untitled product'}</p>
+                                    <p className={`truncate text-[11px] font-semibold ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                                      {item.category || 'Uncategorized'}
+                                    </p>
+                                  </div>
+                                  <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${selected ? 'border-white bg-white text-zinc-900' : 'border-zinc-300 text-transparent'}`}>
+                                    <Check className="h-3.5 w-3.5" />
+                                  </div>
+                                </div>
+                                <p className={`line-clamp-2 text-[11px] font-medium ${selected ? 'text-zinc-200' : 'text-zinc-600'}`}>
+                                  {item.description || 'No description yet. You can still write the post in your own words.'}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${selected ? 'bg-white text-zinc-900' : 'bg-zinc-900 text-white'}`}>
+                                    {item.price ? `KES ${item.price}` : 'Price pending'}
+                                  </span>
+                                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${selected ? 'bg-white/15 text-white' : stockTone}`}>
+                                    {stockLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 <input className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Product name" value={postForm.name} onChange={(e) => setPostForm(prev => ({ ...prev, name: e.target.value }))} />
                 <textarea className="w-full p-3 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-900" placeholder="Description" value={postForm.description} onChange={(e) => setPostForm(prev => ({ ...prev, description: e.target.value }))} />
                 <div className="grid grid-cols-2 gap-3">

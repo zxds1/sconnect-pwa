@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
+  ArrowLeft,
   Search as SearchIcon, 
   X, 
   ShoppingBag, 
@@ -20,6 +21,7 @@ import {
   Minimize2
 } from 'lucide-react';
 import { Product } from '../types';
+import { CameraCaptureOverlay } from './CameraCaptureOverlay';
 import { getProduct } from '../lib/catalogApi';
 import {
   listRecentSearches,
@@ -82,6 +84,7 @@ import {
 } from '../lib/routeMultipliers';
 
 interface SearchProps {
+  onBack?: () => void;
   onProductOpen: (product: Product) => void;
   comparisonList: Product[];
   onAddToComparison: (product: Product) => void;
@@ -92,7 +95,7 @@ interface SearchProps {
   initialAction?: 'voice' | 'photo' | 'video' | 'hybrid';
 }
 
-export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, onAddToComparison, onOpenComparison, onAddToBag, onShopOpen, initialQuery, initialAction }) => {
+export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, comparisonList, onAddToComparison, onOpenComparison, onAddToBag, onShopOpen, initialQuery, initialAction }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [locationQuery, setLocationQuery] = useState('');
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -2084,6 +2087,11 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       {/* Search Header */}
       <div className="p-6 bg-white border-b border-zinc-100 sticky top-0 z-20">
         <div className="flex gap-3 items-center mb-4">
+          {onBack && (
+            <button onClick={onBack} className="p-2 rounded-full hover:bg-zinc-100 transition-colors" aria-label="Go back">
+              <ArrowLeft className="w-5 h-5 text-zinc-900" />
+            </button>
+          )}
           <div className="relative flex-1">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
             <input 
@@ -3434,27 +3442,20 @@ export const Search: React.FC<SearchProps> = ({ onProductOpen, comparisonList, o
       {/* Camera Overlay */}
       <AnimatePresence>
         {isCameraOpen && (
-          <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4">
-            <div className="w-full max-w-md bg-black rounded-2xl overflow-hidden">
-              <div className="relative">
-                <video ref={videoRef} className="w-full h-80 object-cover" autoPlay playsInline muted />
-                <button 
-                  onClick={handleCloseCamera}
-                  className="absolute top-3 right-3 p-2 bg-black/50 rounded-full text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-                  <div className="p-4 flex items-center justify-between">
-                <span className="text-xs text-white font-bold">Visual Search</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={handleCapture} className="px-4 py-2 bg-white text-black rounded-xl text-xs font-bold">
-                    {mediaUploading ? 'Uploading...' : 'Capture'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <CameraCaptureOverlay
+            open={isCameraOpen}
+            videoRef={videoRef}
+            title="Visual Search Capture"
+            subtitle="Point at a product, shelf, poster, or package and capture one sharp frame to start image search."
+            hint="Move closer until the product fills most of the frame, then capture."
+            statusLabel="Visual search live"
+            captureLabel={mediaUploading ? 'Uploading…' : 'Search With This Photo'}
+            closeLabel="Back"
+            busy={mediaUploading}
+            onClose={handleCloseCamera}
+            onCapture={handleCapture}
+            zIndexClass="z-[80]"
+          />
         )}
       </AnimatePresence>
 

@@ -1,10 +1,11 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Lock, Phone, UserPlus } from 'lucide-react';
+import { ArrowLeft, Lock, Phone, ShoppingBag, Store, UserPlus } from 'lucide-react';
 import { getSessionInfo } from '../lib/identityApi';
 import { getDevicePayload, register } from '../lib/authApi';
 import { postAnalyticsEvent } from '../lib/analyticsApi';
 import { getAuthItem, setAuthItem } from '../lib/authStorage';
+import { updateProfile } from '../lib/profileApi';
 
 interface RegisterProps {
   onBack?: () => void;
@@ -14,17 +15,52 @@ interface RegisterProps {
 }
 
 export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthenticated, contextMessage }) => {
+  const getTokenClaims = (token: string) => {
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) return null;
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+      return JSON.parse(atob(padded)) as { sub?: string; tenant_id?: string; role?: string };
+    } catch {
+      return null;
+    }
+  };
+  const accountOptions = [
+    {
+      id: 'buyer' as const,
+      label: 'Buyer account',
+      helper: 'Discover products and shop deals',
+      icon: ShoppingBag,
+      activeClass: 'border-emerald-500 bg-emerald-50 text-emerald-800',
+      idleClass: 'border-zinc-200 bg-zinc-50 text-zinc-700',
+    },
+    {
+      id: 'seller' as const,
+      label: 'Seller account',
+      helper: 'Open a shop and reach customers',
+      icon: Store,
+      activeClass: 'border-amber-500 bg-amber-50 text-amber-800',
+      idleClass: 'border-zinc-200 bg-zinc-50 text-zinc-700',
+    },
+  ];
   const [form, setForm] = React.useState({
+    display_name: '',
     phone: '',
     pin: '',
     confirmPin: '',
     tenant_id: '',
+    account_type: 'buyer' as 'buyer' | 'seller',
   });
   const [status, setStatus] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   React.useEffect(() => {
     try {
-      const tenant = getAuthItem('soko:tenant_id') || '';
+      const tenant =
+        getAuthItem('soko:tenant_id') ||
+        (import.meta as any).env?.VITE_GUEST_TENANT_ID ||
+        (import.meta as any).env?.VITE_TENANT_ID ||
+        '';
       setForm(prev => ({ ...prev, tenant_id: tenant }));
     } catch {}
   }, []);
@@ -32,6 +68,10 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus(null);
+    if (!form.display_name.trim()) {
+      setStatus('Tell us what name to show on your profile.');
+      return;
+    }
     if (form.pin.trim() !== form.confirmPin.trim()) {
       setStatus('PINs do not match.');
       return;
@@ -39,6 +79,7 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
     setLoading(true);
     try {
       const tokens = await register({
+        display_name: form.display_name.trim(),
         phone: form.phone.trim(),
         pin: form.pin.trim(),
         tenant_id: form.tenant_id.trim(),
@@ -48,13 +89,33 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
         setAuthItem('soko:auth_token', tokens.access_token);
         setAuthItem('soko:refresh_token', tokens.refresh_token);
         setAuthItem('soko:tenant_id', form.tenant_id.trim());
+        setAuthItem('soko:username', form.tenant_id.trim());
+        setAuthItem('soko:display_name', form.display_name.trim());
+        setAuthItem('soko:account_intent', form.account_type);
       } catch {}
       try {
         const session = await getSessionInfo();
         if (session?.user_id) setAuthItem('soko:user_id', session.user_id);
-        if (session?.tenant_id) setAuthItem('soko:tenant_id', session.tenant_id);
-        if (session?.role) setAuthItem('soko:role', String(session.role).toLowerCase());
+        if (session?.tenant_id) {
+          setAuthItem('soko:tenant_id', session.tenant_id);
+          setAuthItem('soko:username', session.tenant_id);
+        }
+        if (session?.role) {
+          setAuthItem('soko:role', String(session.role).toLowerCase());
+        } else {
+          setAuthItem('soko:role', form.account_type);
+        }
         if (session?.session_id) setAuthItem('soko:session_id', session.session_id);
+      } catch {}
+      const claims = getTokenClaims(tokens.access_token);
+      if (claims?.sub) setAuthItem('soko:user_id', claims.sub);
+      if (claims?.tenant_id) {
+        setAuthItem('soko:tenant_id', claims.tenant_id);
+        setAuthItem('soko:username', claims.tenant_id);
+      }
+      setAuthItem('soko:role', String(claims?.role || form.account_type).toLowerCase());
+      try {
+        await updateProfile({ display_name: form.display_name.trim() });
       } catch {}
       try {
         const phone = form.phone.trim();
@@ -64,6 +125,7 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
           properties: {
             tenant_id: form.tenant_id.trim(),
             phone_last4: phone.slice(-4),
+            account_type: form.account_type,
           },
         });
       } catch {}
@@ -120,6 +182,47 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Account Type</span>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {accountOptions.map((option) => {
+                  const Icon = option.icon;
+                  const selected = form.account_type === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, account_type: option.id }))}
+                      className={`rounded-2xl border px-3 py-3 text-left transition ${
+                        selected ? option.activeClass : option.idleClass
+                      }`}
+                      aria-pressed={selected}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon className="w-4 h-4" />
+                        <span className="text-xs font-black uppercase tracking-wide">{option.label}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] font-semibold opacity-80">{option.helper}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Display Name</span>
+              <div className="mt-2 flex items-center gap-2 bg-zinc-50 rounded-2xl border border-zinc-200 px-3 py-2">
+                <UserPlus className="w-4 h-4 text-zinc-400" />
+                <input
+                  value={form.display_name}
+                  onChange={(e) => setForm(prev => ({ ...prev, display_name: e.target.value }))}
+                  className="flex-1 bg-transparent text-sm font-semibold text-zinc-900 focus:outline-none"
+                  placeholder={form.account_type === 'seller' ? 'Mama Mboga Corner' : 'Jane Wanjiku'}
+                  required
+                />
+              </div>
+            </label>
+
             <label className="block">
               <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Phone Number</span>
               <div className="mt-2 flex items-center gap-2 bg-zinc-50 rounded-2xl border border-zinc-200 px-3 py-2">
@@ -167,12 +270,12 @@ export const Register: React.FC<RegisterProps> = ({ onBack, onLoginOpen, onAuthe
             </label>
 
             <label className="block">
-              <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Tenant ID</span>
+              <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Username</span>
               <input
                 value={form.tenant_id}
                 onChange={(e) => setForm(prev => ({ ...prev, tenant_id: e.target.value }))}
                 className="mt-2 w-full bg-zinc-50 rounded-2xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none"
-                placeholder="tenant_001"
+                placeholder="your_username"
                 required
               />
             </label>

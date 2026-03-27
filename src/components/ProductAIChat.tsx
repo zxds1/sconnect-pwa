@@ -5,6 +5,7 @@ import { Product } from '../types';
 import { createChatThread, listChatMessages, createChatMessage, escalateChatThread, createSupportTicketAttachment } from '../lib/supportApi';
 import { createThread, listMessages, streamThreadMessage } from '../lib/assistantApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { requestMediaUploadPreview } from '../lib/mediaPreview';
 
 interface Message {
   role: 'user' | 'model';
@@ -164,6 +165,11 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
 
   const uploadAttachmentFile = async (file: File) => {
     if (!file || !threadId) return;
+    const approvedFile = await requestMediaUploadPreview(file, {
+      title: 'Preview product AI attachment',
+      description: 'Review the image or video before sending it into the chat.',
+      confirmLabel: 'Send attachment'
+    });
     setUploading(true);
     setError(null);
     setAttachmentStatus(null);
@@ -178,18 +184,18 @@ export const ProductAIChat: React.FC<ProductAIChatProps> = ({ product, onClose }
         throw new Error('Unable to create support ticket for attachment.');
       }
       const presign = await requestUploadPresign({
-        file_name: file.name,
-        mime_type: file.type || 'application/octet-stream',
-        content_length: file.size,
+        file_name: approvedFile.name,
+        mime_type: approvedFile.type || 'application/octet-stream',
+        content_length: approvedFile.size,
         context: 'support'
       });
-      const s3Key = await uploadToPresignedUrl(file, presign);
+      const s3Key = await uploadToPresignedUrl(approvedFile, presign);
       await createSupportTicketAttachment(currentTicketId, {
         s3_key: s3Key,
-        file_name: file.name,
-        mime_type: file.type || 'application/octet-stream'
+        file_name: approvedFile.name,
+        mime_type: approvedFile.type || 'application/octet-stream'
       });
-      await createChatMessage(threadId, { role: 'user', content: `Uploaded attachment: ${file.name}` });
+      await createChatMessage(threadId, { role: 'user', content: `Uploaded attachment: ${approvedFile.name}` });
       await refreshMessages(threadId);
       setAttachmentStatus('Attachment uploaded.');
     } catch (err: any) {

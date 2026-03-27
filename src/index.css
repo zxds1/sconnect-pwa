@@ -19,6 +19,58 @@
   --border: #e4e4e7;
   --text-muted: #6b7280;
   --text-soft: #9ca3af;
+  --page-shell-bg: linear-gradient(180deg, #fafaf9 0%, #f4f4f5 100%);
+  --page-header-bg: rgba(255, 255, 255, 0.92);
+  --page-header-border: rgba(228, 228, 231, 0.96);
+  --page-panel-bg: rgba(255, 255, 255, 0.96);
+  --page-panel-border: rgba(228, 228, 231, 0.96);
+  --page-panel-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+  --page-input-bg: #f4f4f5;
+  --page-input-border: #e4e4e7;
+  --page-input-text: #111827;
+  --page-chip-bg: #f4f4f5;
+  --page-chip-text: #52525b;
+  --page-chip-border: #e4e4e7;
+  --rewards-shell-bg: radial-gradient(circle at top, #f4eadb 0%, #fffdf8 38%, #eef5ef 100%);
+  --rewards-header-bg: linear-gradient(135deg, #1f2937 0%, #111827 55%, #163322 100%);
+  --rewards-header-border: #d8ccb8;
+  --rewards-card-bg: rgba(255, 255, 255, 0.95);
+  --rewards-card-border: #eadfce;
+  --rewards-muted-bg: #fbf7f2;
+  --rewards-muted-border: #efe4d4;
+  --rewards-eyebrow: #b45309;
+  --rewards-secondary-bg: #f7f1e8;
+  --rewards-secondary-border: #e7dccb;
+  --rewards-secondary-text: #5b4632;
+  --rewards-balance-bg: #0f172a;
+  --rewards-balance-accent: #bbf7d0;
+  --rewards-card-shadow: 0 20px 60px rgba(15, 23, 42, 0.06);
+  --group-buys-shell-bg: radial-gradient(circle at top, rgba(16, 185, 129, 0.16), transparent 34%), radial-gradient(circle at 80% 0%, rgba(56, 189, 248, 0.14), transparent 28%), linear-gradient(180deg, #f8fafc 0%, #eff6ff 55%, #f8fafc 100%);
+  --group-buys-header-bg: rgba(255, 255, 255, 0.86);
+  --group-buys-header-border: rgba(226, 232, 240, 0.9);
+  --group-buys-panel-bg: rgba(255, 255, 255, 0.74);
+  --group-buys-panel-border: rgba(226, 232, 240, 0.92);
+  --group-buys-panel-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+  --group-buys-body-text: #0f172a;
+  --group-buys-muted-text: #475569;
+  --group-buys-soft-text: #64748b;
+  --group-buys-input-bg: rgba(255, 255, 255, 0.9);
+  --group-buys-input-border: #cbd5e1;
+  --group-buys-input-text: #0f172a;
+  --group-buys-chip-bg: rgba(255, 255, 255, 0.72);
+  --group-buys-chip-text: #334155;
+  --group-buys-stat-text: #0f172a;
+  --group-buys-stat-muted: #64748b;
+  --group-buys-progress-track: rgba(148, 163, 184, 0.2);
+  --group-buys-accent-bg: rgba(14, 165, 233, 0.12);
+  --group-buys-accent-border: rgba(14, 165, 233, 0.2);
+  --group-buys-accent-text: #0369a1;
+  --group-buys-warning-bg: rgba(245, 158, 11, 0.12);
+  --group-buys-warning-border: rgba(245, 158, 11, 0.18);
+  --group-buys-warning-text: #b45309;
+  --group-buys-error-bg: rgba(244, 63, 94, 0.1);
+  --group-buys-error-border: rgba(244, 63, 94, 0.16);
+  --group-buys-error-text: #be123c;
 }
 
 :root[data-theme='dark'] {
@@ -30,6 +82,58 @@
   --border: #27272a;
   --text-muted: #a1a1aa;
   --text-soft: #71717a;
+  --page-shell-bg: linear-gradient(180deg, #09090b 0%, #0f172a 100%);
+  --page-header-bg: rgba(9, 9, 11, 0.9);
+  --page-header-border: rgba(39, 39, 42, 0.95);
+  --page-panel-bg: rgba(24, 24, 27, 0.96);
+  --page-panel-border: rgba(39, 39, 42, 0.95);
+  --page-panel-shadow: 0 18px 40px rgba(2, 6, 23, 0.28);
+  --page-input-bg: #18181b;
+  --page-input-border: #27272a;
+  --page-input-text: #f4f4f5;
+  --page-chip-bg: rgba(24, 24, 27, 0.92);
+  --page-chip-text: #d4d4d8;
+  --page-chip-border: #27272a;
+  --rewards-shell-bg: radial-gradient(circle at top, #163322 0%, #0f172a 42%, #09090b 100%);
+  --rewards-header-bg: linear-gradient(135deg, #020617 0%, #0f172a 55%, #14532d 100%);
+  --rewards-header-border: #243041;
+  --rewards-card-bg: rgba(15, 23, 42, 0.9);
+  --rewards-card-border: #243041;
+  --rewards-muted-bg: rgba(15, 23, 42, 0.76);
+  --rewards-muted-border: #334155;
+  --rewards-eyebrow: #fbbf24;
+  --rewards-secondary-bg: rgba(23, 32, 49, 0.92);
+  --rewards-secondary-border: #334155;
+  --rewards-secondary-text: #e5e7eb;
+  --rewards-balance-bg: #020617;
+  --rewards-balance-accent: #86efac;
+  --rewards-card-shadow: 0 20px 60px rgba(2, 6, 23, 0.28);
+  --group-buys-shell-bg: radial-gradient(circle at top, rgba(34, 197, 94, 0.16), transparent 34%), radial-gradient(circle at 80% 0%, rgba(56, 189, 248, 0.16), transparent 28%), linear-gradient(180deg, #090b12 0%, #0b1020 55%, #06070c 100%);
+  --group-buys-header-bg: rgba(9, 9, 11, 0.78);
+  --group-buys-header-border: rgba(255, 255, 255, 0.1);
+  --group-buys-panel-bg: rgba(255, 255, 255, 0.05);
+  --group-buys-panel-border: rgba(255, 255, 255, 0.1);
+  --group-buys-panel-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
+  --group-buys-body-text: #ffffff;
+  --group-buys-muted-text: rgba(255, 255, 255, 0.75);
+  --group-buys-soft-text: rgba(255, 255, 255, 0.5);
+  --group-buys-input-bg: rgba(0, 0, 0, 0.2);
+  --group-buys-input-border: rgba(255, 255, 255, 0.1);
+  --group-buys-input-text: #ffffff;
+  --group-buys-chip-bg: rgba(255, 255, 255, 0.05);
+  --group-buys-chip-text: rgba(255, 255, 255, 0.9);
+  --group-buys-stat-text: #ffffff;
+  --group-buys-stat-muted: rgba(255, 255, 255, 0.55);
+  --group-buys-progress-track: rgba(255, 255, 255, 0.08);
+  --group-buys-accent-bg: rgba(56, 189, 248, 0.1);
+  --group-buys-accent-border: rgba(56, 189, 248, 0.2);
+  --group-buys-accent-text: #e0f2fe;
+  --group-buys-warning-bg: rgba(251, 191, 36, 0.1);
+  --group-buys-warning-border: rgba(251, 191, 36, 0.18);
+  --group-buys-warning-text: #fde68a;
+  --group-buys-error-bg: rgba(244, 63, 94, 0.1);
+  --group-buys-error-border: rgba(244, 63, 94, 0.16);
+  --group-buys-error-text: #fecdd3;
 }
 
 html,
@@ -48,6 +152,155 @@ body {
 #root {
   min-height: 100vh;
   min-height: 100dvh;
+}
+
+.theme-page-shell {
+  background: var(--page-shell-bg);
+  color: var(--app-text);
+}
+
+.theme-page-header {
+  background: var(--page-header-bg);
+  border-color: var(--page-header-border);
+  backdrop-filter: blur(16px);
+}
+
+.theme-panel {
+  background-color: var(--page-panel-bg);
+  border-color: var(--page-panel-border);
+  box-shadow: var(--page-panel-shadow);
+  color: var(--app-text);
+}
+
+.theme-input-surface {
+  background-color: var(--page-input-bg);
+  border-color: var(--page-input-border);
+  color: var(--page-input-text);
+}
+
+.theme-input-surface::placeholder {
+  color: var(--text-soft);
+}
+
+.theme-chip-surface {
+  background-color: var(--page-chip-bg);
+  border-color: var(--page-chip-border);
+  color: var(--page-chip-text);
+}
+
+.rewards-page-shell {
+  background: var(--rewards-shell-bg);
+}
+
+.rewards-header {
+  background: var(--rewards-header-bg);
+  border-color: var(--rewards-header-border);
+}
+
+.rewards-card {
+  background-color: var(--rewards-card-bg);
+  border-color: var(--rewards-card-border);
+  box-shadow: var(--rewards-card-shadow);
+}
+
+.rewards-muted-panel {
+  background-color: var(--rewards-muted-bg);
+  border-color: var(--rewards-muted-border);
+}
+
+.rewards-eyebrow {
+  color: var(--rewards-eyebrow);
+}
+
+.rewards-secondary-action {
+  background-color: var(--rewards-secondary-bg);
+  border-color: var(--rewards-secondary-border);
+  color: var(--rewards-secondary-text);
+}
+
+.rewards-balance-card {
+  background: var(--rewards-balance-bg);
+  color: #ffffff;
+}
+
+.rewards-balance-accent {
+  color: var(--rewards-balance-accent);
+}
+
+.group-buys-page {
+  background: var(--group-buys-shell-bg);
+  color: var(--group-buys-body-text);
+}
+
+.group-buys-header {
+  background: var(--group-buys-header-bg);
+  border-color: var(--group-buys-header-border);
+  box-shadow: var(--group-buys-panel-shadow);
+  backdrop-filter: blur(20px);
+}
+
+.group-buys-panel {
+  background-color: var(--group-buys-panel-bg);
+  border-color: var(--group-buys-panel-border);
+  box-shadow: var(--group-buys-panel-shadow);
+}
+
+.group-buys-input {
+  background-color: var(--group-buys-input-bg);
+  border-color: var(--group-buys-input-border);
+  color: var(--group-buys-input-text);
+}
+
+.group-buys-input::placeholder {
+  color: var(--text-soft);
+}
+
+.group-buys-chip {
+  background-color: var(--group-buys-chip-bg);
+  border-color: var(--group-buys-panel-border);
+  color: var(--group-buys-chip-text);
+}
+
+.group-buys-title,
+.group-buys-stat-value {
+  color: var(--group-buys-stat-text);
+}
+
+.group-buys-copy {
+  color: var(--group-buys-muted-text);
+}
+
+.group-buys-soft,
+.group-buys-stat-label {
+  color: var(--group-buys-stat-muted);
+}
+
+.group-buys-icon-tile {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--group-buys-panel-border);
+  color: var(--group-buys-stat-text);
+}
+
+.group-buys-progress-track {
+  background-color: var(--group-buys-progress-track);
+}
+
+.group-buys-accent-btn {
+  background-color: var(--group-buys-accent-bg);
+  border-color: var(--group-buys-accent-border);
+  color: var(--group-buys-accent-text);
+}
+
+.group-buys-warning-chip {
+  background-color: var(--group-buys-warning-bg);
+  border-color: var(--group-buys-warning-border);
+  color: var(--group-buys-warning-text);
+}
+
+.group-buys-error {
+  background-color: var(--group-buys-error-bg);
+  border-color: var(--group-buys-error-border);
+  color: var(--group-buys-error-text);
 }
 
 #app-splash {
@@ -161,6 +414,9 @@ body {
 }
 :root[data-theme='dark'] .bg-white\/90 {
   background-color: rgba(15, 23, 42, 0.92) !important;
+}
+:root[data-theme='dark'] .bg-white\/95 {
+  background-color: rgba(15, 23, 42, 0.96) !important;
 }
 :root[data-theme='dark'] .bg-white\/80 {
   background-color: rgba(15, 23, 42, 0.82) !important;

@@ -57,6 +57,7 @@ import {
 } from '../lib/supportApi';
 import { createAuditEvent } from '../lib/securityApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
+import { requestMediaUploadPreview } from '../lib/mediaPreview';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
 import { getOpsConfig } from '../lib/opsConfigApi';
 import { getUiPreferences, updateUiPreferences } from '../lib/settingsApi';
@@ -777,10 +778,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       onRequireLogin?.('Sign in to upload evidence.');
       return null;
     }
+    const approvedFile = await requestMediaUploadPreview(file, {
+      title: context === 'dispute' ? 'Preview dispute evidence' : 'Preview counterfeit evidence',
+      description: 'Review the image or video before attaching it as evidence.',
+      confirmLabel: 'Attach evidence'
+    });
     const presign = await requestUploadPresign({
-      file_name: file.name,
-      mime_type: file.type,
-      content_length: file.size,
+      file_name: approvedFile.name,
+      mime_type: approvedFile.type,
+      content_length: approvedFile.size,
       context: context === 'dispute' ? 'dispute_evidence' : 'counterfeit_evidence',
     });
     const uploadUrl = presign.upload_url || presign.url;
@@ -791,17 +797,17 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     if (presign.fields) {
       const form = new FormData();
       Object.entries(presign.fields).forEach(([key, value]) => form.append(key, value));
-      form.append('file', file);
+      form.append('file', approvedFile);
       await fetch(uploadUrl, { method: 'POST', body: form });
     } else {
       const headers: Record<string, string> = { ...(presign.headers || {}) };
-      if (!headers['Content-Type'] && file.type) headers['Content-Type'] = file.type;
-      await fetch(uploadUrl, { method, body: file, headers });
+      if (!headers['Content-Type'] && approvedFile.type) headers['Content-Type'] = approvedFile.type;
+      await fetch(uploadUrl, { method, body: approvedFile, headers });
     }
     return {
       s3Key: presign.fields?.key || presign.s3_key || presign.key || '',
-      fileName: file.name,
-      mimeType: file.type,
+      fileName: approvedFile.name,
+      mimeType: approvedFile.type,
     };
   };
 
@@ -1792,7 +1798,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   )}
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-zinc-900">@{sellerProfile?.name || sellerProfile?.display_name || 'Seller'}</p>
+                  <p className="text-sm font-bold text-zinc-900">{sellerProfile?.name || sellerProfile?.display_name || 'Seller'}</p>
                   <p className="text-[10px] text-zinc-400 font-medium uppercase tracking-tighter">{sellerProfile?.verified ? 'Verified Merchant' : 'Merchant'}</p>
                 </div>
               </div>
@@ -1850,7 +1856,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   <div>Market: {sellerProfile.market_name}</div>
                 )}
                 {sellerProfile?.visual_marker && (
-                  <div>Marker: {sellerProfile.visual_marker}</div>
+                  <div>Marker: {/^https?:\/\//i.test(String(sellerProfile.visual_marker)) ? 'Photo marker available' : sellerProfile.visual_marker}</div>
                 )}
                 {typeof sellerProfile?.delivery_radius_km === 'number' && sellerProfile.delivery_radius_km > 0 && (
                   <div>Delivery Radius: {sellerProfile.delivery_radius_km} km</div>

@@ -125,6 +125,7 @@ import {
   completeOnlineOAuth,
   bulkProductMappings,
   getConnectionStatus,
+  getConnectionMappingSuggestions,
   triggerConnectionSync,
   recordSellerOnboardingEvent,
   getSellerShareLink,
@@ -134,7 +135,8 @@ import {
   type Tutorial as SellerTutorial,
   type VerificationStatus as SellerVerificationStatus,
   type OnlineConnectRequest,
-  type ProductMappingItem
+  type ProductMappingItem,
+  type MappingSuggestion
 } from '../lib/sellerOnboardingApi';
 import {
   bulkImportSellerProducts,
@@ -157,7 +159,8 @@ import { listPlans, getSubscriptionView, type Plan, type SubscriptionView } from
 import { createGroupBuyOffer } from '../lib/groupBuyApi';
 import { createProduct, listProductMedia, listProductReviews, replyProductReview, type ProductMedia, type ProductReview } from '../lib/catalogApi';
 import { requestUploadPresign } from '../lib/uploadsApi';
-import { getVideoDurationSeconds } from '../lib/mediaUpload';
+import { getVideoDurationSeconds, uploadMediaFile as uploadSharedMediaFile } from '../lib/mediaUpload';
+import { requestMediaUploadPreview } from '../lib/mediaPreview';
 import { addPathLandmark, createPlace, createRegion, deletePath, deletePlace, deleteRegion, listPathWaypoints, listPlaces, listRegions, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, updatePlace, updateRegion, type PathPoint, type PathWaypoint, type Place, type Region, type RecordedPath } from '../lib/searchApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 import {
@@ -178,6 +181,7 @@ import { listShopReviews, replyShopReview, type ShopReview } from '../lib/seller
 import { getSellerNotificationPreferences, updateSellerNotificationPreferences, type SellerNotificationPreferences } from '../lib/sellerNotificationsApi';
 import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
 import { VideoTrimModal } from './VideoTrimModal';
+import { LocationPinPicker } from './LocationPinPicker';
 import {
   acceptRFQResponse,
   createRFQ,
@@ -197,6 +201,33 @@ import {
 } from '../lib/suppliersApi';
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SHOP_TYPE_OPTIONS = [
+  { id: 'physical', label: 'Physical Shop' },
+  { id: 'online', label: 'Online Store' },
+  { id: 'hybrid', label: 'Hybrid' },
+  { id: 'marketplace', label: 'Marketplace' },
+] as const;
+const SELLER_MODE_OPTIONS = [
+  { id: 'fixed_shop', label: 'Fixed Shop' },
+  { id: 'open_market_stall', label: 'Market Stall' },
+  { id: 'ground_trader', label: 'Ground Trader' },
+  { id: 'solopreneur', label: 'Solopreneur' },
+  { id: 'hybrid', label: 'Hybrid' },
+] as const;
+const BUYER_REACH_OPTIONS = [
+  { id: 'fixed_address', label: 'Fixed Address' },
+  { id: 'market_stall', label: 'Market Stall / Walk-in' },
+  { id: 'delivery_only', label: 'Delivery / WhatsApp' },
+] as const;
+const uniqueStrings = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())))
+    : [];
+const toggleMultiSelection = (current: string[], value: string) =>
+  current.includes(value)
+    ? (current.length === 1 ? current : current.filter((item) => item !== value))
+    : [...current, value];
+const isHttpUrl = (value: string) => /^https?:\/\//i.test(value.trim());
 const EMPTY_SELLER: Seller = {
   id: '',
   name: 'Seller',
@@ -226,6 +257,11 @@ const formatHourLabel = (hour: number) => {
 
 const formatHourRange = (hour: number) =>
   `${formatHourLabel(hour)}-${formatHourLabel((hour + 2) % 24)}`;
+
+const formatMatchConfidence = (value?: number) =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? `${Math.round(value * 100)}% match`
+    : 'Needs review';
 
 const formatDateLabel = (value?: string) => {
   if (!value) return '';
@@ -418,6 +454,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [activeTab, setActiveTab] = useState('onboarding');
   const sellerTabHistoryReadyRef = useRef(false);
   const sellerTabSuppressPushRef = useRef(false);
+  const initialSellerTabRef = useRef<string | null>(
+    typeof window === 'undefined'
+      ? null
+      : (typeof window.history.state?.sellerTab === 'string' && window.history.state.sellerTab
+        ? window.history.state.sellerTab
+        : null),
+  );
+  const sellerDefaultTabResolvedRef = useRef(false);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [seller, setSeller] = useState<Seller>(EMPTY_SELLER);
@@ -557,6 +601,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 };
               })()
             : undefined;
+        const locationLatRaw =
+          (primaryLocation as any)?.lat ??
+          (primaryLocation as any)?.latitude ??
+          location?.lat;
+        const locationLngRaw =
+          (primaryLocation as any)?.lng ??
+          (primaryLocation as any)?.longitude ??
+          location?.lng;
+        const locationLat = Number.isFinite(Number(locationLatRaw)) ? Number(locationLatRaw) : undefined;
+        const locationLng = Number.isFinite(Number(locationLngRaw)) ? Number(locationLngRaw) : undefined;
         setSeller(prev => ({
           ...prev,
           id: profile.seller_id || prev.id,
@@ -579,6 +633,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           defaultRegionId: profile.default_region_id || locations?.[0]?.region_id || '',
           locationMode: profile.location_mode || 'fixed'
         });
+        setShopLocationLat(locationLat ?? '');
+        setShopLocationLng(locationLng ?? '');
         setSellerShareLink((shareLink as any)?.share_url ?? null);
         const prefs = (prefsResp as SellerPreferencesApi | null) ?? null;
         setSellerPreferences(prefs);
@@ -678,14 +734,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     defaultRegionId: '',
     locationMode: 'fixed',
   });
+  const [shopLocationLat, setShopLocationLat] = useState<number | ''>('');
+  const [shopLocationLng, setShopLocationLng] = useState<number | ''>('');
   const [shopFrontImageUrl, setShopFrontImageUrl] = useState('');
   const [directionsNote, setDirectionsNote] = useState('');
   const [shopLandmarks, setShopLandmarks] = useState<Array<ShopLandmark & { uploading?: boolean }>>([]);
   const [locationRegions, setLocationRegions] = useState<Region[]>([]);
   const [locationPlaces, setLocationPlaces] = useState<Place[]>([]);
   const [locationAdminStatus, setLocationAdminStatus] = useState<string | null>(null);
-  const [regionDraft, setRegionDraft] = useState({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '' });
-  const [placeDraft, setPlaceDraft] = useState({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '' });
+  const [regionDraft, setRegionDraft] = useState({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '', locationLabel: '' });
+  const [placeDraft, setPlaceDraft] = useState({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '', locationLabel: '' });
   const [editingRegionId, setEditingRegionId] = useState<string | null>(null);
   const [editingPlaceId, setEditingPlaceId] = useState<string | null>(null);
   const activeShopLocationLabel = (() => {
@@ -873,12 +931,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [onboardingStatus, setOnboardingStatus] = useState<string | null>(null);
   const [sellerShareLink, setSellerShareLink] = useState<string | null>(null);
   const [shopType, setShopType] = useState('physical');
+  const [shopTypeSelections, setShopTypeSelections] = useState<string[]>(['physical']);
   const [sellerMode, setSellerMode] = useState('fixed_shop');
+  const [sellerModeSelections, setSellerModeSelections] = useState<string[]>(['fixed_shop']);
   const [buyerReach, setBuyerReach] = useState<'fixed_address' | 'market_stall' | 'delivery_only'>('fixed_address');
+  const [buyerReachSelections, setBuyerReachSelections] = useState<string[]>(['fixed_address']);
+  const [sellerServiceArea, setSellerServiceArea] = useState<Record<string, any>>({});
   const [marketName, setMarketName] = useState('');
   const [visualMarker, setVisualMarker] = useState('');
+  const [visualMarkerUploading, setVisualMarkerUploading] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [deliveryRadiusKm, setDeliveryRadiusKm] = useState<number | ''>('');
+  const [dailyPlaceName, setDailyPlaceName] = useState('');
   const [dailyLat, setDailyLat] = useState<number | ''>('');
   const [dailyLng, setDailyLng] = useState<number | ''>('');
   const [deliveryDetails, setDeliveryDetails] = useState<DeliveryDetails>({
@@ -890,6 +954,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [paymentOptionsInput, setPaymentOptionsInput] = useState('');
   const [installationServicesInput, setInstallationServicesInput] = useState('');
   const [afterSalesSupportInput, setAfterSalesSupportInput] = useState('');
+  const visualMarkerInputRef = useRef<HTMLInputElement | null>(null);
   const [onlineConnectForm, setOnlineConnectForm] = useState<OnlineConnectRequest>({
     platform: 'shopify',
     shop_domain: '',
@@ -911,8 +976,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [oauthStatus, setOauthStatus] = useState<string | null>(null);
   const [groupBuyOfferStatus, setGroupBuyOfferStatus] = useState<string | null>(null);
   const [mappingItems, setMappingItems] = useState<ProductMappingItem[]>([]);
+  const [mappingSuggestions, setMappingSuggestions] = useState<MappingSuggestion[]>([]);
   const [mappingStatus, setMappingStatus] = useState<string | null>(null);
   const [mappingSyncing, setMappingSyncing] = useState(false);
+  const [mappingSuggestionsLoading, setMappingSuggestionsLoading] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<SellerVerificationStatus | null>(null);
   const [productsStatus, setProductsStatus] = useState<string | null>(null);
   const [productsLoading, setProductsLoading] = useState(false);
@@ -1905,13 +1972,53 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setOnboardingEligible(eligibility?.eligible ?? null);
         setOnboardingTutorials(tutorials);
         setVerificationStatus(verification);
-        if (state?.shop_type) setShopType(state.shop_type);
-        if (state?.seller_mode) setSellerMode(state.seller_mode);
+        if (!sellerDefaultTabResolvedRef.current) {
+          sellerDefaultTabResolvedRef.current = true;
+          if (!initialSellerTabRef.current && (state?.completion ?? 0) >= 0.9) {
+            sellerTabSuppressPushRef.current = true;
+            setActiveTab('products');
+          }
+        }
+        if (state?.shop_type) {
+          setShopType(state.shop_type);
+          setShopTypeSelections([state.shop_type]);
+        }
+        if (state?.seller_mode) {
+          setSellerMode(state.seller_mode);
+          setSellerModeSelections([state.seller_mode]);
+        }
         if (typeof state?.delivery_radius_km === 'number') {
           setDeliveryRadiusKm(state.delivery_radius_km || '');
         }
         if (state?.whatsapp_number) setWhatsappNumber(state.whatsapp_number);
-        if (profile?.seller_mode) setSellerMode(profile.seller_mode);
+        if (profile?.seller_mode) {
+          setSellerMode(profile.seller_mode);
+          setSellerModeSelections([profile.seller_mode]);
+        }
+        if (profile?.service_area && typeof profile.service_area === 'object') {
+          const serviceArea = profile.service_area as Record<string, any>;
+          setSellerServiceArea(serviceArea);
+          const loadedShopTypes = uniqueStrings(serviceArea.shop_types);
+          const loadedSellerModes = uniqueStrings(serviceArea.selling_modes);
+          const loadedReachChannels = uniqueStrings(serviceArea.reach_channels);
+          if (loadedShopTypes.length) {
+            setShopTypeSelections(loadedShopTypes);
+            setShopType(loadedShopTypes[0]);
+          }
+          if (loadedSellerModes.length) {
+            setSellerModeSelections(loadedSellerModes);
+            setSellerMode(loadedSellerModes[0]);
+          }
+          if (loadedReachChannels.length) {
+            setBuyerReachSelections(loadedReachChannels);
+            setBuyerReach(loadedReachChannels[0] as typeof buyerReach);
+          }
+          if (typeof serviceArea.daily_place_name === 'string') {
+            setDailyPlaceName(serviceArea.daily_place_name);
+          }
+        } else {
+          setSellerServiceArea({});
+        }
         if (profile?.market_name) setMarketName(profile.market_name);
         if (profile?.visual_marker) setVisualMarker(profile.visual_marker);
         if (profile?.whatsapp_number) setWhatsappNumber(profile.whatsapp_number);
@@ -1939,10 +2046,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           }
         }
         const effectiveMode = profile?.seller_mode || state?.seller_mode || sellerMode;
-        if (effectiveMode && effectiveMode !== 'hybrid') {
-          if (effectiveMode === 'fixed_shop') setBuyerReach('fixed_address');
-          if (effectiveMode === 'open_market_stall' || effectiveMode === 'ground_trader') setBuyerReach('market_stall');
-          if (effectiveMode === 'solopreneur') setBuyerReach('delivery_only');
+        if (effectiveMode && effectiveMode !== 'hybrid' && !uniqueStrings((profile?.service_area as any)?.reach_channels).length) {
+          if (effectiveMode === 'fixed_shop') {
+            setBuyerReach('fixed_address');
+            setBuyerReachSelections(['fixed_address']);
+          }
+          if (effectiveMode === 'open_market_stall' || effectiveMode === 'ground_trader') {
+            setBuyerReach('market_stall');
+            setBuyerReachSelections(['market_stall']);
+          }
+          if (effectiveMode === 'solopreneur') {
+            setBuyerReach('delivery_only');
+            setBuyerReachSelections(['delivery_only']);
+          }
         }
         if (state?.connection?.id) {
           setOnlineConnectionId(state.connection.id);
@@ -1961,6 +2077,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             webhook_url: state.connection?.webhook_url || prev.webhook_url,
             scopes: state.connection?.scopes || prev.scopes
           }));
+          void loadMappingSuggestions(state.connection.id);
         }
       } catch (err: any) {
         if (!ignore) setOnboardingStatus(err?.message || 'Unable to load onboarding status.');
@@ -1988,6 +2105,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   }, [activeTab]);
 
   const onlinePlatform = onlineConnectForm.platform;
+  const suggestedMappingSuggestions = mappingSuggestions.filter((item) => item.status === 'suggested');
+  const reviewMappingSuggestions = mappingSuggestions.filter((item) => item.status === 'needs_review');
+  const mappedMappingSuggestions = mappingSuggestions.filter((item) => item.status === 'mapped');
 
   useEffect(() => {
     setOnlineAuthUrl(null);
@@ -2021,9 +2141,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setProfileLoading(true);
       setReviewsLoading(true);
       try {
-        const [profile, locations, verification, prefs] = await Promise.all([
+        const [profile, locations, history, verification, prefs] = await Promise.all([
           getSellerProfile(),
           listSellerLocations(),
+          listSellerLocationHistory().catch(() => []),
           getSellerVerificationStatus(),
           getSellerPreferences().catch(() => null)
         ]);
@@ -3242,35 +3363,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const uploadMediaFile = async (file: File, context = 'seller_product_media') => {
-    const presign = await requestUploadPresign({
-      file_name: file.name,
-      mime_type: file.type,
-      content_length: file.size,
-      context
-    });
-    if (!presign.upload_url && !presign.url) {
-      throw new Error('Upload presign failed.');
-    }
-    const uploadUrl = presign.upload_url || presign.url!;
-    if (presign.fields) {
-      const form = new FormData();
-      Object.entries(presign.fields).forEach(([key, value]) => {
-        form.append(key, value);
-      });
-      form.append('file', file);
-      await fetch(uploadUrl, {
-        method: presign.method || 'POST',
-        body: form,
-        headers: presign.headers
-      });
-    } else {
-      await fetch(uploadUrl, {
-        method: presign.method || 'PUT',
-        headers: presign.headers || { 'Content-Type': file.type },
-        body: file
-      });
-    }
-    return presign.url || uploadUrl;
+    const uploaded = await uploadSharedMediaFile(file, context);
+    return uploaded.url;
   };
 
   const uploadProductMedia = async (file: File, targetProduct?: Product) => {
@@ -3386,10 +3480,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const uploadReceiptFile = async (file: File) => {
+    const approvedFile = await requestMediaUploadPreview(file, {
+      title: 'Preview receipt upload',
+      description: 'Review the receipt image before sending it for OCR processing.',
+      confirmLabel: 'Upload receipt'
+    });
     const presign = await requestUploadPresign({
-      file_name: file.name,
-      mime_type: file.type,
-      content_length: file.size,
+      file_name: approvedFile.name,
+      mime_type: approvedFile.type,
+      content_length: approvedFile.size,
       context: 'reward_receipt'
     });
     if (!presign.upload_url && !presign.url) {
@@ -3401,7 +3500,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       Object.entries(presign.fields).forEach(([key, value]) => {
         form.append(key, value);
       });
-      form.append('file', file);
+      form.append('file', approvedFile);
       await fetch(uploadUrl, {
         method: presign.method || 'POST',
         body: form,
@@ -3410,8 +3509,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     } else {
       await fetch(uploadUrl, {
         method: presign.method || 'PUT',
-        headers: presign.headers || { 'Content-Type': file.type },
-        body: file
+        headers: presign.headers || { 'Content-Type': approvedFile.type },
+        body: approvedFile
       });
     }
     const key = presign.s3_key || presign.key;
@@ -3530,10 +3629,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const handleShopTypeSelect = async (type: string) => {
-    setShopType(type);
+    const nextSelections = toggleMultiSelection(shopTypeSelections, type);
+    const primaryType = nextSelections[0] || type;
+    setShopType(primaryType);
+    setShopTypeSelections(nextSelections);
     setOnboardingStatus(null);
     try {
-      const state = await setSellerShopType({ shop_type: type });
+      const nextServiceArea = {
+        ...sellerServiceArea,
+        shop_types: nextSelections,
+        selling_modes: sellerModeSelections,
+        reach_channels: buyerReachSelections,
+        daily_place_name: dailyPlaceName || undefined,
+      };
+      const state = await setSellerShopType({ shop_type: primaryType });
+      await updateSellerProfile({ service_area: nextServiceArea });
+      setSellerServiceArea(nextServiceArea);
       setOnboardingState(state);
       setOnboardingStatus('Shop type saved.');
     } catch (err: any) {
@@ -3542,15 +3653,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   };
 
   const handleSellerModeSelect = async (mode: string) => {
-    setSellerMode(mode);
-    if (mode !== 'hybrid') {
-      if (mode === 'fixed_shop') setBuyerReach('fixed_address');
-      if (mode === 'open_market_stall' || mode === 'ground_trader') setBuyerReach('market_stall');
-      if (mode === 'solopreneur') setBuyerReach('delivery_only');
+    const nextSelections = toggleMultiSelection(sellerModeSelections, mode);
+    const primaryMode = nextSelections[0] || mode;
+    setSellerMode(primaryMode);
+    setSellerModeSelections(nextSelections);
+    if (primaryMode !== 'hybrid') {
+      if (primaryMode === 'fixed_shop') setBuyerReach('fixed_address');
+      if (primaryMode === 'open_market_stall' || primaryMode === 'ground_trader') setBuyerReach('market_stall');
+      if (primaryMode === 'solopreneur') setBuyerReach('delivery_only');
     }
     setOnboardingStatus(null);
     try {
-      await updateSellerProfile({ seller_mode: mode });
+      const nextServiceArea = {
+        ...sellerServiceArea,
+        shop_types: shopTypeSelections,
+        selling_modes: nextSelections,
+        reach_channels: buyerReachSelections,
+        daily_place_name: dailyPlaceName || undefined,
+      };
+      await updateSellerProfile({ seller_mode: primaryMode, service_area: nextServiceArea });
+      setSellerServiceArea(nextServiceArea);
       await recordSellerOnboardingEvent({ step: 'seller_mode', status: 'complete' });
       const state = await getSellerOnboardingState();
       setOnboardingState(state);
@@ -3577,20 +3699,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     });
   };
 
-  const handleUseDailyLocation = () => {
-    if (!navigator.geolocation) {
-      setOnboardingStatus('Geolocation not available.');
-      return;
+  const handleVisualMarkerUpload = async (file: File) => {
+    setVisualMarkerUploading(true);
+    setOnboardingStatus(null);
+    try {
+      const url = await uploadMediaFile(file, 'seller_visual_marker');
+      setVisualMarker(url);
+      setOnboardingStatus('Visual marker photo uploaded.');
+    } catch (err: any) {
+      setOnboardingStatus(err?.message || 'Unable to upload visual marker.');
+    } finally {
+      setVisualMarkerUploading(false);
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setDailyLat(Number(pos.coords.latitude.toFixed(6)));
-        setDailyLng(Number(pos.coords.longitude.toFixed(6)));
-      },
-      () => {
-        setOnboardingStatus('Unable to fetch location.');
-      }
-    );
   };
 
   const handleSaveDeliveryDetails = async () => {
@@ -3604,12 +3724,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         .split(',')
         .map(opt => opt.trim())
         .filter(Boolean);
-      if ((buyerReach === 'market_stall' || sellerMode === 'ground_trader' || sellerMode === 'open_market_stall') &&
-        (!marketName.trim() || !visualMarker.trim() || !whatsappNumber.trim())) {
-        setOnboardingStatus('Market sellers need market name, visual marker, and WhatsApp number.');
+      const selectedReach = buyerReachSelections.length ? buyerReachSelections : [buyerReach];
+      const selectedModes = sellerModeSelections.length ? sellerModeSelections : [sellerMode];
+      const hasDailyPin = dailyLat !== '' && dailyLng !== '';
+      if ((selectedReach.includes('market_stall') || selectedModes.includes('ground_trader') || selectedModes.includes('open_market_stall')) &&
+        (!marketName.trim() || !visualMarker.trim() || !whatsappNumber.trim() || !dailyPlaceName.trim() || !hasDailyPin)) {
+        setOnboardingStatus('Market sellers need a place name, pinned map location, visual marker photo, and WhatsApp number.');
         return;
       }
-      if ((buyerReach === 'delivery_only' || sellerMode === 'solopreneur') &&
+      if ((selectedReach.includes('delivery_only') || selectedModes.includes('solopreneur')) &&
         (!whatsappNumber.trim() || (deliveryRadiusKm === '' && zones.length === 0))) {
         setOnboardingStatus('Delivery sellers need WhatsApp and a delivery radius or zones.');
         return;
@@ -3623,6 +3746,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         installation_services: installationServicesInput || undefined,
         after_sales_support: afterSalesSupportInput || undefined
       };
+      const nextServiceArea = {
+        ...sellerServiceArea,
+        shop_types: shopTypeSelections,
+        selling_modes: sellerModeSelections,
+        reach_channels: selectedReach,
+        daily_place_name: dailyPlaceName.trim() || undefined,
+      };
       await updateSellerProfile({
         market_name: marketName || undefined,
         visual_marker: visualMarker || undefined,
@@ -3630,8 +3760,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         delivery_radius_km: deliveryRadiusKm === '' ? undefined : Number(deliveryRadiusKm),
         daily_lat: dailyLat === '' ? undefined : Number(dailyLat),
         daily_lng: dailyLng === '' ? undefined : Number(dailyLng),
-        delivery_details: normalizedDetails
+        delivery_details: normalizedDetails,
+        service_area: nextServiceArea,
       });
+      setSellerServiceArea(nextServiceArea);
       await recordSellerOnboardingEvent({ step: 'delivery_details', status: 'complete' });
       const state = await getSellerOnboardingState();
       setOnboardingState(state);
@@ -3674,6 +3806,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       if (connection?.id) {
         setOnlineConnectionId(connection.id);
         setOnlineConnectionStatus(`Connection ${connection.connection_status || 'created'}.`);
+        void loadMappingSuggestions(connection.id);
       } else if (response?.auth_url) {
         setOnlineConnectionStatus('Authorization required. Complete Shopify OAuth to finish.');
       } else {
@@ -3727,6 +3860,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         setOauthStatus('OAuth connection complete.');
         const stateResp = await getSellerOnboardingState();
         setOnboardingState(stateResp);
+        if (stateResp?.connection?.id) {
+          setOnlineConnectionId(stateResp.connection.id);
+          void loadMappingSuggestions(stateResp.connection.id);
+        }
       } catch (err: any) {
         setOauthStatus(err?.message || 'OAuth completion failed.');
       } finally {
@@ -3743,9 +3880,84 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     ]));
   };
 
+  const upsertMappingDraft = (item: ProductMappingItem) => {
+    setMappingItems(prev => {
+      const next = [...prev];
+      const idx = next.findIndex((entry) =>
+        entry.external_sku.trim().toLowerCase() === item.external_sku.trim().toLowerCase()
+        && entry.platform.trim().toLowerCase() === item.platform.trim().toLowerCase()
+      );
+      if (idx >= 0) {
+        next[idx] = { ...next[idx], ...item, sync_enabled: true };
+        return next;
+      }
+      return [...next, { ...item, sync_enabled: true }];
+    });
+  };
+
+  const loadMappingSuggestions = async (connectionId?: string | null) => {
+    const target = connectionId || onlineConnectionId;
+    if (!target) {
+      setMappingSuggestions([]);
+      return;
+    }
+    setMappingSuggestionsLoading(true);
+    try {
+      const items = await getConnectionMappingSuggestions(target);
+      setMappingSuggestions(items || []);
+    } catch (err: any) {
+      setMappingSuggestions([]);
+      setMappingStatus(err?.message || 'Unable to load mapping suggestions.');
+    } finally {
+      setMappingSuggestionsLoading(false);
+    }
+  };
+
+  const handleApplySuggestedMapping = (suggestion: MappingSuggestion, canonicalSKU?: string) => {
+    const selected = canonicalSKU || suggestion.canonical_sku;
+    if (!selected || !suggestion.external_sku) return;
+    upsertMappingDraft({
+      external_sku: suggestion.external_sku,
+      canonical_sku: selected,
+      platform: suggestion.platform || onlineConnectForm.platform || 'custom',
+      sync_enabled: true,
+    });
+    setMappingStatus(`Added mapping draft for ${suggestion.external_title || suggestion.external_sku}. Save mappings to apply it.`);
+  };
+
+  const handleDraftManualMapping = (suggestion: MappingSuggestion) => {
+    if (!suggestion.external_sku) return;
+    upsertMappingDraft({
+      external_sku: suggestion.external_sku,
+      canonical_sku: '',
+      platform: suggestion.platform || onlineConnectForm.platform || 'custom',
+      sync_enabled: true,
+    });
+    setMappingStatus(`Created a manual mapping draft for ${suggestion.external_title || suggestion.external_sku}. Add the catalog product ID, then save.`);
+  };
+
+  const handleApplyAllSuggestedMappings = () => {
+    const suggested = mappingSuggestions.filter((item) => item.status === 'suggested' && item.canonical_sku);
+    if (suggested.length === 0) {
+      setMappingStatus('No high-confidence suggestions available yet.');
+      return;
+    }
+    suggested.forEach((item) => {
+      if (item.canonical_sku) {
+        upsertMappingDraft({
+          external_sku: item.external_sku,
+          canonical_sku: item.canonical_sku,
+          platform: item.platform || onlineConnectForm.platform || 'custom',
+          sync_enabled: true,
+        });
+      }
+    });
+    setMappingStatus(`Added ${suggested.length} suggested mapping${suggested.length === 1 ? '' : 's'} to the draft list. Save mappings to apply them.`);
+  };
+
   const handleSaveMappings = async () => {
     if (mappingItems.length === 0) {
-      setMappingStatus('Add at least one mapping.');
+      setMappingStatus('Manual mappings are only needed for items the sync could not match automatically.');
       return;
     }
     setMappingStatus(null);
@@ -3753,6 +3965,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     try {
       await bulkProductMappings(mappingItems);
       setMappingStatus('Mappings saved.');
+      await loadMappingSuggestions();
     } catch (err: any) {
       setMappingStatus(err?.message || 'Unable to save mappings.');
     } finally {
@@ -3765,9 +3978,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     setOnlineConnectionStatus(null);
     try {
       const status = await getConnectionStatus(onlineConnectionId);
-      if (status?.connection_status) {
-        setOnlineConnectionStatus(`Status: ${status.connection_status}`);
+      if (status?.connection_status || status?.last_error) {
+        const parts: string[] = [];
+        if (status?.connection_status) {
+          parts.push(`Status: ${status.connection_status}`);
+        }
+        if (status?.last_error) {
+          parts.push(status.last_error);
+        }
+        setOnlineConnectionStatus(parts.join(' - '));
       }
+      await loadMappingSuggestions(onlineConnectionId);
     } catch (err: any) {
       setOnlineConnectionStatus(err?.message || 'Unable to fetch connection status.');
     }
@@ -3807,6 +4028,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     try {
       const status = await triggerConnectionSync(onlineConnectionId);
       setOnlineConnectionStatus(`Sync started (${status?.connection_status || 'syncing'}).`);
+      await loadMappingSuggestions(onlineConnectionId);
     } catch (err: any) {
       setOnlineConnectionStatus(err?.message || 'Unable to trigger sync.');
     }
@@ -4041,6 +4263,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     e.preventDefault();
     setSettingsStatus(null);
     try {
+      const resolvedShopLat = shopLocationLat === '' ? undefined : Number(shopLocationLat);
+      const resolvedShopLng = shopLocationLng === '' ? undefined : Number(shopLocationLng);
+      const resolvedAddress = profileData.address.trim();
       await updateSellerProfile({
         name: profileData.name,
         description: profileData.description,
@@ -4062,21 +4287,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           }))
       });
       const existing = sellerLocations[0];
-      if (profileData.address) {
+      if (resolvedAddress || resolvedShopLat !== undefined || resolvedShopLng !== undefined) {
         if (existing?.id) {
           await updateSellerLocation(existing.id, {
-            address: profileData.address,
-            lat: existing.lat,
-            lng: existing.lng,
+            address: resolvedAddress || existing.address || '',
+            lat: resolvedShopLat ?? existing.lat,
+            lng: resolvedShopLng ?? existing.lng,
             region_id: profileData.defaultRegionId || existing.region_id,
             place_id: profileData.placeId || existing.place_id,
             source: existing.source || 'manual_pin'
           });
         } else {
           await createSellerLocation({
-            address: profileData.address,
-            lat: seller.location?.lat,
-            lng: seller.location?.lng,
+            address: resolvedAddress,
+            lat: resolvedShopLat ?? seller.location?.lat,
+            lng: resolvedShopLng ?? seller.location?.lng,
             region_id: profileData.defaultRegionId,
             place_id: profileData.placeId,
             source: 'manual_pin'
@@ -4088,6 +4313,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       const refreshedHistory = await listSellerLocationHistory().catch(() => []);
       setSellerLocations(refreshedLocations);
       setSellerLocationHistory(Array.isArray(refreshedHistory) ? refreshedHistory : []);
+      setShopLocationLat(refreshedLocations[0]?.lat ?? '');
+      setShopLocationLng(refreshedLocations[0]?.lng ?? '');
       setSeller(prev => ({
         ...prev,
         name: refreshedProfile?.name || profileData.name,
@@ -4101,6 +4328,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setDirectionsNote(refreshedProfile?.directions_note || directionsNote);
       setProfileData(prev => ({
         ...prev,
+        address: refreshedLocations[0]?.address || prev.address,
         placeId: refreshedProfile?.place_id || prev.placeId,
         defaultRegionId: refreshedProfile?.default_region_id || prev.defaultRegionId,
         locationMode: refreshedProfile?.location_mode || prev.locationMode
@@ -4147,7 +4375,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       if (created?.id) {
         setProfileData(prev => ({ ...prev, defaultRegionId: created.id }));
       }
-      setRegionDraft({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '' });
+      setRegionDraft({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '', locationLabel: '' });
       setEditingRegionId(null);
       setLocationAdminStatus(isEditing ? 'Region updated.' : 'Region created.');
     } catch (err: any) {
@@ -4180,7 +4408,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       if (created?.id) {
         setProfileData(prev => ({ ...prev, placeId: created.id, defaultRegionId: prev.defaultRegionId || placeDraft.regionId }));
       }
-      setPlaceDraft({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '' });
+      setPlaceDraft({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '', locationLabel: '' });
       setEditingPlaceId(null);
       setLocationAdminStatus(isEditing ? 'Place updated.' : 'Place created.');
     } catch (err: any) {
@@ -4195,7 +4423,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       name: region.name || '',
       parentId: region.parent_id || '',
       lat: region.centroid_lat !== undefined && region.centroid_lat !== null ? String(region.centroid_lat) : '',
-      lng: region.centroid_lng !== undefined && region.centroid_lng !== null ? String(region.centroid_lng) : ''
+      lng: region.centroid_lng !== undefined && region.centroid_lng !== null ? String(region.centroid_lng) : '',
+      locationLabel: region.name || ''
     });
     setLocationAdminStatus(`Editing region: ${region.name}`);
   };
@@ -4208,7 +4437,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       regionId: place.region_id || '',
       addressLine: place.address_line || '',
       lat: place.lat !== undefined && place.lat !== null ? String(place.lat) : '',
-      lng: place.lng !== undefined && place.lng !== null ? String(place.lng) : ''
+      lng: place.lng !== undefined && place.lng !== null ? String(place.lng) : '',
+      locationLabel: place.address_line || place.name || ''
     });
     setLocationAdminStatus(`Editing place: ${place.name}`);
   };
@@ -5000,14 +5230,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  const showMarketFields = buyerReach === 'market_stall'
-    || sellerMode === 'open_market_stall'
-    || sellerMode === 'ground_trader'
-    || sellerMode === 'hybrid';
+  const showMarketFields = buyerReachSelections.includes('market_stall')
+    || sellerModeSelections.includes('open_market_stall')
+    || sellerModeSelections.includes('ground_trader')
+    || sellerModeSelections.includes('hybrid');
   const showDeliveryConfig = Boolean(deliveryDetails.offers_delivery)
-    || buyerReach === 'delivery_only'
-    || sellerMode === 'solopreneur'
-    || sellerMode === 'hybrid';
+    || buyerReachSelections.includes('delivery_only')
+    || sellerModeSelections.includes('solopreneur')
+    || sellerModeSelections.includes('hybrid');
   const tabs = [
     { id: 'onboarding', icon: Sparkles, label: 'Onboarding' },
     { id: 'products', icon: Package, label: 'Products' },
@@ -5142,26 +5372,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Seller Mode</p>
-                  <p className="text-sm font-bold text-zinc-900">How do buyers reach you today?</p>
-                  <p className="text-[10px] text-zinc-500">Pick the mode that best matches your setup.</p>
+                  <p className="text-sm font-bold text-zinc-900">Which selling setups describe you today?</p>
+                  <p className="text-[10px] text-zinc-500">Choose all that apply. The first one stays your primary mode.</p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-zinc-50 text-[10px] font-black text-zinc-600">
                   Current: {sellerMode.replace('_', ' ')}
                 </span>
               </div>
               <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2 text-[10px] font-bold">
-                {[
-                  { id: 'fixed_shop', label: 'Fixed Shop' },
-                  { id: 'open_market_stall', label: 'Market Stall' },
-                  { id: 'ground_trader', label: 'Ground Trader' },
-                  { id: 'solopreneur', label: 'Solopreneur' },
-                  { id: 'hybrid', label: 'Hybrid' }
-                ].map(option => (
+                {SELLER_MODE_OPTIONS.map(option => (
                   <button
                     key={option.id}
                     onClick={() => handleSellerModeSelect(option.id)}
                     className={`px-3 py-3 rounded-2xl border ${
-                      sellerMode === option.id
+                      sellerModeSelections.includes(option.id)
                         ? 'bg-emerald-600 border-emerald-600 text-white'
                         : 'bg-zinc-50 border-zinc-200 text-zinc-700'
                     }`}
@@ -5177,23 +5401,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Buyer Reach</p>
                   <p className="text-sm font-bold text-zinc-900">How do buyers reach you?</p>
-                  <p className="text-[10px] text-zinc-500">Choose the primary method; hybrid sellers can use all.</p>
+                  <p className="text-[10px] text-zinc-500">Choose every way buyers can find, contact, or order from you.</p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-zinc-50 text-[10px] font-black text-zinc-600">
                   Selected: {buyerReach.replace('_', ' ')}
                 </span>
               </div>
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-bold">
-                {[
-                  { id: 'fixed_address', label: 'Fixed Address' },
-                  { id: 'market_stall', label: 'Market Stall / Ground Trader' },
-                  { id: 'delivery_only', label: 'Delivery Only' }
-                ].map(option => (
+                {BUYER_REACH_OPTIONS.map(option => (
                   <button
                     key={option.id}
-                    onClick={() => setBuyerReach(option.id as typeof buyerReach)}
+                    onClick={() => {
+                      const next = toggleMultiSelection(buyerReachSelections, option.id);
+                      setBuyerReachSelections(next);
+                      setBuyerReach((next[0] || option.id) as typeof buyerReach);
+                    }}
                     className={`px-3 py-3 rounded-2xl border ${
-                      buyerReach === option.id
+                      buyerReachSelections.includes(option.id)
                         ? 'bg-indigo-600 border-indigo-600 text-white'
                         : 'bg-zinc-50 border-zinc-200 text-zinc-700'
                     }`}
@@ -5212,24 +5436,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Unified Shop Registry</p>
                   <p className="text-sm font-bold text-zinc-900">Select how you sell today</p>
-                  <p className="text-[10px] text-zinc-500">Physical, online, hybrid, or marketplace sellers — one flow.</p>
+                  <p className="text-[10px] text-zinc-500">Choose all sales channels that apply to your business.</p>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-zinc-50 text-[10px] font-black text-zinc-600">
                   Current: {shopType}
                 </span>
               </div>
               <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-bold">
-                {[
-                  { id: 'physical', label: 'Physical Shop' },
-                  { id: 'online', label: 'Online Store' },
-                  { id: 'hybrid', label: 'Hybrid' },
-                  { id: 'marketplace', label: 'Marketplace' }
-                ].map(option => (
+                {SHOP_TYPE_OPTIONS.map(option => (
                   <button
                     key={option.id}
                     onClick={() => handleShopTypeSelect(option.id)}
                     className={`px-3 py-3 rounded-2xl border ${
-                      shopType === option.id
+                      shopTypeSelections.includes(option.id)
                         ? 'bg-emerald-600 border-emerald-600 text-white'
                         : 'bg-zinc-50 border-zinc-200 text-zinc-700'
                     }`}
@@ -5293,7 +5512,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 {showMarketFields && (
                   <>
                     <label className="text-[10px] font-bold text-zinc-500">
-                      Market Name (if applicable)
+                      Market / Place Name
                       <input
                         className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
                         value={marketName}
@@ -5301,15 +5520,37 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                         placeholder="My Gikomba Spot"
                       />
                     </label>
-                    <label className="text-[10px] font-bold text-zinc-500">
-                      Visual Marker
+                    <div className="text-[10px] font-bold text-zinc-500">
+                      Visual Marker Photo
                       <input
-                        className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                        value={visualMarker}
-                        onChange={(e) => setVisualMarker(e.target.value)}
-                        placeholder="Blue tarp"
+                        ref={visualMarkerInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void handleVisualMarkerUpload(file);
+                          if (e.currentTarget) e.currentTarget.value = '';
+                        }}
                       />
-                    </label>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => visualMarkerInputRef.current?.click()}
+                          className="px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-700 flex items-center gap-2"
+                          disabled={visualMarkerUploading}
+                        >
+                          <Upload className="w-4 h-4" />
+                          {visualMarkerUploading ? 'Uploading…' : 'Upload Photo'}
+                        </button>
+                        {visualMarker && isHttpUrl(visualMarker) && (
+                          <span className="text-[10px] text-zinc-500">Marker photo ready</span>
+                        )}
+                      </div>
+                      {visualMarker && isHttpUrl(visualMarker) && (
+                        <img src={visualMarker} alt="Visual marker" className="mt-3 h-24 w-24 rounded-2xl object-cover border border-zinc-200" />
+                      )}
+                    </div>
                   </>
                 )}
                 {showDeliveryConfig && (
@@ -5488,34 +5729,24 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     </label>
                   </>
                 )}
-                <label className="text-[10px] font-bold text-zinc-500">
-                  Daily Latitude
-                    <input
-                      type="number"
-                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                      value={dailyLat}
-                      onChange={(e) => setDailyLat(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="-4.0435"
-                    />
-                </label>
-                <label className="text-[10px] font-bold text-zinc-500">
-                  Daily Longitude
-                    <input
-                      type="number"
-                      className="mt-2 w-full px-3 py-2 rounded-2xl bg-zinc-50 border border-zinc-200 text-zinc-800"
-                      value={dailyLng}
-                      onChange={(e) => setDailyLng(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="39.6682"
-                    />
-                </label>
+                <LocationPinPicker
+                  title="Selling Location Pin"
+                  helpText="Search for your market or stall, then drag the pin to the exact place buyers should find you."
+                  value={{
+                    label: dailyPlaceName,
+                    lat: dailyLat === '' ? undefined : Number(dailyLat),
+                    lng: dailyLng === '' ? undefined : Number(dailyLng),
+                  }}
+                  onChange={(next) => {
+                    setDailyPlaceName(next.label || '');
+                    setDailyLat(next.lat === undefined ? '' : next.lat);
+                    setDailyLng(next.lng === undefined ? '' : next.lng);
+                    setOnboardingStatus(null);
+                  }}
+                  searchPlaceholder="Search market, building, stage, or landmark"
+                />
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleUseDailyLocation}
-                  className="px-4 py-2 rounded-2xl bg-zinc-100 text-zinc-700 text-[10px] font-black"
-                >
-                  Use Current Location
-                </button>
                 <button
                   onClick={handleSaveDeliveryDetails}
                   className="px-4 py-2 rounded-2xl bg-emerald-600 text-white text-[10px] font-black"
@@ -5732,13 +5963,157 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
               <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm space-y-3">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Mapping Preview</p>
-                  <p className="text-sm font-bold text-zinc-900">Map external SKU → canonical SKU</p>
-                  <p className="text-[10px] text-zinc-500">Bulk or manual mapping to sync products.</p>
+                  <p className="text-sm font-bold text-zinc-900">Match external SKU → SConnect catalog product</p>
+                  <p className="text-[10px] text-zinc-500">Sync now auto-matches exact catalog products first. Add manual mappings only for unmatched items.</p>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <div className="px-3 py-2 rounded-2xl bg-emerald-50 text-emerald-700 text-[10px] font-black">
+                    Suggested {suggestedMappingSuggestions.length}
+                  </div>
+                  <div className="px-3 py-2 rounded-2xl bg-amber-50 text-amber-700 text-[10px] font-black">
+                    Needs review {reviewMappingSuggestions.length}
+                  </div>
+                  <div className="px-3 py-2 rounded-2xl bg-zinc-100 text-zinc-700 text-[10px] font-black">
+                    Already mapped {mappedMappingSuggestions.length}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => void loadMappingSuggestions()}
+                    className="px-4 py-2 bg-zinc-100 text-zinc-800 rounded-xl text-[10px] font-black"
+                    disabled={!onlineConnectionId || mappingSuggestionsLoading}
+                  >
+                    {mappingSuggestionsLoading ? 'Refreshing…' : 'Refresh Suggestions'}
+                  </button>
+                  <button
+                    onClick={handleApplyAllSuggestedMappings}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+                    disabled={mappingSuggestionsLoading || suggestedMappingSuggestions.length === 0}
+                  >
+                    Apply All Suggested
+                  </button>
+                </div>
+                {!onlineConnectionId && (
+                  <div className="text-[10px] text-zinc-500 font-bold bg-zinc-50 rounded-2xl px-3 py-2">
+                    Connect a store first. Once the connection is ready, Seller Studio will pull external products and suggest catalog matches here.
+                  </div>
+                )}
+                {onlineConnectionId && mappingSuggestionsLoading && (
+                  <div className="text-[10px] text-zinc-500 font-bold bg-zinc-50 rounded-2xl px-3 py-2">
+                    Loading product matches from your connected store...
+                  </div>
+                )}
+                {onlineConnectionId && !mappingSuggestionsLoading && mappingSuggestions.length === 0 && (
+                  <div className="text-[10px] text-zinc-500 font-bold bg-zinc-50 rounded-2xl px-3 py-2">
+                    No external products found yet. Run a sync or refresh the connection after your shop catalog is available.
+                  </div>
+                )}
+                {suggestedMappingSuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500">High Confidence Matches</p>
+                      <p className="text-[10px] text-zinc-500">These look safe to accept in one click.</p>
+                    </div>
+                    {suggestedMappingSuggestions.map((suggestion) => (
+                      <div key={`suggested_${suggestion.external_sku}`} className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 space-y-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-black text-zinc-900">{suggestion.external_title || suggestion.external_sku}</p>
+                            <p className="text-[10px] text-zinc-500">SKU {suggestion.external_sku} · {formatCurrencyKES(suggestion.price || 0)} · Stock {suggestion.stock || 0}</p>
+                          </div>
+                          <div className="px-2 py-1 rounded-full bg-white text-[10px] font-black text-emerald-700">
+                            {formatMatchConfidence(suggestion.confidence)}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl bg-white px-3 py-2 text-[10px] text-zinc-700">
+                          <span className="font-black text-zinc-900">{suggestion.canonical_name || 'Suggested catalog product'}</span>
+                          {' '}
+                          <span className="text-zinc-500">({suggestion.canonical_sku})</span>
+                          {suggestion.reason ? ` · ${suggestion.reason.replaceAll('_', ' ')}` : ''}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleApplySuggestedMapping(suggestion)}
+                            className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black"
+                          >
+                            Use Suggestion
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {reviewMappingSuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Needs Review</p>
+                      <p className="text-[10px] text-zinc-500">Pick one of the likely catalog matches, or start a manual draft if none are right.</p>
+                    </div>
+                    {reviewMappingSuggestions.map((suggestion) => (
+                      <div key={`review_${suggestion.external_sku}`} className="rounded-2xl border border-amber-100 bg-amber-50/60 p-3 space-y-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-black text-zinc-900">{suggestion.external_title || suggestion.external_sku}</p>
+                            <p className="text-[10px] text-zinc-500">SKU {suggestion.external_sku} · {formatCurrencyKES(suggestion.price || 0)} · Stock {suggestion.stock || 0}</p>
+                          </div>
+                          <div className="px-2 py-1 rounded-full bg-white text-[10px] font-black text-amber-700">
+                            {formatMatchConfidence(suggestion.confidence)}
+                          </div>
+                        </div>
+                        {suggestion.candidates && suggestion.candidates.length > 0 ? (
+                          <div className="space-y-2">
+                            {suggestion.candidates.map((candidate) => (
+                              <div key={`${suggestion.external_sku}_${candidate.canonical_sku}`} className="rounded-2xl bg-white px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-[10px] font-black text-zinc-900">{candidate.name}</p>
+                                  <p className="text-[10px] text-zinc-500">{candidate.canonical_sku} · {formatMatchConfidence(candidate.confidence)} · {candidate.reason.replaceAll('_', ' ')}</p>
+                                </div>
+                                <button
+                                  onClick={() => handleApplySuggestedMapping(suggestion, candidate.canonical_sku)}
+                                  className="px-3 py-2 bg-amber-500 text-white rounded-xl text-[10px] font-black"
+                                >
+                                  Use This Match
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl bg-white px-3 py-2 text-[10px] text-zinc-500">
+                            No safe catalog match found yet for this item.
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleDraftManualMapping(suggestion)}
+                            className="px-3 py-2 bg-zinc-900 text-white rounded-xl text-[10px] font-black"
+                          >
+                            Draft Manual Mapping
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {mappedMappingSuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Already Mapped</p>
+                      <p className="text-[10px] text-zinc-500">These products are already connected to a catalog item.</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {mappedMappingSuggestions.map((suggestion) => (
+                        <div key={`mapped_${suggestion.external_sku}`} className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <p className="text-[10px] font-black text-zinc-900">{suggestion.external_title || suggestion.external_sku}</p>
+                          <p className="text-[10px] text-zinc-500">{suggestion.external_sku} → {suggestion.canonical_name || suggestion.canonical_sku}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   {mappingItems.length === 0 && (
                     <div className="text-[10px] text-zinc-500 font-bold bg-zinc-50 rounded-2xl px-3 py-2">
-                      No mappings added yet.
+                      No manual mappings added yet. Start sync first and only review the products that could not be matched automatically.
                     </div>
                   )}
                   {mappingItems.map((item, idx) => (
@@ -5754,7 +6129,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                       />
                       <input
                         className="px-3 py-2 rounded-xl bg-zinc-50 border border-zinc-200 text-[10px] font-bold"
-                        placeholder="Canonical SKU"
+                        placeholder="Catalog product ID"
                         value={item.canonical_sku}
                         onChange={(e) => {
                           const value = e.target.value;
@@ -9451,6 +9826,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     </div>
                   ) : null;
                 })()}
+                <LocationPinPicker
+                  title="Shop Pin"
+                  helpText="Search, drag, or tap the exact storefront location buyers should use for directions."
+                  value={{
+                    label: profileData.address,
+                    lat: shopLocationLat === '' ? undefined : Number(shopLocationLat),
+                    lng: shopLocationLng === '' ? undefined : Number(shopLocationLng),
+                  }}
+                  onChange={(next) => {
+                    setProfileData(prev => ({
+                      ...prev,
+                      address: next.label || prev.address,
+                    }));
+                    setShopLocationLat(next.lat === undefined ? '' : next.lat);
+                    setShopLocationLng(next.lng === undefined ? '' : next.lng);
+                    setSettingsStatus(null);
+                  }}
+                  searchPlaceholder="Search shop building, road, stage, or landmark"
+                  className="mt-4"
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -9517,7 +9912,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                           type="button"
                           onClick={() => {
                             setEditingRegionId(null);
-                            setRegionDraft({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '' });
+                            setRegionDraft({ type: 'market_zone', name: '', parentId: '', lat: '', lng: '', locationLabel: '' });
                             setLocationAdminStatus(null);
                           }}
                           className="text-[10px] font-black text-zinc-500"
@@ -9556,22 +9951,25 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                         </option>
                       ))}
                     </select>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="number"
-                        value={regionDraft.lat}
-                        onChange={(e) => setRegionDraft(prev => ({ ...prev, lat: e.target.value }))}
-                        placeholder="Centroid lat"
-                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
-                      />
-                      <input
-                        type="number"
-                        value={regionDraft.lng}
-                        onChange={(e) => setRegionDraft(prev => ({ ...prev, lng: e.target.value }))}
-                        placeholder="Centroid lng"
-                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
-                      />
-                    </div>
+                    <LocationPinPicker
+                      title="Region Pin"
+                      helpText="Search and drag to the center of this region."
+                      value={{
+                        label: regionDraft.locationLabel,
+                        lat: regionDraft.lat ? Number(regionDraft.lat) : undefined,
+                        lng: regionDraft.lng ? Number(regionDraft.lng) : undefined,
+                      }}
+                      onChange={(next) => {
+                        setRegionDraft(prev => ({
+                          ...prev,
+                          lat: next.lat === undefined ? '' : String(next.lat),
+                          lng: next.lng === undefined ? '' : String(next.lng),
+                          locationLabel: next.label || prev.locationLabel,
+                        }));
+                        setLocationAdminStatus(null);
+                      }}
+                      searchPlaceholder="Search region center, market, or landmark"
+                    />
                     <button
                       type="button"
                       onClick={handleCreateRegion}
@@ -9588,7 +9986,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                           type="button"
                           onClick={() => {
                             setEditingPlaceId(null);
-                            setPlaceDraft({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '' });
+                            setPlaceDraft({ type: 'pickup_point', name: '', regionId: '', addressLine: '', lat: '', lng: '', locationLabel: '' });
                             setLocationAdminStatus(null);
                           }}
                           className="text-[10px] font-black text-zinc-500"
@@ -9633,22 +10031,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                       placeholder="Address line"
                       className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
                     />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="number"
-                        value={placeDraft.lat}
-                        onChange={(e) => setPlaceDraft(prev => ({ ...prev, lat: e.target.value }))}
-                        placeholder="Lat"
-                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
-                      />
-                      <input
-                        type="number"
-                        value={placeDraft.lng}
-                        onChange={(e) => setPlaceDraft(prev => ({ ...prev, lng: e.target.value }))}
-                        placeholder="Lng"
-                        className="w-full p-3 bg-white border border-zinc-200 rounded-xl text-xs font-bold"
-                      />
-                    </div>
+                    <LocationPinPicker
+                      title="Place Pin"
+                      helpText="Search and drag to the exact pickup point, building, or market spot."
+                      value={{
+                        label: placeDraft.locationLabel,
+                        lat: placeDraft.lat ? Number(placeDraft.lat) : undefined,
+                        lng: placeDraft.lng ? Number(placeDraft.lng) : undefined,
+                      }}
+                      onChange={(next) => {
+                        setPlaceDraft(prev => ({
+                          ...prev,
+                          lat: next.lat === undefined ? '' : String(next.lat),
+                          lng: next.lng === undefined ? '' : String(next.lng),
+                          locationLabel: next.label || prev.locationLabel,
+                          addressLine: next.label || prev.addressLine,
+                        }));
+                        setLocationAdminStatus(null);
+                      }}
+                      searchPlaceholder="Search pickup point, building, or landmark"
+                    />
                     <button
                       type="button"
                       onClick={handleCreatePlace}
@@ -9812,7 +10214,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                       <p className="text-[10px] text-zinc-500 font-bold">No landmark photos added yet.</p>
                     )}
                     {shopLandmarks.map((item, idx) => (
-                      <div key={`${item.id || idx}`} className="grid grid-cols-1 sm:grid-cols-[auto,1.2fr,1fr,auto] gap-2 bg-white rounded-2xl p-3 border border-dashed border-zinc-200">
+                      <div key={`${item.id || idx}`} className="grid grid-cols-1 sm:grid-cols-[auto_1.2fr_1fr_auto] gap-2 bg-white rounded-2xl p-3 border border-dashed border-zinc-200">
                         <div className="space-y-2">
                           <div className="w-12 h-12 rounded-xl overflow-hidden border border-zinc-100 bg-zinc-50 flex items-center justify-center">
                             {item.image_url ? (
@@ -10755,7 +11157,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                     {pathLandmarkDrafts.map((item, idx) => (
                       <div
                         key={`${item.label}-${idx}`}
-                        className="grid grid-cols-1 sm:grid-cols-[auto,auto,1fr,1fr] gap-2 bg-zinc-50 rounded-2xl p-3 border border-dashed border-zinc-200"
+                        className="grid grid-cols-1 sm:grid-cols-[auto_auto_1fr_1fr] gap-2 bg-zinc-50 rounded-2xl p-3 border border-dashed border-zinc-200"
                         draggable
                         onDragStart={() => {
                           landmarkDragIndexRef.current = idx;

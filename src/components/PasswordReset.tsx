@@ -36,7 +36,7 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
     e.preventDefault();
     setStatus(null);
     if (!isValidPhone(form.phone) || !isValidTenant(form.tenant_id)) {
-      setStatus('Please enter a valid phone number and tenant ID.');
+      setStatus('Please enter a valid phone number and username.');
       return;
     }
     setLoading(true);
@@ -58,7 +58,7 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
     e.preventDefault();
     setStatus(null);
     if (!isValidPhone(form.phone) || !isValidTenant(form.tenant_id) || !isValidResetCode(form.reset_code) || !isValidPin(form.new_pin)) {
-      setStatus('Please check the reset code, PIN, phone number, and tenant ID.');
+      setStatus('Please check the reset code, PIN, phone number, and username.');
       return;
     }
     if (form.new_pin.trim() !== form.confirm_pin.trim()) {
@@ -134,12 +134,12 @@ export const PasswordReset: React.FC<PasswordResetProps> = ({ onBack, onLoginOpe
                 </div>
               </label>
               <label className="block">
-                <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Tenant ID</span>
+                <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Username</span>
                 <input
                   value={form.tenant_id}
                   onChange={(e) => setForm(prev => ({ ...prev, tenant_id: e.target.value }))}
                   className="mt-2 w-full bg-zinc-50 rounded-2xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none"
-                  placeholder="tenant_001"
+                  placeholder="your_username"
                   required
                 />
               </label>

@@ -88,7 +88,6 @@ export const getDevicePayload = (): AuthDevicePayload => {
 };
 
 const normalizeAuthPayload = <T extends { phone: string; pin: string; tenant_id: string }>(payload: T) => ({
-  ...payload,
   phone: sanitizePhone(payload.phone),
   pin: sanitizePin(payload.pin),
   tenant_id: sanitizeTenantId(payload.tenant_id),
@@ -102,7 +101,7 @@ export const login = async (payload: {
 }): Promise<AuthTokens> => {
   const normalized = normalizeAuthPayload(payload);
   if (!isValidPhone(normalized.phone) || !isValidPin(normalized.pin) || !isValidTenantId(normalized.tenant_id)) {
-    throw new Error('Please enter a valid phone number, PIN, and tenant ID.');
+    throw new Error('Please enter a valid phone number, PIN, and username.');
   }
   try {
     return await apiFetch('/v1/auth/login', {
@@ -125,6 +124,7 @@ export const login = async (payload: {
 };
 
 export const register = async (payload: {
+  display_name?: string;
   phone: string;
   pin: string;
   tenant_id: string;
@@ -132,7 +132,10 @@ export const register = async (payload: {
 }): Promise<AuthTokens> =>
   apiFetch('/v1/auth/register', {
     method: 'POST',
-    body: JSON.stringify(normalizeAuthPayload(payload)),
+    body: JSON.stringify({
+      ...normalizeAuthPayload(payload),
+      display_name: sanitizeText(payload.display_name || '', 120),
+    }),
   });
 
 export const requestPasswordReset = async (payload: {

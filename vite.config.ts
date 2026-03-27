@@ -24,7 +24,9 @@ if (!globalAny.global.crypto) {
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const isDev = mode === 'development';
+  const enablePwaInDev = env.VITE_ENABLE_PWA_DEV === 'true';
   const gatewayTarget = env.VITE_GATEWAY_URL || env.VITE_API_BASE_URL || 'http://localhost:8000';
+  const buildId = `${env.npm_package_version || '0.0.0'}-${new Date().toISOString()}`;
   return {
     plugins: [
       react(),
@@ -69,12 +71,13 @@ export default defineConfig(({mode}) => {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff2}'],
         },
         devOptions: {
-          enabled: isDev
+          enabled: isDev && enablePwaInDev
         }
       })
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      __APP_BUILD_ID__: JSON.stringify(buildId),
     },
     resolve: {
       alias: {

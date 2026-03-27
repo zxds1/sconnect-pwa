@@ -29,7 +29,7 @@ const getStored = (key: string) => {
 const resolveBaseUrl = () => getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
 
 const resolveAuth = (): WsAuthParams => ({
-  tenantId: getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001',
+  tenantId: getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID') ?? '',
   userId: getAuthItem('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '',
   role: getAuthItem('soko:role') ?? getEnv('VITE_ROLE') ?? '',
 });

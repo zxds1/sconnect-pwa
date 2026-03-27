@@ -27,9 +27,9 @@ import {
   removeProfileFavorite,
   updateProfile
 } from '../lib/profileApi';
-import { getAuthItem, getVisitorId } from '../lib/authStorage';
-import { getShopProfile, getShopStats } from '../lib/shopDirectoryApi';
-import { updateSellerProfile } from '../lib/sellerProfileApi';
+import { getAccountLabel, getAuthItem, getVisitorId, setAuthItem } from '../lib/authStorage';
+import { getShopProducts, getShopProfile, getShopStats } from '../lib/shopDirectoryApi';
+import { getSellerProfile, type SellerProfile, updateSellerProfile } from '../lib/sellerProfileApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 import { postAnalyticsEvent } from '../lib/analyticsApi';
 import {
@@ -76,12 +76,52 @@ const guessMediaType = (url: string): 'video' | 'image' => {
   return 'image';
 };
 
+const normalizeAccountName = (value?: string) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'profile' || normalized === 'my profile') return '';
+  return trimmed;
+};
+
+const normalizeShopProduct = (raw: any): Product | null => {
+  if (!raw) return null;
+  const id = raw.id || raw.product_id || raw.productId;
+  if (!id) return null;
+  const mediaUrl = raw.media_url || raw.mediaUrl || raw.image_url || raw.image || '/logo.jpg';
+  const lat = raw.location?.lat ?? raw.lat;
+  const lng = raw.location?.lng ?? raw.lng;
+  const address = raw.location?.address ?? raw.address ?? '';
+  return {
+    id: String(id),
+    sellerId: String(raw.seller_id || raw.sellerId || ''),
+    productId: raw.product_id || raw.productId || String(id),
+    name: raw.name || raw.title || raw.product_name || 'Product',
+    description: raw.description || raw.summary || '',
+    price: Number(raw.price ?? raw.current_price ?? raw.unit_price ?? 0),
+    category: raw.category || raw.category_name || 'general',
+    mediaUrl,
+    mediaType: String(raw.media_type || raw.mediaType || '').toLowerCase() === 'video' ? 'video' : guessMediaType(mediaUrl),
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    stockLevel: Number(raw.stock_level ?? raw.stockLevel ?? raw.stock ?? 0),
+    stockStatus: raw.stock_status || raw.stockStatus,
+    expiryDate: raw.expiry_date || raw.expiryDate,
+    isFeatured: raw.is_featured ?? raw.isFeatured,
+    discountPrice: raw.discount_price ?? raw.discountPrice,
+    location: Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+      ? { lat: Number(lat), lng: Number(lng), address }
+      : undefined,
+  };
+};
+
 export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequireLogin, onOpenSellerStudio, onSellerAccountCreated, sellerFastTrack, onSellerFastTrackConsumed, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
   const hasSession = Boolean(getAuthItem('soko:auth_token'));
   const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [ownSellerProfile, setOwnSellerProfile] = useState<SellerProfile | null>(null);
   const [shopProfile, setShopProfile] = useState<Record<string, any> | null>(null);
   const [shopStats, setShopStats] = useState<Record<string, any> | null>(null);
+  const [shopProducts, setShopProducts] = useState<Product[] | null>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [likes, setLikes] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<any[]>([]);
@@ -127,12 +167,15 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
   const isGuestOwnProfile = isOwnProfile && !hasSession;
   const canManageOwnProfile = isOwnProfile && hasSession;
   const visitorId = useMemo(() => (isGuestOwnProfile ? getVisitorId() : ''), [isGuestOwnProfile]);
-  const visitorLabel = visitorId ? `Visitor ${visitorId.slice(-6).toUpperCase()}` : 'Visitor';
+  const accountIntent = isOwnProfile ? String(getAuthItem('soko:account_intent') || '').toLowerCase() : '';
+  const storedAccountLabel = useMemo(() => (isOwnProfile ? getAccountLabel() : ''), [isOwnProfile]);
+  const visitorLabel = visitorId ? `Guest ${visitorId.slice(-4).toUpperCase()}` : 'Guest';
+  const guestProfileName = accountIntent === 'seller' ? 'Guest Seller' : 'Guest Shopper';
 
   const profileData = useMemo(() => {
     if (!isOwnProfile && shopProfile) {
       return {
-        name: shopProfile.name,
+        name: normalizeAccountName(shopProfile.name) || 'Seller',
         avatar: shopProfile.avatar || shopProfile.logo,
         bio: shopProfile.bio || '',
         description: shopProfile.description || '',
@@ -140,15 +183,24 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
       } as any;
     }
     return {
-      name: profile?.display_name || profile?.name || (isGuestOwnProfile ? visitorLabel : 'Profile'),
+      name:
+        normalizeAccountName(profile?.display_name) ||
+        normalizeAccountName(profile?.name) ||
+        normalizeAccountName(ownSellerProfile?.name) ||
+        normalizeAccountName(storedAccountLabel) ||
+        (isGuestOwnProfile ? guestProfileName : getAuthItem('soko:username') || 'My Account'),
       avatar: profile?.avatar_url || profile?.avatar || '/logo.jpg',
       bio: profile?.bio || '',
       description: profile?.description || '',
       is_verified: false,
     } as any;
-  }, [isOwnProfile, isGuestOwnProfile, visitorLabel, profile, shopProfile]);
+  }, [isOwnProfile, isGuestOwnProfile, guestProfileName, profile, ownSellerProfile, shopProfile, storedAccountLabel]);
 
-  const sellerProducts = sellerId ? products.filter(p => p.sellerId === sellerId) : [];
+  const effectiveSellerId = sellerId || (isOwnProfile ? ownSellerProfile?.seller_id || '' : '');
+  const sellerDisplayName =
+    normalizeAccountName(profileData.name) ||
+    (isOwnProfile ? normalizeAccountName(getAuthItem('soko:username')) || 'My Account' : 'Seller');
+  const sellerProducts = effectiveSellerId ? (shopProducts ?? products.filter(p => p.sellerId === effectiveSellerId)) : [];
 
   const parseNumber = (value: any) => {
     if (value === null || value === undefined || value === '') return null;
@@ -161,8 +213,8 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
     return Number.isFinite(parsed) ? parsed : null;
   };
 
-  const reachValue = parseNumber(insightsReach?.total_reach ?? insights?.total_reach);
-  const engagementValue = parseNumber(insightsEngagement?.engagement_rate ?? insights?.engagement_rate);
+  const reachValue = parseNumber(insightsReach?.reach_24h ?? insightsReach?.total_reach ?? insights?.reach_24h ?? insights?.total_reach);
+  const engagementValue = parseNumber(insightsEngagement?.engagement_24h ?? insightsEngagement?.engagement_rate ?? insights?.engagement_24h ?? insights?.engagement_rate);
   const ratingValue = parseNumber(shopStats?.rating ?? shopProfile?.rating);
   const activeItemsValue = sellerProducts.length;
 
@@ -177,12 +229,40 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
   const activeItemsPct = activeItemsTarget > 0 ? Math.min(100, (activeItemsValue / activeItemsTarget) * 100) : null;
 
   const formatEngagement = () => {
-    const raw = insightsEngagement?.engagement_rate ?? insights?.engagement_rate;
+    const raw = insightsEngagement?.engagement_24h ?? insightsEngagement?.engagement_rate ?? insights?.engagement_24h ?? insights?.engagement_rate;
     if (raw === null || raw === undefined || raw === '') return '—';
-    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return '—';
+      if (trimmed.includes('%')) return trimmed;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed)
+        ? parsed.toLocaleString(undefined, { maximumFractionDigits: 1 })
+        : trimmed;
+    }
     const numeric = Number(raw);
-    return Number.isFinite(numeric) ? `${numeric}%` : '—';
+    return Number.isFinite(numeric)
+      ? numeric.toLocaleString(undefined, { maximumFractionDigits: 1 })
+      : '—';
   };
+
+  const insightsChartData = useMemo(() => {
+    if (!Array.isArray(insightsHistory) || insightsHistory.length === 0) return [];
+    return insightsHistory
+      .map((item: any, index: number) => {
+        const rawDate = item?.updated_at || item?.date || item?.created_at || '';
+        const parsedDate = rawDate ? new Date(rawDate) : null;
+        const label = parsedDate && !Number.isNaN(parsedDate.getTime())
+          ? parsedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : `Day ${index + 1}`;
+        return {
+          label,
+          reach: parseNumber(item?.reach ?? item?.reach_24h ?? item?.total_reach) ?? 0,
+          engagement: parseNumber(item?.engagement ?? item?.engagement_24h ?? item?.engagement_rate) ?? 0,
+        };
+      })
+      .reverse();
+  }, [insightsHistory]);
 
   const stats = useMemo(() => {
     if (!isOwnProfile && shopStats) {
@@ -217,16 +297,21 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
       setError(null);
       try {
         if (sellerId) {
-          const [shop, statsResp] = await Promise.all([
+          const [shop, statsResp, shopProductsResp] = await Promise.all([
             getShopProfile(sellerId),
             getShopStats(sellerId).catch(() => null),
+            getShopProducts(sellerId).catch(() => []),
           ]);
           if (!alive) return;
+          setOwnSellerProfile(null);
           setShopProfile(shop || null);
           setShopStats(statsResp || null);
+          setShopProducts((Array.isArray(shopProductsResp) ? shopProductsResp : []).map(normalizeShopProduct).filter(Boolean) as Product[]);
         } else if (!hasSession) {
           if (!alive) return;
           setProfile(null);
+          setOwnSellerProfile(null);
+          setShopProducts(null);
           setPosts([]);
           setLikes([]);
           setFavorites([]);
@@ -239,7 +324,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
           setSocialConnections([]);
           setShareLink('');
         } else {
-          const [profileResp, postsResp, likesResp, favResp, reviewsResp, insightsResp, insightsHistResp, trendResp, reachResp, engagementResp, socialResp, shareResp] = await Promise.all([
+          const [profileResp, postsResp, likesResp, favResp, reviewsResp, insightsResp, insightsHistResp, trendResp, reachResp, engagementResp, socialResp, shareResp, sellerProfileResp] = await Promise.all([
             getProfile(),
             listProfilePosts(),
             listProfileLikes(),
@@ -252,9 +337,32 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
             getProfileInsightsEngagement(),
             listProfileSocial(),
             getProfileShareLink().catch(() => null),
+            isSellerAccount ? getSellerProfile().catch(() => null) : Promise.resolve(null),
           ]);
           if (!alive) return;
+          let ownShopProfileResp: Record<string, any> | null = null;
+          let ownShopStatsResp: Record<string, any> | null = null;
+          let ownShopProductsResp: any[] | null = null;
+          if (sellerProfileResp?.seller_id) {
+            [ownShopProfileResp, ownShopStatsResp, ownShopProductsResp] = await Promise.all([
+              getShopProfile(sellerProfileResp.seller_id).catch(() => null),
+              getShopStats(sellerProfileResp.seller_id).catch(() => null),
+              getShopProducts(sellerProfileResp.seller_id).catch(() => []),
+            ]);
+            if (!alive) return;
+          }
           setProfile(profileResp || null);
+          if (profileResp?.display_name) {
+            setAuthItem('soko:display_name', profileResp.display_name);
+          }
+          setOwnSellerProfile(sellerProfileResp || null);
+          setShopProfile(ownShopProfileResp || null);
+          setShopStats(ownShopStatsResp || null);
+          setShopProducts(
+            Array.isArray(ownShopProductsResp)
+              ? ownShopProductsResp.map(normalizeShopProduct).filter(Boolean) as Product[]
+              : null
+          );
           setPosts(postsResp || []);
           setLikes(likesResp || []);
           setFavorites(favResp || []);
@@ -267,7 +375,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
           setSocialConnections(socialResp || []);
           setShareLink(shareResp?.share_token || '');
           setEditForm({
-            display_name: profileResp?.display_name || '',
+            display_name: profileResp?.display_name || sellerProfileResp?.name || '',
             bio: profileResp?.bio || '',
             description: profileResp?.description || '',
             avatar_url: profileResp?.avatar_url || '',
@@ -301,7 +409,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
     return () => {
       alive = false;
     };
-  }, [sellerId, hasSession, isGuestOwnProfile]);
+  }, [sellerId, hasSession, isGuestOwnProfile, isSellerAccount]);
 
   useEffect(() => {
     let active = true;
@@ -489,6 +597,10 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
     try {
       const updated = await updateProfile(editForm);
       setProfile((prev) => ({ ...prev, ...(updated || editForm) }));
+      const nextDisplayName = String(updated?.display_name || editForm.display_name || '').trim();
+      if (nextDisplayName) {
+        setAuthItem('soko:display_name', nextDisplayName);
+      }
       const platforms: Array<keyof typeof socialForm> = ['facebook', 'twitter', 'instagram', 'tiktok', 'linkedin', 'website'];
       await Promise.all(platforms.map(async (platform) => {
         const desired = (socialForm[platform] || '').trim();
@@ -614,6 +726,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
         name: profileData.name?.trim() || undefined,
         description: profileData.description?.trim() || undefined
       });
+      setActiveTab('shop');
       onSellerAccountCreated?.();
       setSellerAccountStatus('Seller account created.');
     } catch (err: any) {
@@ -702,8 +815,8 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
   };
 
   return (
-    <div className="h-full bg-white flex flex-col overflow-y-auto no-scrollbar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <div className="p-4 flex items-center justify-between sticky top-0 bg-white z-20 border-b border-zinc-100">
+    <div className="theme-page-shell h-full flex flex-col overflow-y-auto no-scrollbar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <div className="theme-page-header sticky top-0 z-20 flex items-center justify-between border-b p-4">
         <div className="flex items-center gap-3">
           {onBack && (
             <button onClick={onBack} className="p-1 hover:bg-zinc-100 rounded-full">
@@ -716,7 +829,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
             className="w-7 h-7 rounded-lg object-cover"
           />
           <div className="flex items-center gap-1">
-            <h2 className="font-bold text-lg">{(profileData.name || '').toLowerCase().replace(/\s/g, '_')}</h2>
+            <h2 className="font-bold text-lg">{sellerDisplayName}</h2>
             {profileData.is_verified && <BadgeCheck className="w-4 h-4 text-indigo-600 fill-indigo-50" />}
           </div>
         </div>
@@ -935,7 +1048,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
           <p className="mb-3 text-[10px] font-bold text-zinc-500">Uploading avatar…</p>
         )}
         <div className="flex items-center gap-2 mb-1">
-          <h1 className="text-xl font-black text-zinc-900">{profileData.name}</h1>
+          <h1 className="text-xl font-black text-zinc-900">{sellerDisplayName}</h1>
           {profileData.is_verified && (
             <div className="group relative">
               <BadgeCheck className="w-5 h-5 text-indigo-600 fill-indigo-50" />
@@ -965,7 +1078,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
         ) : (
           canManageOwnProfile && (
             <p className="text-xs text-zinc-400 mb-2 text-center max-w-xs leading-relaxed">
-              Add a short bio so people know you.
+              Add a short bio so people know {sellerDisplayName}.
             </p>
           )
         )}
@@ -979,7 +1092,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
           if (!description) {
             return isOwnProfile ? (
               <p className="text-sm text-zinc-500 mb-6 text-center max-w-xs leading-relaxed">
-                Add a description about your shop or yourself.
+                Add a description for {sellerDisplayName}'s profile or shop.
               </p>
             ) : null;
           }
@@ -1002,7 +1115,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
           <div className="mb-6 w-full max-w-sm rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-center">
             <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Guest profile</p>
             <p className="mt-1 text-xs font-semibold text-indigo-700">
-              Your visitor ID is {visitorLabel}. Sign in to edit, post, or manage seller tools.
+              Browsing as {visitorLabel}. Sign in to save your real profile name, posts, and seller tools.
             </p>
           </div>
         )}
@@ -1160,20 +1273,20 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-4">Recent Sales Trend</h4>
                 <div className="h-32 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={insightsHistory.length ? insightsHistory : []}>
+                    <AreaChart data={insightsChartData}>
                       <defs>
                         <linearGradient id="colorSalesStats" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
                           <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
-                      <XAxis dataKey="name" hide />
+                      <XAxis dataKey="label" hide />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '10px' }}
                       />
                       <Area
                         type="monotone"
-                        dataKey="sales"
+                        dataKey="reach"
                         stroke="#4f46e5"
                         strokeWidth={2}
                         fillOpacity={1}
@@ -1182,7 +1295,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-                <p className="text-[10px] text-zinc-400 text-center mt-2 font-medium">Sales velocity updated with live insights</p>
+                <p className="text-[10px] text-zinc-400 text-center mt-2 font-medium">Reach updated with live insights</p>
               </div>
             )}
 
@@ -1252,7 +1365,9 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                         </div>
                         <div className="flex items-center gap-1 text-amber-500">
                           <Star className="w-3 h-3 fill-amber-500" />
-                          <span className="text-xs font-bold">{shopProfile?.rating || '--'}</span>
+                          <span className="text-xs font-bold">
+                            {ratingValue !== null ? ratingValue.toFixed(1) : '--'}
+                          </span>
                         </div>
                       </div>
                       <p className="text-xs text-zinc-500 line-clamp-2 mb-4 leading-relaxed">
@@ -1286,7 +1401,11 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                 <div className="py-20 flex flex-col items-center justify-center text-center px-6">
                   <ShoppingBag className="w-12 h-12 text-zinc-200 mb-4" />
                   <h4 className="text-zinc-900 font-bold mb-1">No products yet</h4>
-                  <p className="text-xs text-zinc-400">This seller hasn't listed any items for sale in their shop tab.</p>
+                  <p className="text-xs text-zinc-400">
+                    {canManageOwnProfile && isSellerAccount
+                      ? 'Add products in Seller Studio and they will appear here automatically.'
+                      : "This seller hasn't listed any items for sale in their shop tab."}
+                  </p>
                 </div>
               )}
             </div>

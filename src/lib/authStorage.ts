@@ -64,3 +64,11 @@ export const getVisitorId = () => {
   setAuthItem('soko:visitor_id', visitorId);
   return visitorId;
 };
+
+export const getAccountLabel = () => {
+  const displayName = (getAuthItem('soko:display_name') || '').trim();
+  if (displayName) return displayName;
+  const username = (getAuthItem('soko:username') || getAuthItem('soko:tenant_id') || '').trim();
+  if (username) return username;
+  return '';
+};

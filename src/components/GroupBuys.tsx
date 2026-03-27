@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Zap, Loader2, BadgePercent, Sparkles, Clock3 } from 'lucide-react';
+import { ArrowLeft, MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Zap, Loader2, BadgePercent, Sparkles, Clock3 } from 'lucide-react';
 import { listGroupBuyInstances, joinGroupBuyInstance, createBuyerGroupRequest, type GroupBuyInstance } from '../lib/groupBuyApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 
@@ -58,6 +58,11 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     if (status.includes('filled')) return 'rgba(34,197,94,0.9)';
     return 'rgba(56,189,248,0.9)';
   };
+
+  const panelClass = 'group-buys-panel rounded-3xl border backdrop-blur-xl';
+  const chipClass = 'group-buys-chip rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em]';
+  const inputClass = 'group-buys-input rounded-2xl border px-4 py-3 text-sm font-semibold outline-none transition';
+  const subtleCopyClass = 'group-buys-soft text-[11px] font-medium';
 
   useEffect(() => {
     let alive = true;
@@ -148,35 +153,35 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(34,197,94,0.16),_transparent_34%),radial-gradient(circle_at_80%_0%,_rgba(56,189,248,0.16),_transparent_28%),linear-gradient(180deg,_#090b12_0%,_#0b1020_55%,_#06070c_100%)] text-white">
-      <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950/75 backdrop-blur-xl px-4 pt-[calc(env(safe-area-inset-top)+0.85rem)] pb-4 shadow-[0_12px_60px_rgba(0,0,0,0.28)]">
+    <div className="group-buys-page min-h-screen">
+      <div className="group-buys-header sticky top-0 z-10 border-b px-4 pt-[calc(env(safe-area-inset-top)+0.85rem)] pb-4">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {onBack && (
-              <button onClick={onBack} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/10">
-                Back
+              <button onClick={onBack} className="group-buys-chip rounded-full p-2 transition hover:opacity-85" aria-label="Go back">
+                <ArrowLeft className="h-5 w-5" />
               </button>
             )}
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.32em] text-emerald-300/90">Shared deals</p>
-              <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">Group Buys</h2>
+              <p className="text-[10px] font-black uppercase tracking-[0.32em] text-emerald-400">Shared deals</p>
+              <h2 className="group-buys-title text-2xl font-black tracking-tight sm:text-3xl">Group Buys</h2>
             </div>
           </div>
           <div className="hidden text-right sm:block">
-            <p className="text-[11px] font-medium text-white/75">Join nearby shoppers for better prices.</p>
-            <p className="text-[10px] font-bold text-white/50">Seller participation is optional and location-aware.</p>
+            <p className="group-buys-copy text-[11px] font-medium">Join nearby shoppers for better prices.</p>
+            <p className="group-buys-soft text-[10px] font-bold">Seller participation is optional and location-aware.</p>
           </div>
         </div>
       </div>
 
       <div className="mx-auto w-full max-w-6xl px-4 py-4 sm:py-5">
-        <div className="sticky top-[calc(env(safe-area-inset-top)+4.2rem)] z-10 mb-4 rounded-3xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+        <div className={`${panelClass} sticky top-[calc(env(safe-area-inset-top)+4.2rem)] z-10 mb-4 px-4 py-4`}>
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-sky-300">
                 <Filter className="h-4 w-4" /> Find deals
               </div>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/60">
+              <span className={chipClass}>
                 {items.length} listings
               </span>
             </div>
@@ -185,18 +190,18 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 value={filters.market_name}
                 onChange={(e) => setFilters((prev) => ({ ...prev, market_name: e.target.value }))}
                 placeholder="Market or area"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
+                className={`${inputClass} focus:border-sky-400/50`}
               />
               <input
                 value={filters.category_id}
                 onChange={(e) => setFilters((prev) => ({ ...prev, category_id: e.target.value }))}
                 placeholder="Category or product"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
+                className={`${inputClass} focus:border-sky-400/50`}
               />
               <select
                 value={filters.status}
                 onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-sky-400/50"
+                className={`${inputClass} focus:border-sky-400/50`}
               >
                 <option value="open">Open</option>
                 <option value="filled">Filled</option>
@@ -205,7 +210,7 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               <select
                 value={filters.sort}
                 onChange={(e) => setFilters((prev) => ({ ...prev, sort: e.target.value }))}
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-sky-400/50"
+                className={`${inputClass} focus:border-sky-400/50`}
               >
                 <option value="ending_soon">Ending soon</option>
                 <option value="most_full">Most full</option>
@@ -219,39 +224,39 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 onChange={(e) => setFilters((prev) => ({ ...prev, price_max: e.target.value }))}
                 placeholder="Max price you want"
                 type="number"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
+                className={`${inputClass} focus:border-sky-400/50`}
               />
               <input
                 value={filters.radius_km}
                 onChange={(e) => setFilters((prev) => ({ ...prev, radius_km: e.target.value }))}
                 placeholder="Distance radius (km)"
                 type="number"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-sky-400/50"
+                className={`${inputClass} focus:border-sky-400/50`}
               />
               <div className="flex flex-wrap items-center gap-3 sm:justify-end">
                 <button
                   onClick={handleUseMyLocation}
-                  className="inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] text-sky-200 transition hover:bg-sky-400/15"
+                  className="group-buys-accent-btn inline-flex items-center gap-2 rounded-full border px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] transition hover:brightness-105"
                 >
                   <MapPin className="h-4 w-4" /> Use location
                 </button>
-                <span className="text-[11px] font-medium text-white/45">Nearby deals are prioritized when location is set.</span>
+                <span className={subtleCopyClass}>Nearby deals are prioritized when location is set.</span>
               </div>
             </div>
           </div>
         </div>
 
-        <details className="group mb-4 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+        <details className={`${panelClass} group mb-4 p-4`}>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">
                 <ShoppingCart className="h-4 w-4" /> Request a group deal
               </div>
-              <p className="mt-2 text-sm text-white/70">
+              <p className="group-buys-copy mt-2 text-sm">
                 Tell nearby sellers what you want, how many you need, and the price that works for you.
               </p>
             </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/60 group-open:bg-white/10">
+            <span className={`${chipClass} group-open:opacity-90`}>
               Toggle
             </span>
           </summary>
@@ -260,21 +265,21 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               value={createSku}
               onChange={(e) => setCreateSku(e.target.value)}
               placeholder="Product SKU or name"
-              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-emerald-400/50"
+              className={`${inputClass} focus:border-emerald-400/50`}
             />
             <input
               value={createQty}
               onChange={(e) => setCreateQty(e.target.value)}
               placeholder="How many units"
               type="number"
-              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-emerald-400/50"
+              className={`${inputClass} focus:border-emerald-400/50`}
             />
             <input
               value={createPrice}
               onChange={(e) => setCreatePrice(e.target.value)}
               placeholder="Target price"
               type="number"
-              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-white placeholder:text-white/35 outline-none transition focus:border-emerald-400/50"
+              className={`${inputClass} focus:border-emerald-400/50`}
             />
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -284,7 +289,7 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             >
               <Sparkles className="h-4 w-4" /> Request deal
             </button>
-            <span className="text-[11px] font-medium text-white/45">
+            <span className={subtleCopyClass}>
               Create a request and let sellers respond with better pricing tiers.
             </span>
           </div>
@@ -299,13 +304,13 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           ].map((card) => {
             const Icon = card.icon;
             return (
-              <div key={card.label} className={`rounded-3xl border border-white/10 bg-gradient-to-br ${card.tone} p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur-xl`}>
+              <div key={card.label} className={`${panelClass} bg-gradient-to-br ${card.tone} p-4`}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="text-[10px] font-black uppercase tracking-[0.26em] text-white/55">{card.label}</div>
-                    <div className="mt-2 text-2xl font-black tracking-tight text-white">{card.value}</div>
+                    <div className="group-buys-stat-label text-[10px] font-black uppercase tracking-[0.26em]">{card.label}</div>
+                    <div className="group-buys-stat-value mt-2 text-2xl font-black tracking-tight">{card.value}</div>
                   </div>
-                  <div className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/10 text-white">
+                  <div className="group-buys-icon-tile grid h-11 w-11 place-items-center rounded-2xl border">
                     <Icon className="h-5 w-5" />
                   </div>
                 </div>
@@ -315,12 +320,12 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         </div>
 
         {error && (
-          <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm font-semibold text-rose-100">
+          <div className="group-buys-error mt-4 rounded-2xl border px-4 py-3 text-sm font-semibold">
             {error}
           </div>
         )}
         {loading && (
-          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/70">
+          <div className="group-buys-panel group-buys-copy mt-4 flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading shared deals...
           </div>
         )}
@@ -343,12 +348,12 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 key={item.id}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_22px_80px_rgba(0,0,0,0.22)] backdrop-blur-xl"
+                className={`${panelClass} overflow-hidden p-5`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-black tracking-tight text-white">{item.product_sku || 'Shared deal'}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-white/55">
+                    <div className="group-buys-title text-sm font-black tracking-tight">{item.product_sku || 'Shared deal'}</div>
+                    <div className="group-buys-stat-label mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium">
                       <span>{item.market_name || item.seller_name || 'Market'}</span>
                       <span>•</span>
                       <span>{item.distance_km ? `${item.distance_km.toFixed(1)} km` : 'Nearby'}</span>
@@ -359,22 +364,22 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                         </>
                       ) : null}
                     </div>
-                    <div className="mt-1 text-[11px] text-white/45">
-                      {item.seller_mode || 'seller'} {item.visual_marker ? `• ${item.visual_marker}` : ''}
+                    <div className="group-buys-soft mt-1 text-[11px]">
+                      {item.seller_mode || 'seller'} {item.visual_marker ? `• ${/^https?:\/\//i.test(String(item.visual_marker)) ? 'photo marker' : item.visual_marker}` : ''}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-black text-white">KSh {tierPrice || '-'}</div>
+                    <div className="group-buys-title text-sm font-black">KSh {tierPrice || '-'}</div>
                     {tierDiscount && <div className="text-[10px] font-bold text-emerald-300">{tierDiscount} off</div>}
                   </div>
                 </div>
 
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-[0.18em] text-white/45">
+                  <div className="group-buys-soft flex items-center justify-between text-[10px] font-black uppercase tracking-[0.18em]">
                     <span>{current}/{target} joined</span>
                     <span>{progress}%</span>
                   </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/8">
+                  <div className="group-buys-progress-track mt-2 h-2 overflow-hidden rounded-full">
                     <div className="h-full rounded-full" style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${dealTone(item)}, rgba(255,255,255,0.14))` }} />
                   </div>
                 </div>
@@ -382,14 +387,14 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => handleJoin(item)}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-sky-100 transition hover:bg-sky-400/15"
+                    className="group-buys-accent-btn inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:brightness-105"
                   >
                     <Users className="h-4 w-4" /> Join deal
                   </button>
                   {shareLink && (
                     <button
                       onClick={() => window.open(shareLink, '_blank', 'noopener')}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-white/90 transition hover:bg-white/10"
+                      className="group-buys-chip inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:opacity-90"
                     >
                       <MessageCircle className="h-4 w-4" /> Open discussion
                     </button>
@@ -397,18 +402,18 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                   {item.whatsapp_number && (
                     <a
                       href={`https://wa.me/${item.whatsapp_number}`}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-white/90 transition hover:bg-white/10"
+                      className="group-buys-chip inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:opacity-90"
                     >
                       <MessageCircle className="h-4 w-4" /> Contact seller
                     </a>
                   )}
                   {item.expires_at && (
-                    <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/55">
+                    <div className="group-buys-chip inline-flex items-center gap-1 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
                       <Timer className="h-3 w-3" /> {new Date(item.expires_at).toLocaleDateString()}
                     </div>
                   )}
                   {item.inventory_remaining !== undefined && (
-                    <div className="inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-200">
+                    <div className="group-buys-warning-chip inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
                       <Zap className="h-3 w-3" /> {item.inventory_remaining} left
                     </div>
                   )}
@@ -417,7 +422,7 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             );
           })}
           {!loading && items.length === 0 && (
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-sm font-semibold text-white/55">
+            <div className="group-buys-panel group-buys-stat-label rounded-3xl border p-5 text-sm font-semibold">
               No group buys found. Try a different filter.
             </div>
           )}

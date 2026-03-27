@@ -1,4 +1,5 @@
 import { requestUploadPresign } from './uploadsApi';
+import { requestMediaUploadPreview } from './mediaPreview';
 
 export const getVideoDurationSeconds = async (file: File) => {
   const url = URL.createObjectURL(file);
@@ -136,10 +137,15 @@ export const trimVideoFile = async (file: File, startSeconds: number, durationSe
 };
 
 export const uploadMediaFile = async (file: File, context: string) => {
+  const approvedFile = await requestMediaUploadPreview(file, {
+    title: 'Preview upload',
+    description: 'Review this image or video before it is uploaded.',
+    confirmLabel: 'Upload media',
+  });
   const presign = await requestUploadPresign({
-    file_name: file.name,
-    mime_type: file.type,
-    content_length: file.size,
+    file_name: approvedFile.name,
+    mime_type: approvedFile.type,
+    content_length: approvedFile.size,
     context,
   });
   if (!presign.upload_url && !presign.url) {
@@ -151,7 +157,7 @@ export const uploadMediaFile = async (file: File, context: string) => {
     Object.entries(presign.fields).forEach(([key, value]) => {
       form.append(key, value);
     });
-    form.append('file', file);
+    form.append('file', approvedFile);
     await fetch(uploadUrl, {
       method: presign.method || 'POST',
       body: form,
@@ -160,8 +166,8 @@ export const uploadMediaFile = async (file: File, context: string) => {
   } else {
     await fetch(uploadUrl, {
       method: presign.method || 'PUT',
-      headers: presign.headers || { 'Content-Type': file.type },
-      body: file,
+      headers: presign.headers || { 'Content-Type': approvedFile.type },
+      body: approvedFile,
     });
   }
   return {

@@ -15,6 +15,17 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpen, onAuthenticated, contextMessage }) => {
+  const getTokenClaims = (token: string) => {
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) return null;
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+      return JSON.parse(atob(padded)) as { sub?: string; tenant_id?: string; role?: string };
+    } catch {
+      return null;
+    }
+  };
   const [form, setForm] = React.useState({
     phone: '',
     pin: '',
@@ -37,7 +48,7 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
     e.preventDefault();
     setStatus(null);
     if (!isValidPhone(form.phone) || !isValidPin(form.pin) || !isValidTenant(form.tenant_id)) {
-      setStatus('Please enter a valid phone number, PIN, and tenant ID.');
+      setStatus('Please enter a valid phone number, PIN, and username.');
       return;
     }
     setLoading(true);
@@ -49,19 +60,30 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
         device: getDevicePayload(),
       });
       try {
-        if (form.remember) {
-          setAuthItem('soko:auth_token', tokens.access_token);
-          setAuthItem('soko:refresh_token', tokens.refresh_token);
-          setAuthItem('soko:tenant_id', form.tenant_id.trim());
-        }
+        // Keep the active session in storage regardless of the "remember" toggle.
+        // "remember" should control persistence strategy, not whether login state exists at all.
+        setAuthItem('soko:auth_token', tokens.access_token);
+        setAuthItem('soko:refresh_token', tokens.refresh_token);
+        setAuthItem('soko:tenant_id', form.tenant_id.trim());
+        setAuthItem('soko:username', form.tenant_id.trim());
       } catch {}
       try {
         const session = await getSessionInfo();
         if (session?.user_id) setAuthItem('soko:user_id', session.user_id);
-        if (session?.tenant_id) setAuthItem('soko:tenant_id', session.tenant_id);
+        if (session?.tenant_id) {
+          setAuthItem('soko:tenant_id', session.tenant_id);
+          setAuthItem('soko:username', session.tenant_id);
+        }
         if (session?.role) setAuthItem('soko:role', String(session.role).toLowerCase());
         if (session?.session_id) setAuthItem('soko:session_id', session.session_id);
       } catch {}
+      const claims = getTokenClaims(tokens.access_token);
+      if (claims?.sub) setAuthItem('soko:user_id', claims.sub);
+      if (claims?.tenant_id) {
+        setAuthItem('soko:tenant_id', claims.tenant_id);
+        setAuthItem('soko:username', claims.tenant_id);
+      }
+      if (claims?.role) setAuthItem('soko:role', String(claims.role).toLowerCase());
       try {
         const phone = form.phone.trim();
         await postAnalyticsEvent({
@@ -157,12 +179,12 @@ export const Login: React.FC<LoginProps> = ({ onBack, onRegisterOpen, onResetOpe
             </label>
 
             <label className="block">
-              <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Tenant ID</span>
+              <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Username</span>
               <input
                 value={form.tenant_id}
                 onChange={(e) => setForm(prev => ({ ...prev, tenant_id: e.target.value }))}
                 className="mt-2 w-full bg-zinc-50 rounded-2xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-900 focus:outline-none"
-                placeholder="tenant_001"
+                placeholder="your_username"
                 required
               />
             </label>

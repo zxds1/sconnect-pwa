@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Crown, Lock, BarChart3, Wallet, Megaphone } from 'lucide-react';
+import { ArrowLeft, Crown, Lock, BarChart3, Wallet, Megaphone } from 'lucide-react';
 import {
   cancelSubscription,
   downgradeSubscription,
@@ -193,14 +193,16 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
   return (
     <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">
       <div className="p-4 bg-white border-b border-zinc-100 sticky top-0 z-10">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button onClick={onBack} className="p-2 rounded-full hover:bg-zinc-100 transition-colors" aria-label="Go back">
+              <ArrowLeft className="w-5 h-5 text-zinc-900" />
+            </button>
+          )}
           <div>
             <p className="text-sm font-black text-zinc-900">Subscriptions</p>
             <p className="text-[10px] text-zinc-500">Upgrade paths and billing</p>
           </div>
-          {onBack && (
-            <button onClick={onBack} className="text-[10px] font-black text-zinc-500">Close</button>
-          )}
         </div>
         <div className="mt-3 flex items-center gap-2">
           {[
