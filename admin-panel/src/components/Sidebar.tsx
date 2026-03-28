@@ -17,9 +17,15 @@ const navItems = [
   { path: "/alerts", label: "Security Alerts" },
   { path: "/security", label: "Security Overview" },
   { path: "/compliance", label: "Compliance" },
+  { path: "/trust", label: "Trust & Support" },
   { path: "/risk", label: "Risk Radar" },
   { path: "/audit", label: "Audit Trail" },
-  { path: "/activity", label: "Platform Activity" }
+  { path: "/activity", label: "Platform Activity" },
+  { path: "/runtime", label: "Workers" },
+  { path: "/workers", label: "Worker Fleet" },
+  { path: "/delivery-center", label: "Delivery Center" },
+  { path: "/phase3-center", label: "Phase 3 Center" },
+  { path: "/group-buys", label: "Group Buys" },
 ];
 
 export const Sidebar = () => {

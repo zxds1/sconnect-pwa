@@ -4,12 +4,15 @@ import {
   cancelSubscription,
   downgradeSubscription,
   getSubscriptionView,
+  getInvoiceDownloadUrl,
   initiatePayment,
+  listBillingEvents,
   listInvoices,
   listPlans,
   reactivateSubscription,
   startTrial,
   upgradeSubscription,
+  type BillingEvent,
   type Invoice,
   type Plan,
   type SubscriptionView
@@ -26,6 +29,7 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscriptionView, setSubscriptionView] = useState<SubscriptionView | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [billingEvents, setBillingEvents] = useState<BillingEvent[]>([]);
   const [mpesaPhone, setMpesaPhone] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [downgradeTier, setDowngradeTier] = useState('');
@@ -34,6 +38,7 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
 
   const currentTier = subscriptionView?.subscription?.plan_tier || '';
+  const subscriptionStatus = String(subscriptionView?.subscription?.status || '').toLowerCase();
 
   useEffect(() => {
     let ignore = false;
@@ -49,11 +54,19 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
         setPlans(planItems);
         setSubscriptionView(view);
         setInvoices(invoiceItems);
+        listBillingEvents()
+          .then((events) => {
+            if (!ignore) setBillingEvents(events);
+          })
+          .catch(() => {
+            if (!ignore) setBillingEvents([]);
+          });
       } catch {
         if (!ignore) {
           setPlans([]);
           setSubscriptionView(null);
           setInvoices([]);
+          setBillingEvents([]);
         }
       } finally {
         if (!ignore) setLoading(false);
@@ -173,21 +186,31 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
   };
 
   const handleInvoiceDownload = async (invoice: Invoice) => {
+    const directUrl = invoice.download_url || '';
+    if (directUrl) {
+      window.open(directUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const key = invoice.pdf_s3_key || '';
     if (!key) {
       setStatusMessage('No invoice file available');
       return;
     }
+    try {
+      const resp = await getInvoiceDownloadUrl(invoice.id);
+      if (resp?.download_url) {
+        window.open(resp.download_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    } catch {}
     if (key.startsWith('http://') || key.startsWith('https://')) {
-      window.open(key, '_blank');
+      window.open(key, '_blank', 'noopener,noreferrer');
       return;
     }
     try {
       await navigator.clipboard.writeText(key);
-      setStatusMessage('Invoice key copied. Provide to support for download.');
-    } catch {
-      setStatusMessage(`Invoice key: ${key}`);
-    }
+    } catch {}
+    setStatusMessage('Invoice download is not available yet. The backend could not sign this invoice.');
   };
 
   return (
@@ -369,6 +392,11 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
               ) : (
                 <div className="text-[10px] font-bold text-zinc-500">No active subscription found.</div>
               )}
+              {subscriptionStatus.includes('past_due') && (
+                <div className="mt-4 p-3 rounded-2xl bg-amber-50 text-[10px] font-bold text-amber-700">
+                  Your subscription is past due. Review the billing events below and complete payment.
+                </div>
+              )}
               {subscriptionView?.usage && (
                 <div className="mt-4 text-[10px] font-bold text-zinc-600 space-y-2">
                   <div>Messages used: {subscriptionView.usage.messages_used ?? 0}</div>
@@ -428,6 +456,26 @@ export const Subscriptions: React.FC<Props> = ({ onBack }) => {
                 {invoices.length === 0 && (
                   <div className="text-zinc-400">No invoices yet.</div>
                 )}
+              </div>
+            </section>
+
+            <section className="bg-white rounded-3xl border border-zinc-100 p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <Wallet className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500">Billing Events</h3>
+              </div>
+              <div className="space-y-2 text-[10px] font-bold text-zinc-600">
+                {billingEvents.map((event) => (
+                  <div key={event.id} className="rounded-2xl bg-zinc-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{event.kind || 'event'}</span>
+                      <span className="text-zinc-400">{event.status || '—'}</span>
+                    </div>
+                    <div className="mt-1 text-zinc-500">{event.source || 'service'} · {event.created_at ? new Date(event.created_at).toLocaleString() : '—'}</div>
+                    {event.error_text && <div className="mt-1 text-amber-700">{event.error_text}</div>}
+                  </div>
+                ))}
+                {billingEvents.length === 0 && <div className="text-zinc-400">No billing events yet.</div>}
               </div>
             </section>
 

@@ -9,6 +9,14 @@ interface ShopsProps {
 }
 
 export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
+  const fallbackInitials = (value: string) =>
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('')
+      || 'S';
   const [query, setQuery] = useState('');
   const [shops, setShops] = useState<ShopDirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -47,7 +55,7 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
         ? shop.location
         : shop.location?.address || '';
       const category = shop.category || 'General';
-      const avatar = (shop as any)?.logo_url || '/logo.jpg';
+      const avatar = (shop as any)?.logo_url || '';
       const description = (shop as any)?.description || shop.category || '';
       return { id, name, rating, verified, locationLabel, category, avatar, description, raw: shop };
     });
@@ -85,7 +93,15 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="font-bold text-zinc-800">Top Rated Sellers</h2>
-          <button className="text-indigo-600 text-xs font-bold uppercase tracking-wider">View All</button>
+          <button
+            onClick={() => {
+              setStatus(null);
+              setQuery('');
+            }}
+            className="text-indigo-600 text-xs font-bold uppercase tracking-wider"
+          >
+            View All
+          </button>
         </div>
 
         {status && (
@@ -100,7 +116,7 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
         )}
         {!loading && shopCards.length === 0 && (
           <div className="p-3 rounded-2xl bg-white border border-zinc-100 text-xs font-bold text-zinc-500">
-            No shops found yet.
+            No shops matched the production directory response yet.
           </div>
         )}
         <div className="grid grid-cols-1 gap-4">
@@ -114,7 +130,13 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
               className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
             >
               <div className="flex gap-4 items-center mb-4">
-                <img src={seller.avatar} className="w-16 h-16 rounded-full border-2 border-zinc-50 object-cover" alt="avatar" />
+                {seller.avatar ? (
+                  <img src={seller.avatar} className="w-16 h-16 rounded-full border-2 border-zinc-50 object-cover" alt="avatar" />
+                ) : (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-zinc-50 bg-zinc-900 text-sm font-black text-white">
+                    {fallbackInitials(seller.name)}
+                  </div>
+                )}
                 <div className="flex-1">
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <h3 className="font-bold text-zinc-900">{seller.name}</h3>
@@ -144,7 +166,7 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
               </div>
 
               <p className="text-xs text-zinc-500 mb-4 line-clamp-2 italic">
-                "{seller.description || 'Discover more on this shop.'}"
+                "{seller.description || 'Production shop details will appear here once the directory sync resolves.'}"
               </p>
 
               <div className="flex flex-wrap gap-2 text-[10px] font-bold text-zinc-600">
@@ -161,7 +183,7 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
           <h2 className="font-bold text-zinc-800 mb-4">Browse Categories</h2>
           {availableCategories.length === 0 && (
             <div className="p-3 bg-white border border-zinc-100 rounded-2xl text-xs font-bold text-zinc-500">
-              No categories available yet.
+              No categories surfaced from the live directory yet.
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">

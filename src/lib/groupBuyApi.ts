@@ -35,6 +35,16 @@ export type GroupBuyInstance = {
   current_price?: number;
 };
 
+export type GroupBuyStatus = {
+  group_id: string;
+  members?: number;
+  target?: number;
+  momentum?: number;
+  tier_price?: number;
+  tier?: string;
+  status?: string;
+};
+
 export type GroupBuyFilters = {
   lat?: number;
   lng?: number;
@@ -92,3 +102,6 @@ export const joinGroupBuyInstance = async (id: string, payload?: { quantity?: nu
     method: 'POST',
     body: JSON.stringify(payload || {}),
   });
+
+export const getGroupBuyStatus = async (id: string): Promise<GroupBuyStatus> =>
+  apiFetch(`/v1/group-buy/${id}/status`);

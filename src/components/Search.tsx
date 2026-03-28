@@ -884,7 +884,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
         },
         (error) => {
           console.error("Error getting location:", error);
-          alert("Could not get your location. Please check permissions.");
+          setMapStatus('Could not get your location. Please check permissions.');
         }
       );
     }
@@ -923,6 +923,9 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     }
     setMediaError(null);
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is not supported on this browser. Use text search or upload a file instead.');
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       setCameraStream(stream);
       setIsCameraOpen(true);
@@ -934,7 +937,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
       videoRef.current.muted = true;
       await videoRef.current.play();
     } catch {
-      alert('Could not access camera.');
+      setMediaError('Could not access camera. Use text search or upload a file instead.');
     }
   };
 
@@ -1124,7 +1127,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
 
   const handleReadResults = () => {
     if (!voiceFeedbackEnabled) {
-      alert('Enable Voice-First Feedback in Settings.');
+      setSearchError('Enable Voice-First Feedback in Settings, or continue with text and photo search.');
       return;
     }
     const summary = filteredProducts.slice(0, 3).map(p => `${p.name} for ${p.price} shillings`).join('. ');
@@ -1134,7 +1137,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
       window.speechSynthesis.speak(utter);
       return;
     }
-    alert('Voice feedback not supported on this browser.');
+    setSearchError('Voice feedback is not supported on this browser. Use text search or photo search instead.');
   };
 
   const getProductLocationTarget = React.useCallback((product: Product) => {
@@ -1249,7 +1252,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   const handleStartListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech recognition not supported on this browser.');
+      setSearchError('Speech recognition is not supported on this browser. You can still use text search or photo search.');
       return;
     }
     if (isListening && recognitionRef.current) {
@@ -1257,6 +1260,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
       return;
     }
     setMediaError(null);
+    setSearchError(null);
     const recognition = new SpeechRecognition();
     recognition.lang = detectedLanguage === 'Swahili' ? 'sw-KE' : 'en-US';
     recognition.interimResults = false;
@@ -1368,7 +1372,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     if (!raw) return;
     const target = Number(raw);
     if (!Number.isFinite(target) || target <= 0) {
-      alert('Enter a valid target price.');
+      setSearchError('Enter a valid target price.');
       return;
     }
     try {
@@ -1381,7 +1385,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     const raw = watchlistTargets[item.id] ?? String(item.target_price);
     const target = Number(raw);
     if (!Number.isFinite(target) || target <= 0) {
-      alert('Enter a valid target price.');
+      setSearchError('Enter a valid target price.');
       return;
     }
     try {
@@ -2394,8 +2398,19 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
           </div>
         </div>
         {(searchError || mediaError || mediaUploading) && (
-          <div className="mb-4 text-[10px] font-bold text-rose-500">
-            {searchError || mediaError || 'Uploading media...'}
+          <div className="mb-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-[10px] font-bold text-rose-600 flex items-start justify-between gap-3">
+            <span>{searchError || mediaError || 'Uploading media...'}</span>
+            {(searchError || mediaError) && (
+              <button
+                onClick={() => {
+                  setSearchError(null);
+                  setMediaError(null);
+                }}
+                className="text-rose-500 hover:text-rose-700"
+              >
+                Dismiss
+              </button>
+            )}
           </div>
         )}
 
@@ -2405,7 +2420,17 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
               <div ref={mapContainerRef} className="absolute inset-0" />
               {!mapboxToken && (
                 <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/70 text-white text-xs font-bold">
-                  Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                  <div className="max-w-xs space-y-3 rounded-3xl border border-white/10 bg-zinc-950/80 p-5 text-center backdrop-blur">
+                    <p>Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.</p>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        onClick={() => setViewMode('grid')}
+                        className="rounded-full bg-white px-3 py-2 text-[10px] font-black text-zinc-900"
+                      >
+                        Switch to Grid
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">

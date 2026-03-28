@@ -15,9 +15,15 @@ import { SearchOps } from "./pages/SearchOps";
 import { Alerts } from "./pages/Alerts";
 import { Security } from "./pages/Security";
 import { Compliance } from "./pages/Compliance";
+import { Trust } from "./pages/Trust";
 import { Risk } from "./pages/Risk";
 import { Audit } from "./pages/Audit";
 import { Activity } from "./pages/Activity";
+import { Runtime } from "./pages/Runtime";
+import { Workers } from "./pages/Workers";
+import { DeliveryCenter } from "./pages/DeliveryCenter";
+import { Phase3Center } from "./pages/Phase3Center";
+import { GroupBuys } from "./pages/GroupBuys";
 import { SupplierApplications } from "./pages/SupplierApplications";
 import { AssistantModels } from "./pages/AssistantModels";
 import { Partnerships } from "./pages/Partnerships";
@@ -55,7 +61,13 @@ export default function App() {
         { name: "scrapers" },
         { name: "alerts" },
         { name: "audit" },
+        { name: "trust" },
         { name: "risk" },
+        { name: "runtime" },
+        { name: "workers" },
+        { name: "delivery-center" },
+        { name: "phase3-center" },
+        { name: "group-buys" },
       ]}
       options={{ syncWithLocation: true, warnWhenUnsavedChanges: false }}
     >
@@ -79,9 +91,15 @@ export default function App() {
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/security" element={<Security />} />
             <Route path="/compliance" element={<Compliance />} />
+            <Route path="/trust" element={<Trust />} />
               <Route path="/risk" element={<Risk />} />
               <Route path="/audit" element={<Audit />} />
               <Route path="/activity" element={<Activity />} />
+              <Route path="/runtime" element={<Runtime />} />
+              <Route path="/workers" element={<Workers />} />
+              <Route path="/delivery-center" element={<DeliveryCenter />} />
+              <Route path="/phase3-center" element={<Phase3Center />} />
+              <Route path="/group-buys" element={<GroupBuys />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </div>

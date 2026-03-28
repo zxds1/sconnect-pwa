@@ -960,13 +960,10 @@ export const Assistant: React.FC<AssistantProps> = ({
               onClick: () => onOpenProfile()
             };
           default:
-            return {
-              label,
-              onClick: () => onToast('Action not available yet.')
-            };
+            return null;
         }
       })
-      .filter(Boolean) as AssistantAction[];
+      .filter((action): action is AssistantAction => Boolean(action));
     return sortActionsByUsage(mapped).map((action) => ({
       label: action.label,
       onClick: () => {

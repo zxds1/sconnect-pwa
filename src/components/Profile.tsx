@@ -88,7 +88,7 @@ const normalizeShopProduct = (raw: any): Product | null => {
   if (!raw) return null;
   const id = raw.id || raw.product_id || raw.productId;
   if (!id) return null;
-  const mediaUrl = raw.media_url || raw.mediaUrl || raw.image_url || raw.image || '/logo.jpg';
+  const mediaUrl = raw.media_url || raw.mediaUrl || raw.image_url || raw.image || '';
   const lat = raw.location?.lat ?? raw.lat;
   const lng = raw.location?.lng ?? raw.lng;
   const address = raw.location?.address ?? raw.address ?? '';
@@ -116,6 +116,14 @@ const normalizeShopProduct = (raw: any): Product | null => {
 
 export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequireLogin, onOpenSellerStudio, onSellerAccountCreated, sellerFastTrack, onSellerFastTrackConsumed, isSellerAccount, onProductOpen, sellerId, products, onToggleFollow }) => {
   const hasSession = Boolean(getAuthItem('soko:auth_token'));
+  const initials = (value?: string) =>
+    String(value || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('') || 'S';
   const [activeTab, setActiveTab] = useState(sellerId ? 'shop' : 'grid');
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [ownSellerProfile, setOwnSellerProfile] = useState<SellerProfile | null>(null);
@@ -154,6 +162,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
   const [supplierAppLoading, setSupplierAppLoading] = useState(false);
   const [supplierAppError, setSupplierAppError] = useState<string | null>(null);
   const [creatingSupplierApp, setCreatingSupplierApp] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [supplierForm, setSupplierForm] = useState({
     business_name: '',
     category: '',
@@ -176,7 +185,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
     if (!isOwnProfile && shopProfile) {
       return {
         name: normalizeAccountName(shopProfile.name) || 'Seller',
-        avatar: shopProfile.avatar || shopProfile.logo,
+        avatar: shopProfile.avatar || shopProfile.logo || '',
         bio: shopProfile.bio || '',
         description: shopProfile.description || '',
         is_verified: shopProfile.verified,
@@ -189,7 +198,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
         normalizeAccountName(ownSellerProfile?.name) ||
         normalizeAccountName(storedAccountLabel) ||
         (isGuestOwnProfile ? guestProfileName : getAuthItem('soko:username') || 'My Account'),
-      avatar: profile?.avatar_url || profile?.avatar || '/logo.jpg',
+      avatar: profile?.avatar_url || profile?.avatar || '',
       bio: profile?.bio || '',
       description: profile?.description || '',
       is_verified: false,
@@ -515,7 +524,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
         });
       } else {
         await navigator.clipboard.writeText(isUrl ? url : shareToken || url);
-        alert(isUrl ? 'Profile link copied to clipboard!' : 'Share token copied to clipboard!');
+        setShareStatus(isUrl ? 'Profile link copied to clipboard.' : 'Share token copied to clipboard.');
       }
     } catch (err: any) {
       setError(err?.message || 'Unable to share profile.');
@@ -850,6 +859,14 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
           {error}
         </div>
       )}
+      {shareStatus && (
+        <div className="m-4 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-2xl px-4 py-3 flex items-start justify-between gap-3">
+          <span>{shareStatus}</span>
+          <button onClick={() => setShareStatus(null)} className="text-emerald-600 hover:text-emerald-700">
+            Dismiss
+          </button>
+        </div>
+      )}
       {loading && (
         <div className="m-4 bg-white rounded-2xl border border-zinc-100 p-5 text-[11px] font-bold text-zinc-500">
           Loading profile...
@@ -1009,11 +1026,17 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
             className="block rounded-full"
             aria-label="View profile photo"
           >
-          <img
-            src={profileData.avatar}
-            className="w-24 h-24 rounded-full border-2 border-zinc-100 p-1 object-cover shadow-xl cursor-zoom-in"
-            alt="profile"
-          />
+            {profileData.avatar ? (
+              <img
+                src={profileData.avatar}
+                className="w-24 h-24 rounded-full border-2 border-zinc-100 p-1 object-cover shadow-xl cursor-zoom-in"
+                alt="profile"
+              />
+            ) : (
+              <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-zinc-100 bg-zinc-900 p-1 text-xl font-black text-white shadow-xl cursor-zoom-in">
+                {initials(profileData.name)}
+              </div>
+            )}
           </button>
           {canManageOwnProfile && (
             <>
@@ -1416,7 +1439,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                 <div className="space-y-3">
                   {reviews.length === 0 && (
                     <div className="p-4 bg-zinc-50 rounded-2xl text-[10px] text-zinc-500 font-bold text-center">
-                      No reviews yet.
+                      No production reviews yet.
                     </div>
                   )}
                   {reviews.map((review) => (
@@ -1592,7 +1615,13 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
             </div>
             <div className="p-4">
               <div className="rounded-3xl overflow-hidden bg-zinc-100">
-                <img src={profileData.avatar} alt="profile preview" className="w-full h-72 object-cover" />
+                {profileData.avatar ? (
+                  <img src={profileData.avatar} alt="profile preview" className="w-full h-72 object-cover" />
+                ) : (
+                  <div className="flex h-72 w-full items-center justify-center bg-zinc-900 text-3xl font-black text-white">
+                    {initials(profileData.name)}
+                  </div>
+                )}
               </div>
               <div className="mt-4 grid gap-2">
                 {canManageOwnProfile && (

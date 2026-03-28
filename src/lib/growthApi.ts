@@ -29,7 +29,11 @@ export type LoanEligibility = {
 
 export type Projection = {
   type?: string;
+  status?: string;
+  confidence?: number;
+  reasons?: string[];
   forecast?: Record<string, any>;
+  generated_at?: string;
   updated_at?: string;
 };
 

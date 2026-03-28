@@ -162,7 +162,7 @@ import { requestUploadPresign } from '../lib/uploadsApi';
 import { getVideoDurationSeconds, uploadMediaFile as uploadSharedMediaFile } from '../lib/mediaUpload';
 import { requestMediaUploadPreview } from '../lib/mediaPreview';
 import { addPathLandmark, createPlace, createRegion, deletePath, deletePlace, deleteRegion, listPathWaypoints, listPlaces, listRegions, listSellerPaths, precomputePathWaypoints, recordPath, setPrimaryPath, updatePlace, updateRegion, type PathPoint, type PathWaypoint, type Place, type Region, type RecordedPath } from '../lib/searchApi';
-import { getOpsConfig } from '../lib/opsConfigApi';
+import { getOpsConfig, setOpsConfig } from '../lib/opsConfigApi';
 import {
   getSellerRank,
   getSellerMetrics,
@@ -180,6 +180,7 @@ import { getSellerPreferences, updateSellerPreferences, type SellerPreferences a
 import { listShopReviews, replyShopReview, type ShopReview } from '../lib/sellerShopApi';
 import { getSellerNotificationPreferences, updateSellerNotificationPreferences, type SellerNotificationPreferences } from '../lib/sellerNotificationsApi';
 import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
+import { uploadSellerVerificationDoc } from '../lib/sellerVerificationApi';
 import { VideoTrimModal } from './VideoTrimModal';
 import { LocationPinPicker } from './LocationPinPicker';
 import {
@@ -231,7 +232,7 @@ const isHttpUrl = (value: string) => /^https?:\/\//i.test(value.trim());
 const EMPTY_SELLER: Seller = {
   id: '',
   name: 'Seller',
-  avatar: '/logo.jpg',
+  avatar: '',
   description: '',
   rating: 0,
   followersCount: 0,
@@ -495,9 +496,35 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [topProductsDefaults, setTopProductsDefaults] = useState<{ days?: number; limit?: number } | null>(null);
   const [broadcastsDefaults, setBroadcastsDefaults] = useState<{ limit?: number } | null>(null);
   const [quickBoostConfig, setQuickBoostConfig] = useState<{ budget?: number; currency?: string } | null>(null);
-  const [offlineUssdConfig, setOfflineUssdConfig] = useState<{ code?: string; menu?: string } | null>(null);
-  const [offlineSmsConfig, setOfflineSmsConfig] = useState<{ sample?: string } | null>(null);
-  const [offlineVoiceConfig, setOfflineVoiceConfig] = useState<{ sample?: string } | null>(null);
+  const [offlineSetupConfig, setOfflineSetupConfig] = useState<Record<string, any> | null>(null);
+  const [offlineUssdConfig, setOfflineUssdConfig] = useState<Record<string, any> | null>(null);
+  const [offlineSmsProviderConfig, setOfflineSmsProviderConfig] = useState<Record<string, any> | null>(null);
+  const [offlineVoiceProviderConfig, setOfflineVoiceProviderConfig] = useState<Record<string, any> | null>(null);
+  const [offlineSetupDraft, setOfflineSetupDraft] = useState({
+    provider: '',
+    setupUrl: '',
+    callbackUrl: '',
+    ussdProvider: '',
+    ussdCode: '',
+    ussdMenu: '',
+    smsProvider: '',
+    smsSenderId: '',
+    smsWebhookUrl: '',
+    voiceProvider: '',
+    voicePhoneNumber: '',
+    voiceWebhookUrl: '',
+  });
+  const [offlineSetupSaving, setOfflineSetupSaving] = useState(false);
+  const [offlineSetupStatus, setOfflineSetupStatus] = useState<string | null>(null);
+  const [verificationCheckStatus, setVerificationCheckStatus] = useState<string | null>(null);
+  const [verificationDocUploading, setVerificationDocUploading] = useState(false);
+  const [verificationSelfieUploading, setVerificationSelfieUploading] = useState(false);
+  const [verificationDocUrl, setVerificationDocUrl] = useState('');
+  const [verificationSelfieUrl, setVerificationSelfieUrl] = useState('');
+  const verificationDocInputRef = useRef<HTMLInputElement | null>(null);
+  const verificationSelfieInputRef = useRef<HTMLInputElement | null>(null);
+  const verificationStatusPollRef = useRef<number | null>(null);
+  const verificationStatusAnnouncedRef = useRef(false);
   const [subscriptionPlans, setSubscriptionPlans] = useState<Plan[]>([]);
   const [subscriptionView, setSubscriptionView] = useState<SubscriptionView | null>(null);
   const [sellerRankInfo, setSellerRankInfo] = useState<{ rank?: number; breakdown?: Record<string, any> } | null>(null);
@@ -540,6 +567,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && verificationStatusPollRef.current !== null) {
+        window.clearTimeout(verificationStatusPollRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -981,6 +1016,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const [mappingSyncing, setMappingSyncing] = useState(false);
   const [mappingSuggestionsLoading, setMappingSuggestionsLoading] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<SellerVerificationStatus | null>(null);
+  useEffect(() => {
+    const status = String(verificationStatus?.status || '').toLowerCase();
+    if (verificationStatus?.verified || status === 'approved') {
+      setSeller((prev) => (prev.isVerified ? prev : { ...prev, isVerified: true }));
+    }
+  }, [verificationStatus]);
   const [productsStatus, setProductsStatus] = useState<string | null>(null);
   const [productsLoading, setProductsLoading] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
@@ -1128,9 +1169,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         topProductsDefaultsResp,
         broadcastsDefaultsResp,
         quickBoostResp,
+        offlineSetupResp,
         offlineUssdResp,
-        offlineSmsResp,
-        offlineVoiceResp
+        offlineSmsProviderResp,
+        offlineVoiceProviderResp
       ] = await Promise.all([
         getOpsConfig('rewards.data_sharing').catch(() => null),
         getOpsConfig('rewards.referrals').catch(() => null),
@@ -1149,9 +1191,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
         getOpsConfig('analytics.top_products_defaults').catch(() => null),
         getOpsConfig('comms.broadcasts_defaults').catch(() => null),
         getOpsConfig('marketing.quick_boost').catch(() => null),
+        getOpsConfig('offline.setup').catch(() => null),
         getOpsConfig('offline.ussd').catch(() => null),
-        getOpsConfig('offline.sms_sample').catch(() => null),
-        getOpsConfig('offline.voice_sample').catch(() => null)
+        getOpsConfig('offline.sms_provider').catch(() => null),
+        getOpsConfig('offline.voice_provider').catch(() => null)
       ]);
       setDataSharingRewards((dataSharingResp as any)?.value ?? null);
       setReferralRewards((referralResp as any)?.value ?? null);
@@ -1177,9 +1220,28 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setTopProductsDefaults((topProductsDefaultsResp as any)?.value ?? null);
       setBroadcastsDefaults((broadcastsDefaultsResp as any)?.value ?? null);
       setQuickBoostConfig((quickBoostResp as any)?.value ?? null);
+      setOfflineSetupConfig((offlineSetupResp as any)?.value ?? null);
       setOfflineUssdConfig((offlineUssdResp as any)?.value ?? null);
-      setOfflineSmsConfig((offlineSmsResp as any)?.value ?? null);
-      setOfflineVoiceConfig((offlineVoiceResp as any)?.value ?? null);
+      setOfflineSmsProviderConfig((offlineSmsProviderResp as any)?.value ?? null);
+      setOfflineVoiceProviderConfig((offlineVoiceProviderResp as any)?.value ?? null);
+      const offlineSetupValue = (offlineSetupResp as any)?.value || {};
+      const offlineUssdValue = (offlineUssdResp as any)?.value || {};
+      const offlineSmsValue = (offlineSmsProviderResp as any)?.value || {};
+      const offlineVoiceValue = (offlineVoiceProviderResp as any)?.value || {};
+      setOfflineSetupDraft({
+        provider: String(offlineSetupValue.provider || offlineSetupValue.provider_name || '').trim(),
+        setupUrl: String(offlineSetupValue.setup_url || offlineSetupValue.setupUrl || '').trim(),
+        callbackUrl: String(offlineSetupValue.callback_url || offlineSetupValue.callbackUrl || '').trim(),
+        ussdProvider: String(offlineUssdValue.provider || offlineUssdValue.provider_name || '').trim(),
+        ussdCode: String(offlineUssdValue.code || '').trim(),
+        ussdMenu: String(offlineUssdValue.menu || '').trim(),
+        smsProvider: String(offlineSmsValue.provider || offlineSmsValue.provider_name || '').trim(),
+        smsSenderId: String(offlineSmsValue.sender_id || offlineSmsValue.senderId || '').trim(),
+        smsWebhookUrl: String(offlineSmsValue.webhook_url || offlineSmsValue.webhookUrl || '').trim(),
+        voiceProvider: String(offlineVoiceValue.provider || offlineVoiceValue.provider_name || '').trim(),
+        voicePhoneNumber: String(offlineVoiceValue.phone_number || offlineVoiceValue.phoneNumber || '').trim(),
+        voiceWebhookUrl: String(offlineVoiceValue.webhook_url || offlineVoiceValue.webhookUrl || '').trim(),
+      });
     } catch {
       setDataSharingRewards(null);
       setReferralRewards(null);
@@ -1198,9 +1260,24 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
       setTopProductsDefaults(null);
       setBroadcastsDefaults(null);
       setQuickBoostConfig(null);
+      setOfflineSetupConfig(null);
       setOfflineUssdConfig(null);
-      setOfflineSmsConfig(null);
-      setOfflineVoiceConfig(null);
+      setOfflineSmsProviderConfig(null);
+      setOfflineVoiceProviderConfig(null);
+      setOfflineSetupDraft({
+        provider: '',
+        setupUrl: '',
+        callbackUrl: '',
+        ussdProvider: '',
+        ussdCode: '',
+        ussdMenu: '',
+        smsProvider: '',
+        smsSenderId: '',
+        smsWebhookUrl: '',
+        voiceProvider: '',
+        voicePhoneNumber: '',
+        voiceWebhookUrl: '',
+      });
     }
   }, []);
 
@@ -1287,10 +1364,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   }, [seller.id]);
 
   useEffect(() => {
-    if (!offlineEnabled && activeTab === 'offline') {
+    const hasOfflineSetup =
+      Boolean(offlineSetupDraft.provider) ||
+      Boolean(offlineSetupDraft.setupUrl) ||
+      Boolean(offlineSetupDraft.smsProvider) ||
+      Boolean(offlineSetupDraft.voiceProvider) ||
+      Boolean(offlineSetupDraft.ussdCode);
+    if (!offlineEnabled && !hasOfflineSetup && activeTab === 'offline') {
       setActiveTab('onboarding');
     }
-  }, [offlineEnabled, activeTab]);
+  }, [offlineEnabled, offlineSetupDraft, activeTab]);
 
   const runAiInsight = React.useCallback(async (force = false) => {
     if (!seller?.id) return;
@@ -2834,6 +2917,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
   const cashflowIn = Number(growthCashflow?.inflow ?? 0);
   const aovValue = analyticsSummary?.aov ? Number(analyticsSummary.aov) : null;
   const projectionSeries = projectionToSeries(growthProjection?.forecast as Record<string, any>, []);
+  const projectionStatus = String(growthProjection?.status || '').trim() || 'ready';
+  const projectionConfidence = growthProjection?.confidence !== undefined ? Number(growthProjection.confidence) : null;
+  const projectionReasons = Array.isArray(growthProjection?.reasons) ? growthProjection.reasons : [];
   const growthRetention =
     growthOverview?.retention_rate !== undefined
       ? Number(growthOverview.retention_rate)
@@ -3329,15 +3415,216 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     }
   };
 
+  const stopVerificationStatusPolling = () => {
+    if (typeof window === 'undefined' || verificationStatusPollRef.current === null) {
+      return;
+    }
+    window.clearTimeout(verificationStatusPollRef.current);
+    verificationStatusPollRef.current = null;
+  };
+
+  const refreshVerificationStatus = async (opts?: { announceCompletion?: boolean }) => {
+    const refreshed = await getSellerVerificationStatus().catch(() => null);
+    if (!refreshed) {
+      return null;
+    }
+    setVerificationStatus(refreshed);
+    const status = String(refreshed.status || '').toLowerCase();
+    const isApproved = Boolean(refreshed.verified || status === 'approved');
+    const isFinal = isApproved || ['rejected', 'manual_review', 'blocked', 'limited'].includes(status);
+
+    if (isApproved) {
+      setSeller((prev) => (prev.isVerified ? prev : { ...prev, isVerified: true }));
+      if (!verificationStatusAnnouncedRef.current && opts?.announceCompletion !== false) {
+        verificationStatusAnnouncedRef.current = true;
+        onVerifiedSellerIdsChange(Array.from(new Set([...verifiedSellerIds, seller.id])));
+        onToast?.('Verification completed.');
+      }
+    } else {
+      verificationStatusAnnouncedRef.current = false;
+    }
+
+    if (status === 'pending') {
+      setVerificationCheckStatus('Backend OCR or face-match is still processing.');
+    } else if (status === 'manual_review') {
+      setVerificationCheckStatus('Backend review is required before verification completes.');
+    } else if (status === 'rejected') {
+      setVerificationCheckStatus('Verification was rejected by the backend review.');
+    } else if (isApproved) {
+      setVerificationCheckStatus('Verification approved by the backend.');
+    }
+
+    return { status, isFinal, isApproved };
+  };
+
+  const beginVerificationStatusPolling = async (message: string) => {
+    stopVerificationStatusPolling();
+    verificationStatusAnnouncedRef.current = false;
+    setVerificationCheckStatus(message);
+
+    const immediate = await refreshVerificationStatus({ announceCompletion: true });
+    if (immediate?.isFinal) {
+      return immediate;
+    }
+
+    if (typeof window === 'undefined') {
+      return immediate;
+    }
+
+    let attempts = 0;
+    const poll = async () => {
+      attempts += 1;
+      const refreshed = await refreshVerificationStatus({ announceCompletion: true }).catch(() => null);
+      if (refreshed?.isFinal || attempts >= 12) {
+        if (!refreshed?.isFinal) {
+          setVerificationCheckStatus('Verification is still processing. Please check back shortly.');
+        }
+        stopVerificationStatusPolling();
+        return;
+      }
+      verificationStatusPollRef.current = window.setTimeout(poll, 4000);
+    };
+
+    verificationStatusPollRef.current = window.setTimeout(poll, 4000);
+    return immediate;
+  };
+
   const handleStartVerification = async () => {
     setOnboardingStatus(null);
     try {
       await requestSellerVerification();
-      const status = await getSellerVerificationStatus();
-      setVerificationStatus(status);
+      await beginVerificationStatusPolling('Verification request submitted. Checking backend OCR and face-match status...');
       setOnboardingStatus('Verification request submitted.');
     } catch (err: any) {
       setOnboardingStatus(err?.message || 'Unable to start verification.');
+    }
+  };
+
+  const uploadVerificationArtifact = async (file: File, type: 'id_document' | 'selfie') => {
+    if (!seller.id) {
+      throw new Error('Load a seller profile before uploading verification docs.');
+    }
+    const approvedFile = await requestMediaUploadPreview(file, {
+      title: type === 'selfie' ? 'Preview selfie for verification' : 'Preview verification document',
+      description: type === 'selfie'
+        ? 'Review the selfie before it is sent to the backend face-match queue.'
+        : 'Review the document before it is sent to the backend OCR queue.',
+      confirmLabel: type === 'selfie' ? 'Upload selfie' : 'Upload document'
+    });
+    const presign = await requestUploadPresign({
+      file_name: approvedFile.name,
+      mime_type: approvedFile.type,
+      content_length: approvedFile.size,
+      context: `verification_${type}`,
+    });
+    const uploadUrl = presign.upload_url || presign.url;
+    if (!uploadUrl) {
+      throw new Error('Upload URL missing.');
+    }
+    if (presign.fields) {
+      const form = new FormData();
+      Object.entries(presign.fields).forEach(([key, value]) => {
+        form.append(key, value);
+      });
+      form.append('file', approvedFile);
+      await fetch(uploadUrl, {
+        method: presign.method || 'POST',
+        body: form,
+        headers: presign.headers,
+      });
+    } else {
+      await fetch(uploadUrl, {
+        method: presign.method || 'PUT',
+        headers: presign.headers || { 'Content-Type': approvedFile.type },
+        body: approvedFile,
+      });
+    }
+    const fileUrl = presign.file_url || presign.url || uploadUrl;
+    if (!fileUrl) {
+      throw new Error('File URL missing.');
+    }
+    await uploadSellerVerificationDoc({ type, file_url: fileUrl });
+    await beginVerificationStatusPolling(
+      type === 'selfie'
+        ? 'Selfie uploaded. Backend face-match is now processing it.'
+        : 'Verification document uploaded. Backend OCR is now processing it.'
+    );
+    return fileUrl;
+  };
+
+  const handleVerificationDocUpload = async (file?: File | null) => {
+    if (!file) return;
+    setVerificationDocUploading(true);
+    setVerificationCheckStatus('Uploading document and queueing OCR...');
+    try {
+      const url = await uploadVerificationArtifact(file, 'id_document');
+      setVerificationDocUrl(url);
+      setVerificationCheckStatus('Verification document uploaded. Backend OCR is now processing it.');
+    } catch (err: any) {
+      setVerificationCheckStatus(err?.message || 'Unable to upload verification document.');
+    } finally {
+      setVerificationDocUploading(false);
+      if (verificationDocInputRef.current) verificationDocInputRef.current.value = '';
+    }
+  };
+
+  const handleVerificationSelfieUpload = async (file?: File | null) => {
+    if (!file) return;
+    setVerificationSelfieUploading(true);
+    setVerificationCheckStatus('Uploading selfie and queueing face match...');
+    try {
+      const url = await uploadVerificationArtifact(file, 'selfie');
+      setVerificationSelfieUrl(url);
+      setVerificationCheckStatus('Selfie uploaded. Backend face-match is now processing it.');
+    } catch (err: any) {
+      setVerificationCheckStatus(err?.message || 'Unable to upload selfie.');
+    } finally {
+      setVerificationSelfieUploading(false);
+      if (verificationSelfieInputRef.current) verificationSelfieInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveOfflineSetup = async () => {
+    setOfflineSetupStatus(null);
+    setOfflineSetupSaving(true);
+    try {
+      const setupPayload = {
+        provider: offlineSetupDraft.provider.trim(),
+        setup_url: offlineSetupDraft.setupUrl.trim() || undefined,
+        callback_url: offlineSetupDraft.callbackUrl.trim() || undefined,
+      };
+      const ussdPayload = {
+        provider: offlineSetupDraft.ussdProvider.trim() || offlineSetupDraft.provider.trim() || undefined,
+        code: offlineSetupDraft.ussdCode.trim() || undefined,
+        menu: offlineSetupDraft.ussdMenu.trim() || undefined,
+        setup_url: offlineSetupDraft.setupUrl.trim() || undefined,
+        callback_url: offlineSetupDraft.callbackUrl.trim() || undefined,
+      };
+      const smsPayload = {
+        provider: offlineSetupDraft.smsProvider.trim() || offlineSetupDraft.provider.trim() || undefined,
+        sender_id: offlineSetupDraft.smsSenderId.trim() || undefined,
+        webhook_url: offlineSetupDraft.smsWebhookUrl.trim() || undefined,
+      };
+      const voicePayload = {
+        provider: offlineSetupDraft.voiceProvider.trim() || offlineSetupDraft.provider.trim() || undefined,
+        phone_number: offlineSetupDraft.voicePhoneNumber.trim() || undefined,
+        webhook_url: offlineSetupDraft.voiceWebhookUrl.trim() || undefined,
+      };
+      await Promise.all([
+        setOpsConfig('offline.setup', setupPayload),
+        setOpsConfig('offline.ussd', ussdPayload),
+        setOpsConfig('offline.sms_provider', smsPayload),
+        setOpsConfig('offline.voice_provider', voicePayload),
+      ]);
+      setOfflineSetupConfig(setupPayload);
+      setOfflineUssdConfig(ussdPayload);
+      setOfflineSmsProviderConfig(smsPayload);
+      setOfflineVoiceProviderConfig(voicePayload);
+      setOfflineSetupStatus('Offline setup saved to production ops config.');
+    } catch (err: any) {
+      setOfflineSetupStatus(err?.message || 'Unable to save offline setup.');
+    } finally {
+      setOfflineSetupSaving(false);
     }
   };
 
@@ -4766,15 +5053,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     setSettingsStatus(null);
     try {
       await requestSellerVerification();
-      const status = await getSellerVerificationStatus();
-      setVerificationStatus(status);
-      if (status?.verified || status?.status === 'verified') {
-        onVerifiedSellerIdsChange(Array.from(new Set([...verifiedSellerIds, seller.id])));
-        setSeller(prev => ({ ...prev, isVerified: true }));
-        onToast?.('Verification completed.');
-      } else {
-        onToast?.('Verification request submitted.');
-      }
+      await beginVerificationStatusPolling('Verification request submitted. Checking backend OCR and face-match status...');
+      onToast?.('Verification request submitted.');
     } catch (err: any) {
       setSettingsStatus(err?.message || 'Unable to request verification.');
     }
@@ -5247,7 +5527,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
     { id: 'growth', icon: Wallet, label: 'Growth' },
     { id: 'suppliers', icon: MapPin, label: 'Suppliers' },
     { id: 'comms', icon: MessageSquare, label: 'Comms' },
-    ...(offlineEnabled ? [{ id: 'offline', icon: Clock, label: 'Offline' }] : []),
+    ...((offlineEnabled || offlineSetupDraft.provider || offlineSetupDraft.setupUrl || offlineSetupDraft.smsProvider || offlineSetupDraft.voiceProvider || offlineSetupDraft.ussdCode)
+      ? [{ id: 'offline', icon: Clock, label: 'Offline' }]
+      : []),
     { id: 'settings', icon: Settings, label: 'Shop Profile' }
   ];
 
@@ -6198,7 +6480,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div>
                   <p className="text-[10px] font-bold text-zinc-400 uppercase">Your public page</p>
                   <p className="text-sm font-black text-zinc-900">
-                    {sellerShareLink || 'Share link not available yet.'}
+                    {sellerShareLink || 'Refresh to generate your public link.'}
                   </p>
                 </div>
                 <button
@@ -8428,7 +8710,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 </div>
               ) : (
                 <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-500">
-                  Rewards not configured yet.
+                  Reward configuration is loaded from Ops when available.
                 </div>
               )}
               <button onClick={applyBulkUpdate} className="mt-3 w-full py-3 bg-zinc-900 text-white rounded-xl text-[10px] font-black">
@@ -8549,40 +8831,137 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
           </div>
         )}
 
-        {activeTab === 'offline' && offlineEnabled && (
+        {activeTab === 'offline' && (offlineEnabled || offlineSetupDraft.provider || offlineSetupDraft.setupUrl || offlineSetupDraft.smsProvider || offlineSetupDraft.voiceProvider || offlineSetupDraft.ussdCode) && (
           <div className="space-y-6 pb-20">
             <h2 className="text-2xl font-black text-zinc-900">Offline & Accessibility</h2>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <Phone className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">USSD Interface</h3>
+                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Provider Setup</h3>
               </div>
-              <div className="p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-600">
-                {offlineUssdConfig?.code
-                  ? `Dial ${offlineUssdConfig.code}${offlineUssdConfig.menu ? ` → ${offlineUssdConfig.menu}` : ''}`
-                  : 'USSD config not available yet.'}
+              <div className="grid gap-3 md:grid-cols-3 text-[10px] font-bold text-zinc-600">
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                  <p className="uppercase tracking-widest text-zinc-400">USSD</p>
+                  <p className="mt-1 text-zinc-900">
+                    {offlineUssdConfig?.provider || offlineSetupConfig?.provider || 'Not configured'}
+                  </p>
+                  <p className="mt-1">{offlineUssdConfig?.code ? `Code ${offlineUssdConfig.code}` : 'No code linked yet.'}</p>
+                </div>
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                  <p className="uppercase tracking-widest text-zinc-400">SMS</p>
+                  <p className="mt-1 text-zinc-900">
+                    {offlineSmsProviderConfig?.provider || offlineSetupConfig?.provider || 'Not configured'}
+                  </p>
+                  <p className="mt-1">{offlineSmsProviderConfig?.sender_id ? `Sender ${offlineSmsProviderConfig.sender_id}` : 'No sender ID saved yet.'}</p>
+                </div>
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                  <p className="uppercase tracking-widest text-zinc-400">Voice</p>
+                  <p className="mt-1 text-zinc-900">
+                    {offlineVoiceProviderConfig?.provider || offlineSetupConfig?.provider || 'Not configured'}
+                  </p>
+                  <p className="mt-1">{offlineVoiceProviderConfig?.phone_number ? `Line ${offlineVoiceProviderConfig.phone_number}` : 'No voice line saved yet.'}</p>
+                </div>
+              </div>
+              <div className="mt-4 rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Explicit setup tool</p>
+                <p className="mt-1 text-[11px] font-bold text-emerald-700">
+                  Link the production provider endpoints here. No canned prompts or offline filler are used in this panel.
+                </p>
+                {offlineSetupStatus && (
+                  <div className="mt-3 rounded-2xl bg-white px-3 py-2 text-[10px] font-bold text-zinc-600 shadow-sm">
+                    {offlineSetupStatus}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <MessageSquare className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">SMS Alerts</h3>
+                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Setup Fields</h3>
               </div>
-              <div className="p-3 bg-indigo-50 rounded-2xl text-[10px] font-bold text-indigo-700">
-                {offlineSmsConfig?.sample || 'SMS config not available yet.'}
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  value={offlineSetupDraft.provider}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, provider: e.target.value }))}
+                  placeholder="Provider name"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.setupUrl}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, setupUrl: e.target.value }))}
+                  placeholder="Provider setup URL"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.callbackUrl}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, callbackUrl: e.target.value }))}
+                  placeholder="Callback URL"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.ussdProvider}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, ussdProvider: e.target.value }))}
+                  placeholder="USSD provider"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.ussdCode}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, ussdCode: e.target.value }))}
+                  placeholder="USSD code"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.ussdMenu}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, ussdMenu: e.target.value }))}
+                  placeholder="USSD menu"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.smsProvider}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, smsProvider: e.target.value }))}
+                  placeholder="SMS provider"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.smsSenderId}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, smsSenderId: e.target.value }))}
+                  placeholder="SMS sender ID"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.smsWebhookUrl}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, smsWebhookUrl: e.target.value }))}
+                  placeholder="SMS webhook URL"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.voiceProvider}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, voiceProvider: e.target.value }))}
+                  placeholder="Voice provider"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.voicePhoneNumber}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, voicePhoneNumber: e.target.value }))}
+                  placeholder="Voice phone number"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
+                <input
+                  value={offlineSetupDraft.voiceWebhookUrl}
+                  onChange={(e) => setOfflineSetupDraft((prev) => ({ ...prev, voiceWebhookUrl: e.target.value }))}
+                  placeholder="Voice webhook URL"
+                  className="rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-[10px] font-bold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#1976D2]/30"
+                />
               </div>
-            </div>
-
-            <div className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm">
-              <div className="flex items-center gap-2 mb-3">
-                <MessageSquare className="w-4 h-4 text-amber-500" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Voice Commands</h3>
-              </div>
-              <div className="p-3 bg-amber-50 rounded-2xl text-[10px] font-bold text-amber-700">
-                {offlineVoiceConfig?.sample || 'Voice config not available yet.'}
-              </div>
+              <button
+                onClick={handleSaveOfflineSetup}
+                disabled={offlineSetupSaving}
+                className="mt-4 w-full rounded-2xl bg-zinc-900 px-4 py-3 text-[10px] font-black text-white disabled:opacity-60"
+              >
+                {offlineSetupSaving ? 'Saving…' : 'Save provider setup'}
+              </button>
             </div>
           </div>
         )}
@@ -8641,25 +9020,43 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
             {/* Cashflow Forecast */}
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold">Cashflow Forecast</h3>
-                <span className="text-[10px] text-zinc-400 font-bold">Next 7 days</span>
+                <div>
+                  <h3 className="text-sm font-bold">Cashflow Forecast</h3>
+                  <p className="text-[10px] text-zinc-400 font-bold">
+                    {projectionConfidence !== null && Number.isFinite(projectionConfidence) ? `Confidence ${Math.round(projectionConfidence)}%` : 'Forecast status unavailable'}
+                  </p>
+                </div>
+                <span className={`text-[10px] font-bold ${projectionStatus === 'ready' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {projectionStatus.replaceAll('_', ' ')}
+                </span>
               </div>
+              {projectionReasons.length > 0 && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-100 rounded-2xl text-[10px] font-bold text-amber-700">
+                  {projectionReasons.join(' • ')}
+                </div>
+              )}
               <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={projectionSeries.map(d => ({ ...d, revenue: Math.round(d.revenue) }))}>
-                    <defs>
-                      <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis hide />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="revenue" stroke="#10b981" fill="url(#revFill)" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                {projectionSeries.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={projectionSeries.map(d => ({ ...d, revenue: Math.round(d.revenue) }))}>
+                      <defs>
+                        <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                      <YAxis hide />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="revenue" stroke="#10b981" fill="url(#revFill)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center rounded-2xl bg-zinc-50 text-[10px] font-bold text-zinc-500">
+                    Forecast will appear once enough history is available.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -9312,6 +9709,61 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 <div className="p-3 bg-zinc-50 rounded-2xl">Business verified ✓</div>
                 <div className="p-3 bg-zinc-50 rounded-2xl">Visit verified ✓</div>
               </div>
+              <div className="mt-4 rounded-3xl border border-zinc-100 bg-zinc-50/80 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">OCR and Face Match</p>
+                    <p className="text-[11px] font-bold text-zinc-600">Upload a document or selfie and let the backend queue OCR or face-match automatically.</p>
+                  </div>
+                  {verificationCheckStatus && (
+                    <div className="max-w-[220px] rounded-2xl bg-white px-3 py-2 text-[10px] font-bold text-zinc-600 shadow-sm">
+                      {verificationCheckStatus}
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl border border-white bg-white p-3 shadow-sm">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Document OCR</p>
+                    <p className="mt-2 text-[11px] font-bold text-zinc-600">
+                      {verificationDocUrl ? 'Document queued from a production file URL.' : 'No document uploaded yet.'}
+                    </p>
+                    <button
+                      onClick={() => verificationDocInputRef.current?.click()}
+                      disabled={verificationDocUploading}
+                      className="mt-3 w-full rounded-xl bg-zinc-900 px-4 py-2 text-[10px] font-black text-white"
+                    >
+                      {verificationDocUploading ? 'Uploading…' : 'Upload ID document'}
+                    </button>
+                    <input
+                      ref={verificationDocInputRef}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => handleVerificationDocUpload(e.target.files?.[0] || null)}
+                    />
+                  </div>
+                  <div className="rounded-2xl border border-white bg-white p-3 shadow-sm">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Face Match</p>
+                    <p className="mt-2 text-[11px] font-bold text-zinc-600">
+                      {verificationSelfieUrl ? 'Selfie queued from a production file URL.' : 'No selfie uploaded yet.'}
+                    </p>
+                    <button
+                      onClick={() => verificationSelfieInputRef.current?.click()}
+                      disabled={verificationSelfieUploading}
+                      className="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-2 text-[10px] font-black text-white"
+                    >
+                      {verificationSelfieUploading ? 'Uploading…' : 'Upload selfie'}
+                    </button>
+                    <input
+                      ref={verificationSelfieInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleVerificationSelfieUpload(e.target.files?.[0] || null)}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Community Stats & Badges */}
@@ -9646,7 +10098,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                 )}
                 {!reviewsLoading && sellerReviews.length === 0 && (
                   <div className="p-4 bg-zinc-50 rounded-2xl text-[10px] text-zinc-500 font-bold text-center">
-                    No reviews yet.
+                    No production reviews yet.
                   </div>
                 )}
                 {sellerReviews.map((review) => (
@@ -10333,7 +10785,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({
                   <p className="text-[10px] text-emerald-600">
                     {referralRewards
                       ? `You get ${referralRewards.currency ? `${referralRewards.currency} ` : ''}${referralTarget === 'supplier' ? (referralRewards.supplier ?? 0) : (referralRewards.shop ?? 0)}. They get the same.`
-                      : 'Rewards not configured yet.'}
+                      : 'Reward configuration is loaded from Ops when available.'}
                   </p>
                 </div>
                 <div className="space-y-2">

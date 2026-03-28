@@ -168,6 +168,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   initialRouteProfile,
   initialNavigationMode
 }) => {
+  const initials = (value?: string) =>
+    String(value || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('') || 'S';
   const [showAIChat, setShowAIChat] = React.useState(false);
   const [quantity, setQuantity] = React.useState(1);
   const [flyThumb, setFlyThumb] = React.useState<null | { src: string; start: { x: number; y: number; size: number }; end: { x: number; y: number; size: number } }>(null);
@@ -336,6 +344,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [evidenceErrors, setEvidenceErrors] = React.useState<{ s3Key?: string; fileName?: string; mimeType?: string }>({});
   const [evidenceStatus, setEvidenceStatus] = React.useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = React.useState<string | null>(null);
+  const [shareStatus, setShareStatus] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const [routeConfig, setRouteConfig] = React.useState<RouteMultipliersConfig>(() => getDefaultRouteMultipliers());
   const routeTelemetry = React.useMemo(() => createRouteTelemetryTracker('product_detail'), []);
@@ -465,6 +474,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     setError('WhatsApp contact not available for this seller.');
   };
 
+  const handleCallSeller = () => {
+    const rawPhone = sellerProfile?.phone_number || sellerProfile?.whatsappNumber || sellerProfile?.whatsapp_number || sellerProfile?.whatsapp;
+    const phone = typeof rawPhone === 'string' ? rawPhone.replace(/[^\d+]/g, '') : '';
+    if (phone) {
+      window.location.href = `tel:${phone}`;
+      return;
+    }
+    setError('Phone contact not available for this seller.');
+  };
+
   const handleGetDirections = () => {
     const address = activeProduct.location?.address || sellerProfile?.location?.address || sellerProfile?.address;
     const loc = activeProduct.location || sellerProfile?.location;
@@ -474,7 +493,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     }
     if (address) {
       window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
+      return;
     }
+    setError('Directions are not available for this listing yet.');
   };
 
   const handleVisitSite = () => {
@@ -692,10 +713,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     if (navigator.share) {
       try {
         await navigator.share({ title: activeProduct.name, text, url: window.location.href });
+        setShareStatus('Share sheet opened. Your reward will track once the link is shared.');
+        return;
       } catch {}
-      return;
     }
-    alert('Share link copied. Earn rewards when friends confirm purchases.');
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareStatus('Share link copied. Earn rewards when friends confirm purchases.');
+    } catch {
+      setShareStatus(`Share this link to earn rewards: ${window.location.href}`);
+    }
   };
 
   const handleCounterfeitReport = async () => {
@@ -1598,6 +1625,14 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             {error}
           </div>
         )}
+        {shareStatus && (
+          <div className="m-4 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-2xl px-4 py-3 flex items-start justify-between gap-3">
+            <span>{shareStatus}</span>
+            <button onClick={() => setShareStatus(null)} className="text-emerald-600 hover:text-emerald-700">
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {loading && (
           <div className="m-4 bg-white rounded-2xl border border-zinc-100 p-5 text-[11px] font-bold text-zinc-500">
@@ -1790,7 +1825,13 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  <img src={sellerProfile?.avatar || sellerProfile?.logo || '/logo.jpg'} className="w-14 h-14 rounded-full border-2 border-white shadow-sm" alt="seller" />
+                  {sellerProfile?.avatar || sellerProfile?.logo ? (
+                    <img src={sellerProfile?.avatar || sellerProfile?.logo} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover" alt="seller" />
+                  ) : (
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-white bg-zinc-900 text-sm font-black text-white shadow-sm">
+                      {initials(sellerProfile?.name || sellerProfile?.display_name || 'Seller')}
+                    </div>
+                  )}
                   {(sellerProfile?.verified || sellerProfile?.isVerified) && (
                     <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-1 rounded-full border-2 border-white">
                       <ShieldCheck className="w-3 h-3" />
@@ -1825,7 +1866,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <Phone className="w-4 h-4" /> WhatsApp
               </button>
               <button
-                onClick={() => setError('Calling seller...')}
+                onClick={handleCallSeller}
                 className="flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-bold hover:bg-indigo-700 transition-colors"
               >
                 <Phone className="w-4 h-4" /> Call
@@ -1948,8 +1989,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             ) : (
               <div className="py-12 flex flex-col items-center justify-center text-center px-6 bg-zinc-50 rounded-3xl border border-dashed border-zinc-200">
                 <Star className="w-8 h-8 text-zinc-200 mb-3" />
-                <h4 className="text-zinc-900 font-bold text-sm mb-1">No reviews yet</h4>
-                <p className="text-[10px] text-zinc-400">Be the first to share your experience with this product!</p>
+                <h4 className="text-zinc-900 font-bold text-sm mb-1">No production reviews yet</h4>
+                <p className="text-[10px] text-zinc-400">This product will show live customer reviews as soon as the catalog sync returns them.</p>
               </div>
             )}
             <div className="mt-4">
@@ -2008,7 +2049,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   {item.answer ? (
                     <p className="text-[10px] text-emerald-700 font-bold mt-1">A: {item.answer} ✓</p>
                   ) : (
-                    <p className="text-[10px] text-zinc-400 mt-1">No answers yet</p>
+                    <p className="text-[10px] text-zinc-400 mt-1">No catalog answers yet</p>
                   )}
                   <div className="mt-2 flex items-center justify-between">
                     <p className="text-[9px] text-zinc-400">— {item.author}</p>
@@ -2188,7 +2229,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               </div>
             ) : (
               <div className="mt-3 p-3 bg-zinc-50 rounded-2xl text-[10px] font-bold text-zinc-400">
-                No buyer avatars available yet.
+                No buyer avatars were returned from the live data source yet.
               </div>
             )}
           </div>
@@ -2691,7 +2732,23 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <div ref={mapContainerRef} className="absolute inset-0" />
                 {!mapboxToken && (
                   <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white bg-zinc-900/70">
-                    Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.
+                    <div className="max-w-xs space-y-3 rounded-3xl border border-white/10 bg-zinc-950/80 p-5 text-center backdrop-blur">
+                      <p>Mapbox token missing. Add VITE_MAPBOX_TOKEN to enable maps.</p>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          onClick={handleGetDirections}
+                          className="rounded-full bg-white px-3 py-2 text-[10px] font-black text-zinc-900"
+                        >
+                          Open in Maps
+                        </button>
+                        <button
+                          onClick={() => setModal('map', false)}
+                          className="rounded-full bg-white/10 px-3 py-2 text-[10px] font-black text-white"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div className="absolute top-3 right-3 z-10">

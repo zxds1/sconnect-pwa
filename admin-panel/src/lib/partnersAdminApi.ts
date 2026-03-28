@@ -39,6 +39,9 @@ export type PartnerStatusResponse = {
     id?: string;
     status?: string;
     last_sync_at?: string;
+    next_sync_at?: string;
+    error_state?: string;
+    retry_count?: number;
     updated_at?: string;
   };
   recent_jobs?: any[];
@@ -76,11 +79,36 @@ export const getPartnerHealth = async (id: string): Promise<any> =>
 export const syncPartner = async (id: string) =>
   fetchJson(`/partners/${encodeURIComponent(id)}/sync`, { method: "POST" });
 
+export const refreshPartner = async (id: string) =>
+  fetchJson(`/partners/${encodeURIComponent(id)}/refresh`, { method: "POST" });
+
+export const rotatePartnerTokens = async (id: string) =>
+  fetchJson(`/partners/${encodeURIComponent(id)}/rotate`, { method: "POST" });
+
+export const revokePartnerTokens = async (id: string) =>
+  fetchJson(`/partners/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+
+export const healthCheckPartner = async (id: string) =>
+  fetchJson(`/partners/${encodeURIComponent(id)}/health-check`, { method: "POST" });
+
 export const pausePartner = async (id: string) =>
   fetchJson(`/partners/${encodeURIComponent(id)}/pause`, { method: "POST" });
 
 export const resumePartner = async (id: string) =>
   fetchJson(`/partners/${encodeURIComponent(id)}/resume`, { method: "POST" });
+
+export const connectPartner = async (payload: {
+  partner_id: string;
+  auth_method?: string;
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: string;
+  schema_version?: string;
+}) =>
+  fetchJson("/partners/connect", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
 export const disconnectPartner = async (payload: { partner_id?: string; integration_id?: string }) =>
   fetchJson("/partners/disconnect", {

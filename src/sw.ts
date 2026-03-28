@@ -53,6 +53,12 @@ const apiRoutes = [
     maxEntries: 40,
   },
   {
+    pattern: /^https?:\/\/.*\/v1\/group-buy(?:\/|$)/,
+    cacheName: 'api-group-buy',
+    maxAgeSeconds: 30,
+    maxEntries: 40,
+  },
+  {
     pattern: /^https?:\/\/.*\/v1\/paths(?:\/|$)/,
     cacheName: 'api-paths',
     maxAgeSeconds: 3600,

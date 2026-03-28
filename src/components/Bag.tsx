@@ -473,7 +473,7 @@ export const Bag: React.FC<BagProps> = ({ onBack, onOpenProduct, onRequireLogin 
         return;
       }
       if (!rec.candidateSellerId || rec.candidatePrice === undefined) {
-        setError('This option is not ready yet.');
+        setError('This option is unavailable in the current release.');
         return;
       }
       await deleteCartItem(original.id);

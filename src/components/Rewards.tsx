@@ -61,6 +61,13 @@ const loadOptionalSellerProducts = async (enabled: boolean) => {
   }
 };
 
+const DEFAULT_REWARD_MILESTONES = [
+  { stars: 5, label: 'Starter' },
+  { stars: 10, label: 'Momentum' },
+  { stars: 25, label: 'Habit' },
+  { stars: 50, label: 'Power' },
+];
+
 export const Rewards: React.FC<RewardsProps> = ({ onBack, openQrOnMount, onOpenQrHandled, onOpenQrRequested, onCloseQrRequested }) => {
   const [starsSummary, setStarsSummary] = useState<RewardsStarsSummary | null>(null);
   const [leaderboard, setLeaderboard] = useState<RewardsLeaderboardEntry[]>([]);
@@ -179,7 +186,9 @@ export const Rewards: React.FC<RewardsProps> = ({ onBack, openQrOnMount, onOpenQ
     ])
       .then(([milestonesResp, offersResp, walletCopyResp, economicsResp, receiptsResp, referralsResp]) => {
         if (!active) return;
-        const items = Array.isArray(milestonesResp?.value) ? milestonesResp.value : [];
+        const items = Array.isArray(milestonesResp?.value) && milestonesResp.value.length > 0
+          ? milestonesResp.value
+          : DEFAULT_REWARD_MILESTONES;
         setMilestones(items);
         const offers = Array.isArray(offersResp?.value) ? offersResp.value : [];
         setWalletOffers(
@@ -200,7 +209,7 @@ export const Rewards: React.FC<RewardsProps> = ({ onBack, openQrOnMount, onOpenQ
       })
       .catch(() => {
         if (!active) return;
-        setMilestones([]);
+        setMilestones(DEFAULT_REWARD_MILESTONES);
         setWalletOffers([]);
         setWalletHint('');
         setEconomicsConfig(null);
@@ -1390,15 +1399,10 @@ export const Rewards: React.FC<RewardsProps> = ({ onBack, openQrOnMount, onOpenQ
           <div className="flex items-center gap-2 mb-4">
             <Trophy className="w-4 h-4 text-amber-600" />
             <h3 className={sectionEyebrowClass}>
-              {economicsConfig?.passport_label || 'Coming Up'}
+              {economicsConfig?.passport_label || 'Shop Passport'}
             </h3>
           </div>
           <div className="space-y-3">
-            {milestones.length === 0 && (
-              <div className={`${mutedPanelClass} p-3 text-[10px] font-bold text-zinc-500`}>
-                More rewards are coming soon.
-              </div>
-            )}
             {milestones.map((milestone) => (
               <div key={milestone.stars} className={`${mutedPanelClass} flex items-center justify-between rounded-2xl p-3`}>
                 <div>

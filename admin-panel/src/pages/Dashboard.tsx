@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { adminFetch } from "../lib/adminApi";
 import { getSearchCacheMetrics } from "../lib/adminApi";
 import { getPartnerStatus, listPartners, type PartnerRecord } from "../lib/partnersAdminApi";
+import { getRuntimeQueues } from "../lib/opsConfigApi";
 
 type PartnerIssue = {
   id: string;
@@ -31,6 +32,7 @@ export const Dashboard = () => {
   const [pausedPartners, setPausedPartners] = useState<PartnerIssue[]>([]);
   const [failedPartners, setFailedPartners] = useState<PartnerIssue[]>([]);
   const [cacheMetrics, setCacheMetrics] = useState<any>(null);
+  const [runtime, setRuntime] = useState<any>(null);
 
   useEffect(() => {
     adminFetch("/kpis").then(setKpis).catch(() => null);
@@ -40,6 +42,7 @@ export const Dashboard = () => {
     adminFetch("/flags").then((data) => setFlags(data.flags || [])).catch(() => setFlags([]));
     adminFetch("/experiments").then((data) => setExperiments(data.experiments || [])).catch(() => setExperiments([]));
     getSearchCacheMetrics().then(setCacheMetrics).catch(() => null);
+    getRuntimeQueues().then(setRuntime).catch(() => null);
     listPartners()
       .then(async (items: PartnerRecord[]) => {
         const valid = items.filter((item) => Boolean(item.id || item.partner_id));
@@ -96,6 +99,15 @@ export const Dashboard = () => {
     ...activityFeatures.map(([, value]) => value),
     ...activityActions.map(([, value]) => value),
   );
+  const runtimeQueues = runtime?.queues || [];
+  const runtimeServers = runtime?.servers || [];
+  const runtimeLoad = {
+    queues: runtimeQueues.length,
+    pending: runtimeQueues.reduce((acc: number, item: any) => acc + Number(item.pending || 0), 0),
+    retry: runtimeQueues.reduce((acc: number, item: any) => acc + Number(item.retry || 0), 0),
+    failed: runtimeQueues.reduce((acc: number, item: any) => acc + Number(item.failed || 0), 0),
+    activeWorkers: runtimeServers.reduce((acc: number, item: any) => acc + Number(item.active_workers || 0), 0),
+  };
 
   const controlSurfaces = [
     { title: "Feature Flags", count: flags.length, href: "/flags", note: "Kill switches and rollouts." },
@@ -103,6 +115,9 @@ export const Dashboard = () => {
     { title: "Ops Configs", count: "Live", href: "/ops-configs", note: "Platform configuration values." },
     { title: "Assistant Models", count: "Managed", href: "/assistant-models", note: "Prompt and model governance." },
     { title: "Search Ops", count: cacheMetrics?.cache_hit_rate_pct ?? "Live", href: "/search-ops", note: "Embeddings, reindex jobs, and async media queue." },
+    { title: "Workers", count: runtimeLoad.activeWorkers || "Live", href: "/runtime", note: "Workers, queues, retries, and backlog." },
+    { title: "Phase 3", count: "Live", href: "/phase3-center", note: "Growth forecasts, SokoScore, and billing reconciliation." },
+    { title: "Delivery Center", count: "Live", href: "/delivery-center", note: "Notifications, templates, broadcasts, and audiences." },
     { title: "Supplier Apps", count: "Queue", href: "/supplier-applications", note: "Onboarding review flow." },
     { title: "Security", count: "Watch", href: "/security", note: "Controls, alerts, and overview." },
   ];
@@ -180,6 +195,33 @@ export const Dashboard = () => {
             <strong>{totalActivity}</strong>
             <p className="muted">Recorded events across buyer, seller, supplier, and admin flows.</p>
           </div>
+        </div>
+      </div>
+
+      <div className="card-grid">
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h3>Worker Fleet</h3>
+              <p className="muted">Live worker processes reported by Redis.</p>
+            </div>
+          </div>
+          <strong>{runtimeLoad.activeWorkers || "—"}</strong>
+          <p className="muted" style={{ marginTop: 8 }}>
+            {runtimeLoad.queues} queues · {runtimeLoad.pending} pending · {runtimeLoad.retry} retry · {runtimeLoad.failed} failed
+          </p>
+        </div>
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h3>Queue Health</h3>
+              <p className="muted">Running vs paused worker queues.</p>
+            </div>
+          </div>
+          <strong>{runtimeQueues.filter((item: any) => !item.paused).length}</strong>
+          <p className="muted" style={{ marginTop: 8 }}>
+            {runtimeQueues.filter((item: any) => item.paused).length} paused queues
+          </p>
         </div>
       </div>
 

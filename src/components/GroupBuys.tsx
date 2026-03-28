@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Zap, Loader2, BadgePercent, Sparkles, Clock3 } from 'lucide-react';
-import { listGroupBuyInstances, joinGroupBuyInstance, createBuyerGroupRequest, type GroupBuyInstance } from '../lib/groupBuyApi';
+import { ArrowLeft, MapPin, Users, Timer, Filter, MessageCircle, ShoppingCart, Loader2, BadgePercent, Sparkles, Clock3 } from 'lucide-react';
+import {
+  createBuyerGroupRequest,
+  joinGroupBuyInstance,
+  listGroupBuyInstances,
+  type GroupBuyInstance,
+} from '../lib/groupBuyApi';
 import { getOpsConfig } from '../lib/opsConfigApi';
 
 type Filters = {
@@ -45,7 +50,7 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     const averageProgress = items.length
       ? Math.round(items.reduce((acc, item) => {
           const target = Math.max(1, item.target_tier_qty || item.min_group_size || 1);
-          const current = item.current_size || 0;
+          const current = item.current_size ?? 0;
           return acc + Math.min(100, (current / target) * 100);
         }, 0) / items.length)
       : 0;
@@ -333,10 +338,12 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           {items.map((item) => {
             const target = Math.max(1, item.target_tier_qty || item.min_group_size || 1);
-            const current = item.current_size || 0;
+            const current = item.current_size ?? 0;
             const progress = Math.min(100, Math.round((current / target) * 100));
             const tierPrice = item.tiers?.[0]?.price ?? item.current_price ?? 0;
             const tierDiscount = item.tiers?.[0]?.discount;
+            const status = String(item.status || '').toLowerCase();
+            const canJoin = !status.includes('closed') && !status.includes('fulfilled');
             const etaMin = item.distance_km ? Math.max(5, Math.round(item.distance_km * 6)) : null;
             const shareLink = item.share_link
               ? item.share_link.startsWith('http')
@@ -387,9 +394,10 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => handleJoin(item)}
-                    className="group-buys-accent-btn inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:brightness-105"
+                    disabled={!canJoin}
+                    className="group-buys-accent-btn inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Users className="h-4 w-4" /> Join deal
+                    <Users className="h-4 w-4" /> {canJoin ? 'Join deal' : 'Deal closed'}
                   </button>
                   {shareLink && (
                     <button
@@ -410,11 +418,6 @@ export const GroupBuys: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                   {item.expires_at && (
                     <div className="group-buys-chip inline-flex items-center gap-1 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
                       <Timer className="h-3 w-3" /> {new Date(item.expires_at).toLocaleDateString()}
-                    </div>
-                  )}
-                  {item.inventory_remaining !== undefined && (
-                    <div className="group-buys-warning-chip inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
-                      <Zap className="h-3 w-3" /> {item.inventory_remaining} left
                     </div>
                   )}
                 </div>

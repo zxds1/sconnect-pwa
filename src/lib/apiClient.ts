@@ -175,6 +175,7 @@ const getCachePolicy = (path: string): CachePolicy | null => {
     { pattern: /^\/v1\/profile\/insights(?:\/|$)/, policy: { ttlMs: 5_000 } },
     { pattern: /^\/v1\/seller\/(?:rank|metrics|marketing\/kpis|marketing\/demand-hotspots)/, policy: { ttlMs: 5_000 } },
     { pattern: /^\/v1\/groupbuy\/instances(?:\/|$)/, policy: { ttlMs: 5 * 60_000 } },
+    { pattern: /^\/v1\/group-buy(?:\/|$)/, policy: { ttlMs: 30_000, preferIndexedDb: true } },
     { pattern: /^\/v1\/profile(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
     { pattern: /^\/v1\/seller\/profile(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
     { pattern: /^\/v1\/seller\/products(?:\/|$)/, policy: { ttlMs: 2 * 60_000 } },
@@ -210,7 +211,10 @@ const getInvalidationPrefixes = (path: string) => {
     return ['/v1/cart'];
   }
   if (/^\/v1\/groupbuy(?:\/|$)/.test(pathOnly)) {
-    return ['/v1/groupbuy'];
+    return ['/v1/groupbuy', '/v1/group-buy'];
+  }
+  if (/^\/v1\/group-buy(?:\/|$)/.test(pathOnly)) {
+    return ['/v1/group-buy', '/v1/groupbuy'];
   }
   if (/^\/v1\/feed(?:\/|$)/.test(pathOnly) || /^\/v1\/posts(?:\/|$)/.test(pathOnly) || /^\/v1\/live(?:\/|$)/.test(pathOnly)) {
     return ['/v1/feed', '/v1/posts', '/v1/live', '/v1/following'];

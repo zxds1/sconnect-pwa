@@ -45,7 +45,7 @@ import {
   updateUserLocation
 } from '../lib/searchApi';
 import type { NotificationPreferences } from '../lib/notificationsApi';
-import { getAuthItem } from '../lib/authStorage';
+import { getAuthItem, setAuthItem } from '../lib/authStorage';
 
 interface SettingsProps {
   onOpenDataDashboard?: () => void;
@@ -129,6 +129,7 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
   });
   const [comparisonProfile, setComparisonProfile] = React.useState('default');
   const [comparisonStatus, setComparisonStatus] = React.useState<string | null>(null);
+  const [preferenceStatus, setPreferenceStatus] = React.useState<string | null>(null);
   const [savedLocations, setSavedLocations] = React.useState<UserLocation[]>([]);
   const [locationRegions, setLocationRegions] = React.useState<Region[]>([]);
   const [locationForm, setLocationForm] = React.useState({
@@ -313,6 +314,7 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
         const nextConsents = { ...consents, [key]: nextValue };
         setConsents(nextConsents);
         writeGuestJson('consents', nextConsents);
+        setPreferenceStatus('Consent saved locally.');
         return;
       }
       await updateConsentByType(key, { consent_given: nextValue });
@@ -325,7 +327,10 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
           created_at: item.created_at
         }))
       );
-    } catch {}
+      setPreferenceStatus('Consent saved.');
+    } catch (err: any) {
+      setPreferenceStatus(err?.message || 'Unable to save consent right now.');
+    }
     setConsentLoading((prev) => ({ ...prev, [key]: false }));
   };
 
@@ -336,11 +341,15 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
         const nextPrefs = { ...notificationPrefs, [field]: nextValue };
         setNotificationPrefs(nextPrefs);
         writeGuestJson('notifications', nextPrefs);
+        setPreferenceStatus('Notification preference saved locally.');
         return;
       }
       await updateNotificationPreferences({ [field]: nextValue } as any);
       setNotificationPrefs((prev) => ({ ...prev, [field]: nextValue }));
-    } catch {}
+      setPreferenceStatus('Notification preference saved.');
+    } catch (err: any) {
+      setPreferenceStatus(err?.message || 'Unable to save notification preference right now.');
+    }
   };
 
   const persistUiPrefs = async (next: Partial<{ theme: 'light' | 'dark' | 'system'; voiceFeedback: boolean; voiceDirections: boolean }>) => {
@@ -355,6 +364,7 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
         if (typeof next.voiceFeedback === 'boolean') setVoiceFeedback(next.voiceFeedback);
         if (typeof next.voiceDirections === 'boolean') setVoiceDirections(next.voiceDirections);
         writeGuestJson('ui', nextState);
+        setPreferenceStatus('Preferences saved locally.');
         return;
       }
       const saved = await updateUiPreferences({
@@ -371,7 +381,10 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       if (typeof saved?.voice_directions_enabled === 'boolean') {
         setVoiceDirections(saved.voice_directions_enabled);
       }
-    } catch {}
+      setPreferenceStatus('Preferences saved.');
+    } catch (err: any) {
+      setPreferenceStatus(err?.message || 'Unable to save preferences right now.');
+    }
   };
 
   const totalWeight = Object.values(comparisonWeights).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -689,6 +702,11 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
       </div>
 
       <div className="p-6 space-y-8">
+        {preferenceStatus && (
+          <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-[10px] font-bold text-zinc-600 shadow-sm">
+            {preferenceStatus}
+          </div>
+        )}
         {sections.map((section, idx) => (
           <div key={idx} className="space-y-3">
             <h2 className="text-xs font-bold uppercase text-zinc-400 tracking-widest px-2">{section.title}</h2>
@@ -742,7 +760,20 @@ export const Settings: React.FC<SettingsProps> = ({ onOpenDataDashboard, onOpenN
               onRequireLogin?.('Sign in to use account actions.');
               return;
             }
-            setLocationStatus('Signed out of this device.');
+            const keysToClear = [
+              'soko:auth_token',
+              'soko:refresh_token',
+              'soko:user_id',
+              'soko:role',
+              'soko:session_id',
+              'soko:tenant_id',
+              'soko:username',
+              'soko:display_name'
+            ];
+            keysToClear.forEach((key) => setAuthItem(key, ''));
+            setPreferenceStatus('Signed out.');
+            window.location.hash = '#login';
+            window.location.reload();
           }}
           className="w-full flex items-center justify-center gap-2 p-4 bg-white text-red-500 rounded-2xl border border-red-100 font-bold text-sm shadow-sm hover:bg-red-50 transition-colors"
         >

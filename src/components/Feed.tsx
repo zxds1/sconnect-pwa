@@ -215,9 +215,11 @@ export const Feed: React.FC<FeedProps> = ({ onBack, onChatOpen, onProductOpen, o
   const [liveCommentInput, setLiveCommentInput] = useState('');
   const [liveViewerCount, setLiveViewerCount] = useState<number | null>(null);
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
   const livePollRef = useRef<number | null>(null);
   const liveSocketRef = useRef<WebSocket | null>(null);
   const [liveTypingUsers, setLiveTypingUsers] = useState<string[]>([]);
+  const liveSellerId = activeLive?.sellerId || liveSessions.find((session) => session.sellerId)?.sellerId || '';
   const typingTimeoutRef = useRef<number | null>(null);
   const [liveModeration, setLiveModeration] = useState<string | null>(null);
 
@@ -512,9 +514,9 @@ export const Feed: React.FC<FeedProps> = ({ onBack, onChatOpen, onProductOpen, o
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      alert('Link copied to clipboard!');
+      setShareStatus('Link copied to clipboard.');
     } catch {
-      alert(`Link copied: ${window.location.href}`);
+      setShareStatus(`Copy unavailable on this browser. Share this link: ${window.location.href}`);
     }
   };
 
@@ -821,7 +823,10 @@ export const Feed: React.FC<FeedProps> = ({ onBack, onChatOpen, onProductOpen, o
               </button>
               <div className="flex items-center gap-2">
                 <button 
-                  onClick={() => onSellerOpen('')}
+                  onClick={() => {
+                    if (liveSellerId) onSellerOpen(liveSellerId);
+                  }}
+                  disabled={!liveSellerId}
                   className="p-2 bg-white/10 rounded-full text-white"
                 >
                   <User className="w-5 h-5" />
@@ -849,6 +854,17 @@ export const Feed: React.FC<FeedProps> = ({ onBack, onChatOpen, onProductOpen, o
           {error && (
             <div className="bg-red-500/20 border border-red-500/40 text-red-100 text-[10px] font-bold rounded-2xl px-4 py-3">
               {error}
+            </div>
+          )}
+          {shareStatus && (
+            <div className="bg-white/10 border border-white/10 text-white/80 text-[10px] font-bold rounded-2xl px-4 py-3 flex items-start justify-between gap-3">
+              <span>{shareStatus}</span>
+              <button
+                onClick={() => setShareStatus(null)}
+                className="text-white/60 hover:text-white"
+              >
+                Dismiss
+              </button>
             </div>
           )}
           {loading && (
@@ -1283,7 +1299,10 @@ export const Feed: React.FC<FeedProps> = ({ onBack, onChatOpen, onProductOpen, o
             </button>
             <div className="flex items-center gap-2">
               <button 
-                onClick={() => onSellerOpen('')}
+                onClick={() => {
+                  if (liveSellerId) onSellerOpen(liveSellerId);
+                }}
+                disabled={!liveSellerId}
                 className="p-2 bg-white/10 rounded-full text-white"
               >
                 <User className="w-5 h-5" />

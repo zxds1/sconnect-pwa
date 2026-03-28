@@ -223,6 +223,14 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
                   <div>Status: {item.status}</div>
                   <div>Type: {item.export_type || '—'}</div>
                   <div>Created: {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</div>
+                  {item.download_url && (
+                    <button
+                      className="mt-2 inline-flex items-center gap-1 rounded-lg bg-zinc-900 px-2 py-1 text-[9px] font-black text-white"
+                      onClick={() => window.open(item.download_url, '_blank', 'noopener,noreferrer')}
+                    >
+                      Download
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -253,6 +261,14 @@ export const DataDashboard: React.FC<DataDashboardProps> = ({ onBack }) => {
               <div>ID: {exportLookupResult.id}</div>
               <div>Status: {exportLookupResult.status}</div>
               <div>Type: {exportLookupResult.export_type || '—'}</div>
+              {exportLookupResult.download_url && (
+                <button
+                  className="mt-2 inline-flex items-center gap-1 rounded-lg bg-zinc-900 px-2 py-1 text-[9px] font-black text-white"
+                  onClick={() => window.open(exportLookupResult.download_url, '_blank', 'noopener,noreferrer')}
+                >
+                  Download
+                </button>
+              )}
             </div>
           )}
         </section>

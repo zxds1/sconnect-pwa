@@ -1,29 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft } from 'lucide-react';
-import { Feed } from './components/Feed';
-import { Chat } from './components/Chat';
-import { SellerDashboard } from './components/SellerDashboard';
-import { Profile } from './components/Profile';
-import { Shops } from './components/Shops';
-import { Search as SearchView } from './components/Search';
-import { Settings } from './components/Settings';
-import { Login } from './components/Login';
-import { Register } from './components/Register';
-import { PasswordReset } from './components/PasswordReset';
-import { AuthOnboarding } from './components/AuthOnboarding';
-import { Notifications } from './components/Notifications';
-import { DataDashboard } from './components/DataDashboard';
-import { ProductDetail } from './components/ProductDetail';
-import { Bag } from './components/Bag';
-import { Subscriptions } from './components/Subscriptions';
-import { Partnerships } from './components/Partnerships';
-import { SupportChat } from './components/SupportChat';
-import { ComparisonView } from './components/ComparisonView';
-import { Rewards } from './components/Rewards';
-import { Onboarding } from './components/Onboarding';
-import { Assistant } from './components/Assistant';
-import { GroupBuys } from './components/GroupBuys';
 import { MediaUploadPreviewHost } from './components/MediaUploadPreviewHost';
 import { PullToRefresh } from './components/PullToRefresh';
 import { Product } from './types';
@@ -37,6 +14,30 @@ import { getSellerProfile } from './lib/sellerProfileApi';
 import { getSessionInfo } from './lib/identityApi';
 import { listNotifications, markNotificationRead, type NotificationItem } from './lib/notificationsApi';
 import { getAuthItem, setAuthItem } from './lib/authStorage';
+
+const Feed = lazy(() => import('./components/Feed').then((module) => ({ default: module.Feed })));
+const Chat = lazy(() => import('./components/Chat').then((module) => ({ default: module.Chat })));
+const SellerDashboard = lazy(() => import('./components/SellerDashboard').then((module) => ({ default: module.SellerDashboard })));
+const Profile = lazy(() => import('./components/Profile').then((module) => ({ default: module.Profile })));
+const Shops = lazy(() => import('./components/Shops').then((module) => ({ default: module.Shops })));
+const SearchView = lazy(() => import('./components/Search').then((module) => ({ default: module.Search })));
+const Settings = lazy(() => import('./components/Settings').then((module) => ({ default: module.Settings })));
+const Login = lazy(() => import('./components/Login').then((module) => ({ default: module.Login })));
+const Register = lazy(() => import('./components/Register').then((module) => ({ default: module.Register })));
+const PasswordReset = lazy(() => import('./components/PasswordReset').then((module) => ({ default: module.PasswordReset })));
+const AuthOnboarding = lazy(() => import('./components/AuthOnboarding').then((module) => ({ default: module.AuthOnboarding })));
+const Notifications = lazy(() => import('./components/Notifications').then((module) => ({ default: module.Notifications })));
+const DataDashboard = lazy(() => import('./components/DataDashboard').then((module) => ({ default: module.DataDashboard })));
+const ProductDetail = lazy(() => import('./components/ProductDetail').then((module) => ({ default: module.ProductDetail })));
+const Bag = lazy(() => import('./components/Bag').then((module) => ({ default: module.Bag })));
+const Subscriptions = lazy(() => import('./components/Subscriptions').then((module) => ({ default: module.Subscriptions })));
+const Partnerships = lazy(() => import('./components/Partnerships').then((module) => ({ default: module.Partnerships })));
+const SupportChat = lazy(() => import('./components/SupportChat').then((module) => ({ default: module.SupportChat })));
+const ComparisonView = lazy(() => import('./components/ComparisonView').then((module) => ({ default: module.ComparisonView })));
+const Rewards = lazy(() => import('./components/Rewards').then((module) => ({ default: module.Rewards })));
+const Onboarding = lazy(() => import('./components/Onboarding').then((module) => ({ default: module.Onboarding })));
+const Assistant = lazy(() => import('./components/Assistant').then((module) => ({ default: module.Assistant })));
+const GroupBuys = lazy(() => import('./components/GroupBuys').then((module) => ({ default: module.GroupBuys })));
 
 type AppView =
   | 'feed'
@@ -120,6 +121,12 @@ const buildProductFromSearch = (result: SearchResult, detail?: any): Product => 
 };
 
 export default function App() {
+  const screenFallback = (
+    <div className="flex h-full min-h-[40vh] w-full items-center justify-center bg-white text-sm font-medium text-zinc-500">
+      Loading...
+    </div>
+  );
+
   const getInitialView = (): AppView => {
     if (typeof window === 'undefined') return 'assistant';
     const rawHash = window.location.hash.replace(/^#/, '');
@@ -770,476 +777,484 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 min-h-0 relative overflow-y-auto overflow-x-hidden">
         <PullToRefresh onRefresh={() => window.location.reload()}>
-          <AnimatePresence mode="wait">
-          {view === 'feed' && (
-            <motion.div 
-              key="feed"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full"
-            >
-              <Feed 
-                onBack={goBack}
-                onChatOpen={handleChatOpen}
-                onProductOpen={handleProductOpen}
-                onSellerOpen={handleShopClick}
-              />
-            </motion.div>
-          )}
+          <Suspense fallback={screenFallback}>
+            <AnimatePresence mode="wait">
+            {view === 'feed' && (
+              <motion.div
+                key="feed"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full"
+              >
+                <Feed
+                  onBack={goBack}
+                  onChatOpen={handleChatOpen}
+                  onProductOpen={handleProductOpen}
+                  onSellerOpen={handleShopClick}
+                />
+              </motion.div>
+            )}
 
-          {view === 'shops' && (
-            <motion.div 
-              key="shops"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <Shops onBack={goBack} onShopClick={handleShopClick} />
-            </motion.div>
-          )}
+            {view === 'shops' && (
+              <motion.div
+                key="shops"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <Shops onBack={goBack} onShopClick={handleShopClick} />
+              </motion.div>
+            )}
 
-          {view === 'search' && (
-            <motion.div 
-              key="search"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <SearchView 
-                onBack={goBack}
-                onProductOpen={handleProductOpen} 
-                comparisonList={comparisonList}
-                onAddToComparison={handleAddToComparison}
-                onOpenComparison={() => setView('comparison')}
-                onAddToBag={handleAddToBag}
-                onShopOpen={handleShopClick}
-                initialQuery={searchQuery}
-                initialAction={searchAction || undefined}
-              />
-            </motion.div>
-          )}
+            {view === 'search' && (
+              <motion.div
+                key="search"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <SearchView
+                  onBack={goBack}
+                  onProductOpen={handleProductOpen}
+                  comparisonList={comparisonList}
+                  onAddToComparison={handleAddToComparison}
+                  onOpenComparison={() => setView('comparison')}
+                  onAddToBag={handleAddToBag}
+                  onShopOpen={handleShopClick}
+                  initialQuery={searchQuery}
+                  initialAction={searchAction || undefined}
+                />
+              </motion.div>
+            )}
 
-          {view === 'assistant' && (
-            <motion.div 
-              key="assistant"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <Assistant
-                products={products}
-                onOpenSearch={(query) => {
-                  setView('search');
-                  setSearchQuery(query);
-                  setSearchAction(null);
-                }}
-                onOpenProduct={handleProductOpen}
-                onAddToBag={handleAddToBag}
-                onAddToComparison={handleAddToComparison}
-                onOpenSeller={handleShopClick}
-                onStartNavigation={handleStartNavigation}
-                onOpenRewards={handleOpenRewards}
-                onOpenProfile={handleOpenProfile}
-                onOpenSellerStudio={handleOpenSellerStudio}
-                onOpenRFQ={handleOpenRFQ}
-                onOpenOnboarding={() => setShowOnboarding(true)}
-                onOpenBag={handleOpenBag}
-                onOpenQrScan={() => {
-                  setOpenRewardsQrOnMount(true);
-                  setView('rewards');
-                }}
-                onOpenSubscriptions={handleOpenSubscriptions}
-                onOpenPartnerships={() => setView('partnerships')}
-                onOpenFeed={() => setView('feed')}
-                onOpenGroupBuys={() => setView('group-buys')}
-                onOpenLogin={() => setView('login')}
-                onOpenRegister={() => setView('register')}
-                authPromptMessage={authPromptMessage}
-                onToast={setToast}
-              />
-            </motion.div>
-          )}
+            {view === 'assistant' && (
+              <motion.div
+                key="assistant"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <Assistant
+                  products={products}
+                  onOpenSearch={(query) => {
+                    setView('search');
+                    setSearchQuery(query);
+                    setSearchAction(null);
+                  }}
+                  onOpenProduct={handleProductOpen}
+                  onAddToBag={handleAddToBag}
+                  onAddToComparison={handleAddToComparison}
+                  onOpenSeller={handleShopClick}
+                  onStartNavigation={handleStartNavigation}
+                  onOpenRewards={handleOpenRewards}
+                  onOpenProfile={handleOpenProfile}
+                  onOpenSellerStudio={handleOpenSellerStudio}
+                  onOpenRFQ={handleOpenRFQ}
+                  onOpenOnboarding={() => setShowOnboarding(true)}
+                  onOpenBag={handleOpenBag}
+                  onOpenQrScan={() => {
+                    setOpenRewardsQrOnMount(true);
+                    setView('rewards');
+                  }}
+                  onOpenSubscriptions={handleOpenSubscriptions}
+                  onOpenPartnerships={() => setView('partnerships')}
+                  onOpenFeed={() => setView('feed')}
+                  onOpenGroupBuys={() => setView('group-buys')}
+                  onOpenLogin={() => setView('login')}
+                  onOpenRegister={() => setView('register')}
+                  authPromptMessage={authPromptMessage}
+                  onToast={setToast}
+                />
+              </motion.div>
+            )}
 
-          {view === 'login' && (
-            <motion.div
-              key="login"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <Login
-                onBack={goBack}
-                onRegisterOpen={() => setView('register')}
-                onResetOpen={() => setView('password-reset')}
-                onAuthenticated={() => {
-                  handleAuthSuccess(authReturnView);
-                }}
-                contextMessage={authPromptMessage}
-              />
-            </motion.div>
-          )}
+            {view === 'login' && (
+              <motion.div
+                key="login"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <Login
+                  onBack={goBack}
+                  onRegisterOpen={() => setView('register')}
+                  onResetOpen={() => setView('password-reset')}
+                  onAuthenticated={() => {
+                    handleAuthSuccess(authReturnView);
+                  }}
+                  contextMessage={authPromptMessage}
+                />
+              </motion.div>
+            )}
 
-          {view === 'register' && (
-            <motion.div
-              key="register"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <Register
-                onBack={goBack}
-                onLoginOpen={() => setView('login')}
-                onAuthenticated={() => {
-                  const intent = (getAuthItem('soko:account_intent') || '').toLowerCase();
-                  if (intent === 'seller') {
-                    setPendingSellerFastTrack(true);
-                    handleAuthSuccess('profile');
-                    return;
-                  }
-                  if (intent === 'buyer') {
-                    handleAuthSuccess('assistant');
-                    return;
-                  }
-                  handleAuthSuccess('auth-onboarding');
-                }}
-                contextMessage={authPromptMessage}
-              />
-            </motion.div>
-          )}
+            {view === 'register' && (
+              <motion.div
+                key="register"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <Register
+                  onBack={goBack}
+                  onLoginOpen={() => setView('login')}
+                  onAuthenticated={() => {
+                    const intent = (getAuthItem('soko:account_intent') || '').toLowerCase();
+                    if (intent === 'seller') {
+                      setPendingSellerFastTrack(true);
+                      handleAuthSuccess('profile');
+                      return;
+                    }
+                    if (intent === 'buyer') {
+                      handleAuthSuccess('assistant');
+                      return;
+                    }
+                    handleAuthSuccess('auth-onboarding');
+                  }}
+                  contextMessage={authPromptMessage}
+                />
+              </motion.div>
+            )}
 
-          {view === 'password-reset' && (
-            <motion.div
-              key="password-reset"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <PasswordReset
-                onBack={goBack}
-                onLoginOpen={() => setView('login')}
-              />
-            </motion.div>
-          )}
+            {view === 'password-reset' && (
+              <motion.div
+                key="password-reset"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <PasswordReset
+                  onBack={goBack}
+                  onLoginOpen={() => setView('login')}
+                />
+              </motion.div>
+            )}
 
-          {view === 'auth-onboarding' && (
-            <motion.div
-              key="auth-onboarding"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <AuthOnboarding
-                onBack={goBack}
-                onFinish={(intent) => {
-                  if (intent === 'seller') {
-                    setPendingSellerFastTrack(true);
-                    handleAuthSuccess('profile');
-                  } else {
-                    handleAuthSuccess('assistant');
-                  }
-                }}
-              />
-            </motion.div>
-          )}
+            {view === 'auth-onboarding' && (
+              <motion.div
+                key="auth-onboarding"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <AuthOnboarding
+                  onBack={goBack}
+                  onFinish={(intent) => {
+                    if (intent === 'seller') {
+                      setPendingSellerFastTrack(true);
+                      handleAuthSuccess('profile');
+                    } else {
+                      handleAuthSuccess('assistant');
+                    }
+                  }}
+                />
+              </motion.div>
+            )}
 
 
-          {view === 'comparison' && (
-            <motion.div 
-              key="comparison"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <ComparisonView 
-                onClose={goBack}
-                onProductOpen={handleProductOpen}
-              />
-            </motion.div>
-          )}
+            {view === 'comparison' && (
+              <motion.div
+                key="comparison"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <ComparisonView
+                  onClose={goBack}
+                  onProductOpen={handleProductOpen}
+                />
+              </motion.div>
+            )}
 
-          {view === 'rewards' && (
-            <motion.div 
-              key="rewards"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <Rewards
-                onBack={goBack}
-                openQrOnMount={openRewardsQrOnMount}
-                onOpenQrHandled={() => setOpenRewardsQrOnMount(false)}
-                onOpenQrRequested={openRewardsQr}
-                onCloseQrRequested={() => {
-                  if (typeof window !== 'undefined' && window.history.state?.overlay?.kind === 'rewards-qr') {
-                    window.history.back();
-                    return;
-                  }
-                  setOpenRewardsQrOnMount(false);
-                }}
-              />
-            </motion.div>
-          )}
+            {view === 'rewards' && (
+              <motion.div
+                key="rewards"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <Rewards
+                  onBack={goBack}
+                  openQrOnMount={openRewardsQrOnMount}
+                  onOpenQrHandled={() => setOpenRewardsQrOnMount(false)}
+                  onOpenQrRequested={openRewardsQr}
+                  onCloseQrRequested={() => {
+                    if (typeof window !== 'undefined' && window.history.state?.overlay?.kind === 'rewards-qr') {
+                      window.history.back();
+                      return;
+                    }
+                    setOpenRewardsQrOnMount(false);
+                  }}
+                />
+              </motion.div>
+            )}
 
-          {view === 'subscriptions' && (
-            <motion.div 
-              key="subscriptions"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <Subscriptions onBack={goBack} />
-            </motion.div>
-          )}
+            {view === 'subscriptions' && (
+              <motion.div
+                key="subscriptions"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <Subscriptions onBack={goBack} />
+              </motion.div>
+            )}
 
-          {view === 'partnerships' && (
-            <motion.div 
-              key="partnerships"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-40"
-            >
+            {view === 'partnerships' && (
+              <motion.div
+                key="partnerships"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-40"
+              >
                 <Partnerships onBack={goBack} />
               </motion.div>
             )}
 
-          {view === 'bag' && (
-            <motion.div 
-              key="bag"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <Bag
-                onBack={goBack}
-                onOpenProduct={handleProductOpen}
-                onRequireLogin={(message) => promptForLogin(message, 'bag')}
-              />
-            </motion.div>
-          )}
-
-          {view === 'seller' && (
-            <motion.div 
-              key="seller"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <div className="flex items-center p-4 border-b bg-white sticky top-0 z-10">
-                <button onClick={goBack} className="p-2 hover:bg-zinc-100 rounded-full">
-                  <ArrowLeft className="w-6 h-6" />
-                </button>
-                <img
-                  src="/logo-header.jpg"
-                  alt="Sconnect"
-                  className="ml-3 w-8 h-8 rounded-lg object-cover"
+            {view === 'bag' && (
+              <motion.div
+                key="bag"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <Bag
+                  onBack={goBack}
+                  onOpenProduct={handleProductOpen}
+                  onRequireLogin={(message) => promptForLogin(message, 'bag')}
                 />
-                <h1 className="ml-3 text-xl font-bold">Seller Studio</h1>
-              </div>
-              <SellerDashboard
-                products={products}
-                onProductsChange={setProducts}
-                onToast={setToast}
-                verifiedSellerIds={verifiedSellerIds}
-                onVerifiedSellerIdsChange={setVerifiedSellerIds}
-                onOpenSellerChat={() => openSupportChat('seller-ai')}
-                onOpenSupportChat={() => openSupportChat('duka')}
-                onOpenSupplierChat={() => openSupportChat('brand')}
-              />
-            </motion.div>
-          )}
+              </motion.div>
+            )}
 
-          {view === 'profile' && (
-            <motion.div 
-              key="profile"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-40"
-            >
-              <Profile 
-                onBack={goBack}
-                onSettingsOpen={() => setView('settings')}
-                onRequireLogin={(message) => promptForLogin(message, 'profile')}
-                onOpenSellerStudio={handleOpenSellerStudio}
-                onSellerAccountCreated={() => {
-                  setIsSellerAccount(true);
-                }}
-                sellerFastTrack={pendingSellerFastTrack}
-                onSellerFastTrackConsumed={() => setPendingSellerFastTrack(false)}
-                isSellerAccount={isSellerAccount}
-                onProductOpen={handleProductOpen}
-                sellerId={selectedSellerId || undefined}
-                products={products}
-                isFollowing={selectedSellerId ? followedSellerIds.includes(selectedSellerId) : false}
-                onToggleFollow={handleToggleFollow}
-              />
-            </motion.div>
-          )}
-
-          {view === 'settings' && (
-            <motion.div 
-              key="settings"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <div className="flex items-center p-4 border-b bg-white sticky top-0 z-10">
-                <button onClick={goBack} className="p-2 hover:bg-zinc-100 rounded-full">
-                  <ArrowLeft className="w-6 h-6" />
-                </button>
-                <img
-                  src="/logo-header.jpg"
-                  alt="Sconnect"
-                  className="ml-3 w-8 h-8 rounded-lg object-cover"
+            {view === 'seller' && (
+              <motion.div
+                key="seller"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <div className="flex items-center p-4 border-b bg-white sticky top-0 z-10">
+                  <button onClick={goBack} className="p-2 hover:bg-zinc-100 rounded-full">
+                    <ArrowLeft className="w-6 h-6" />
+                  </button>
+                  <img
+                    src="/logo-header.jpg"
+                    alt="Sconnect"
+                    className="ml-3 w-8 h-8 rounded-lg object-cover"
+                  />
+                  <h1 className="ml-3 text-xl font-bold">Seller Studio</h1>
+                </div>
+                <SellerDashboard
+                  products={products}
+                  onProductsChange={setProducts}
+                  onToast={setToast}
+                  verifiedSellerIds={verifiedSellerIds}
+                  onVerifiedSellerIdsChange={setVerifiedSellerIds}
+                  onOpenSellerChat={() => openSupportChat('seller-ai')}
+                  onOpenSupportChat={() => openSupportChat('duka')}
+                  onOpenSupplierChat={() => openSupportChat('brand')}
                 />
-                <h1 className="ml-3 text-xl font-bold">Settings</h1>
-              </div>
-              <Settings
-                onOpenDataDashboard={() => {
-                  if (!hasSession()) {
-                    promptForLogin('Sign in to open your data dashboard.', 'data');
-                    return;
-                  }
-                  setView('data');
-                }}
-                onOpenNotifications={() => {
-                  if (!hasSession()) {
-                    promptForLogin('Sign in to view your notifications.', 'notifications');
-                    return;
-                  }
-                  setView('notifications');
-                }}
-                onOpenProfile={handleOpenProfile}
-                onOpenSecurity={() => {
-                  if (!hasSession()) {
-                    promptForLogin('Sign in to change security settings.', 'password-reset');
-                    return;
-                  }
-                  setView('password-reset');
-                }}
-                onOpenPayments={handleOpenSubscriptions}
-                onOpenSupport={() => openSupportChat('duka')}
-                onOpenPolicies={() => openSupportChat('duka')}
-                onRequireLogin={(message) => promptForLogin(message, 'settings')}
-              />
-            </motion.div>
-          )}
+              </motion.div>
+            )}
 
-          {view === 'notifications' && (
-            <motion.div
-              key="notifications"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <Notifications onBack={goBack} />
-            </motion.div>
-          )}
+            {view === 'profile' && (
+              <motion.div
+                key="profile"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-40"
+              >
+                <Profile
+                  onBack={goBack}
+                  onSettingsOpen={() => setView('settings')}
+                  onRequireLogin={(message) => promptForLogin(message, 'profile')}
+                  onOpenSellerStudio={handleOpenSellerStudio}
+                  onSellerAccountCreated={() => {
+                    setIsSellerAccount(true);
+                  }}
+                  sellerFastTrack={pendingSellerFastTrack}
+                  onSellerFastTrackConsumed={() => setPendingSellerFastTrack(false)}
+                  isSellerAccount={isSellerAccount}
+                  onProductOpen={handleProductOpen}
+                  sellerId={selectedSellerId || undefined}
+                  products={products}
+                  isFollowing={selectedSellerId ? followedSellerIds.includes(selectedSellerId) : false}
+                  onToggleFollow={handleToggleFollow}
+                />
+              </motion.div>
+            )}
 
-          {view === 'data' && (
-            <motion.div
-              key="data"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <DataDashboard onBack={goBack} />
-            </motion.div>
-          )}
+            {view === 'settings' && (
+              <motion.div
+                key="settings"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <div className="flex items-center p-4 border-b bg-white sticky top-0 z-10">
+                  <button onClick={goBack} className="p-2 hover:bg-zinc-100 rounded-full">
+                    <ArrowLeft className="w-6 h-6" />
+                  </button>
+                  <img
+                    src="/logo-header.jpg"
+                    alt="Sconnect"
+                    className="ml-3 w-8 h-8 rounded-lg object-cover"
+                  />
+                  <h1 className="ml-3 text-xl font-bold">Settings</h1>
+                </div>
+                <Settings
+                  onOpenDataDashboard={() => {
+                    if (!hasSession()) {
+                      promptForLogin('Sign in to open your data dashboard.', 'data');
+                      return;
+                    }
+                    setView('data');
+                  }}
+                  onOpenNotifications={() => {
+                    if (!hasSession()) {
+                      promptForLogin('Sign in to view your notifications.', 'notifications');
+                      return;
+                    }
+                    setView('notifications');
+                  }}
+                  onOpenProfile={handleOpenProfile}
+                  onOpenSecurity={() => {
+                    if (!hasSession()) {
+                      promptForLogin('Sign in to change security settings.', 'password-reset');
+                      return;
+                    }
+                    setView('password-reset');
+                  }}
+                  onOpenPayments={handleOpenSubscriptions}
+                  onOpenSupport={() => openSupportChat('duka')}
+                  onOpenPolicies={() => openSupportChat('duka')}
+                  onRequireLogin={(message) => promptForLogin(message, 'settings')}
+                />
+              </motion.div>
+            )}
 
-          {view === 'group-buys' && (
-            <motion.div
-              key="group-buys"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="h-full w-full bg-white z-50"
-            >
-              <GroupBuys onBack={goBack} />
-            </motion.div>
-          )}
+            {view === 'notifications' && (
+              <motion.div
+                key="notifications"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <Notifications onBack={goBack} />
+              </motion.div>
+            )}
 
-          </AnimatePresence>
+            {view === 'data' && (
+              <motion.div
+                key="data"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <DataDashboard onBack={goBack} />
+              </motion.div>
+            )}
+
+            {view === 'group-buys' && (
+              <motion.div
+                key="group-buys"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="h-full w-full bg-white z-50"
+              >
+                <GroupBuys onBack={goBack} />
+              </motion.div>
+            )}
+
+            </AnimatePresence>
+          </Suspense>
         </PullToRefresh>
 
         {/* AI Chat Overlay */}
-        <AnimatePresence>
-          {isChatOpen && (
-            <Chat 
-              product={selectedProduct} 
-              onClose={closeChat}
-              onEscalate={() => {
-                alert("Escalating to seller... A human representative will join shortly.");
-                closeChat();
-              }}
-            />
-          )}
-        </AnimatePresence>
+        <Suspense fallback={null}>
+          <AnimatePresence>
+            {isChatOpen && (
+              <Chat
+                product={selectedProduct}
+                onClose={closeChat}
+                onEscalate={() => {
+                  alert("Escalating to seller... A human representative will join shortly.");
+                  closeChat();
+                }}
+              />
+            )}
+          </AnimatePresence>
+        </Suspense>
 
         {/* Product Detail Overlay */}
-        <AnimatePresence>
-          {isProductDetailOpen && selectedProduct && (
-            <ProductDetail 
-              product={selectedProduct} 
-              onClose={closeProductDetail}
-              onChatOpen={(product) => {
-                handleChatOpen(product);
-              }}
-              onOpenSupportChat={() => openSupportChat('duka')}
-              onAddToComparison={handleAddToComparison}
-              isCompared={comparisonList.some(p => p.id === selectedProduct.id)}
-              onBuyNow={handleBuyNow}
-              onAddToBag={handleAddToBag}
-              onRequireLogin={(message) => promptForLogin(message, view)}
-              initialShowMap={Boolean(navigationPreset?.autoOpen)}
-              initialPreferredPathId={navigationPreset?.pathId || null}
-              initialRouteProfile={navigationPreset?.profile}
-              initialNavigationMode={navigationPreset?.mode}
-            />
-          )}
-        </AnimatePresence>
+        <Suspense fallback={null}>
+          <AnimatePresence>
+            {isProductDetailOpen && selectedProduct && (
+              <ProductDetail
+                product={selectedProduct}
+                onClose={closeProductDetail}
+                onChatOpen={(product) => {
+                  handleChatOpen(product);
+                }}
+                onOpenSupportChat={() => openSupportChat('duka')}
+                onAddToComparison={handleAddToComparison}
+                isCompared={comparisonList.some(p => p.id === selectedProduct.id)}
+                onBuyNow={handleBuyNow}
+                onAddToBag={handleAddToBag}
+                onRequireLogin={(message) => promptForLogin(message, view)}
+                initialShowMap={Boolean(navigationPreset?.autoOpen)}
+                initialPreferredPathId={navigationPreset?.pathId || null}
+                initialRouteProfile={navigationPreset?.profile}
+                initialNavigationMode={navigationPreset?.mode}
+              />
+            )}
+          </AnimatePresence>
+        </Suspense>
 
         {/* Onboarding Overlay */}
-      {showOnboarding && (
-        <Onboarding
-          onFinish={() => {
-            setShowOnboarding(false);
-            try {
-              localStorage.setItem('soko:onboarding_completed', 'true');
-            } catch {}
-            completeOnboarding().catch(() => {});
-            window.dispatchEvent(new Event('soko:onboarding-complete'));
-            setToast('📸 Ali photo’d Sugar. Beat him? +2⭐');
-          }}
-        />
-      )}
+        <Suspense fallback={null}>
+          {showOnboarding && (
+            <Onboarding
+              onFinish={() => {
+                setShowOnboarding(false);
+                try {
+                  localStorage.setItem('soko:onboarding_completed', 'true');
+                } catch {}
+                completeOnboarding().catch(() => {});
+                window.dispatchEvent(new Event('soko:onboarding-complete'));
+                setToast('📸 Ali photo’d Sugar. Beat him? +2⭐');
+              }}
+            />
+          )}
+        </Suspense>
       </main>
 
       {toast && (

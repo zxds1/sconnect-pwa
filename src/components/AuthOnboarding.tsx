@@ -179,6 +179,7 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
 
   const handleContinue = async () => {
     if (!intent) return;
+    setFormError(null);
     if (!displayName.trim()) {
       setFormError('Tell us what name to show on your profile.');
       return;
@@ -236,7 +237,10 @@ export const AuthOnboarding: React.FC<AuthOnboardingProps> = ({ onBack, onFinish
           },
         });
       }
-    } catch {}
+    } catch (err: any) {
+      setFormError(err?.message || 'Unable to save onboarding details. Please try again.');
+      return;
+    }
     trackEvent({
       action: 'complete',
       intent,

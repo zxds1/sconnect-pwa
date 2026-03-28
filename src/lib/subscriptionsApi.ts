@@ -44,6 +44,18 @@ export type Invoice = {
   paid_at?: string | null;
   method?: string;
   pdf_s3_key?: string;
+  download_url?: string;
+};
+
+export type BillingEvent = {
+  id: string;
+  kind?: string;
+  status?: string;
+  source?: string;
+  payload?: Record<string, any>;
+  error_text?: string;
+  created_at?: string;
+  processed_at?: string;
 };
 
 export type PaymentResponse = Record<string, any>;
@@ -77,6 +89,12 @@ export const reactivateSubscription = async () =>
 
 export const listInvoices = async (): Promise<Invoice[]> =>
   unwrapList(await apiFetch('/v1/subscriptions/invoices'));
+
+export const getInvoiceDownloadUrl = async (invoiceId: string): Promise<{ download_url?: string }> =>
+  apiFetch(`/v1/subscriptions/invoices/${encodeURIComponent(invoiceId)}/download`);
+
+export const listBillingEvents = async (): Promise<BillingEvent[]> =>
+  unwrapList(await apiFetch('/v1/subscriptions/billing-events'));
 
 export const initiatePayment = async (payload: { amount: number; mpesa_phone: string }): Promise<PaymentResponse> =>
   apiFetch('/v1/subscriptions/pay', { method: 'POST', body: JSON.stringify(payload) });
