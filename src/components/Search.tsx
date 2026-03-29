@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { Product } from '../types';
 import { CameraCaptureOverlay } from './CameraCaptureOverlay';
-import { getProduct } from '../lib/catalogApi';
+import { getProduct, listCategories } from '../lib/catalogApi';
 import {
   listRecentSearches,
   listSavedSearches,
@@ -68,6 +68,7 @@ import {
 import { requestUploadPresign } from '../lib/uploadsApi';
 import {
   addShopFavorite,
+  getShopProducts,
   getShopProfile,
   listShopFavorites,
   removeShopFavorite,
@@ -75,6 +76,7 @@ import {
   type ShopDirectoryEntry
 } from '../lib/shopDirectoryApi';
 import { createRouteTelemetryTracker } from '../lib/routeTelemetry';
+import { hasAuthSession } from '../lib/authStorage';
 import { getComparisonPreferences, getUiPreferences, updateUiPreferences } from '../lib/settingsApi';
 import {
   detectCityKey,
@@ -105,6 +107,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   const [locationSourceLabel, setLocationSourceLabel] = useState<string | null>(null);
   const [maxDistance, setMaxDistance] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [catalogCategories, setCatalogCategories] = useState<string[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000]);
   const [minRating, setMinRating] = useState(0);
   const [sortBy, setSortBy] = useState<'price_asc' | 'price_desc' | 'rating'>('rating');
@@ -138,6 +141,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   useEffect(() => {
     let alive = true;
     const loadComparisonProfile = async () => {
+      if (!hasAuthSession()) return;
       try {
         const prefs = await getComparisonPreferences();
         if (!alive) return;
@@ -223,6 +227,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   const [watchlistTargets, setWatchlistTargets] = useState<Record<string, string>>({});
   const sellerMetaRef = React.useRef(sellerMeta);
   const searchRunRef = React.useRef(0);
+  const browseSeededRef = React.useRef(false);
   const skipAutoSearchRef = React.useRef(false);
   const mapItemsRef = React.useRef<Product[]>([]);
   const navWatchIdRef = React.useRef<number | null>(null);
@@ -285,6 +290,13 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
 
   useEffect(() => {
     let alive = true;
+    if (!hasAuthSession()) {
+      setVoiceFeedbackEnabled(false);
+      setVoiceDirectionsEnabled(false);
+      return () => {
+        alive = false;
+      };
+    }
     getUiPreferences()
       .then((prefs) => {
         if (!alive) return;
@@ -317,6 +329,18 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
   };
+
+  const parsePriceValue = (value: any) => {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const text = String(value).trim();
+    if (!text) return 0;
+    const normalized = text.replace(/[, ]+/g, '').replace(/[^\d.-]/g, '');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatKES = (value: any) => `KES ${parsePriceValue(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
   const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
     const R = 6371e3;
@@ -739,12 +763,12 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
       sellerId,
       name: detail?.name || result.name || 'Product',
       description: detail?.description || detail?.summary || '',
-      price: numberOrZero(detail?.current_price ?? detail?.price ?? result.price),
+      price: parsePriceValue(detail?.current_price ?? detail?.price ?? detail?.sale_price ?? result.price),
       category: detail?.category || detail?.category_id || 'general',
       mediaUrl,
       mediaType: (detail?.media_type as 'video' | 'image') || (detail?.media?.[0]?.media_type as 'video' | 'image') || 'image',
       tags: Array.isArray(detail?.tags) ? detail.tags : [],
-      stockLevel: numberOrZero(detail?.stock_level ?? detail?.stockLevel),
+      stockLevel: parsePriceValue(detail?.stock_level ?? detail?.stockLevel),
       stockStatus: detail?.stock_status || detail?.stockStatus,
       location,
       discountPrice: detail?.discount_price ?? detail?.discountPrice,
@@ -797,7 +821,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     return products.filter((p) => p.id);
   }, [loadSellerProfiles]);
 
-  const applySearchResponse = React.useCallback(async (response: SearchResponse, runId?: number) => {
+const applySearchResponse = React.useCallback(async (response: SearchResponse, runId?: number) => {
     if (runId !== undefined && runId !== searchRunRef.current) return;
     setSearchQueryId(response.query_id || null);
     setSearchIntent(response.intent || '');
@@ -807,6 +831,36 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
     if (runId !== undefined && runId !== searchRunRef.current) return;
     setSearchProducts(hydrated);
   }, [hydrateProductsFromResults]);
+
+  const normalizeShopProduct = React.useCallback((raw: any): Product | null => {
+    if (!raw) return null;
+    const id = raw.id || raw.product_id || raw.productId;
+    if (!id) return null;
+    const mediaUrl = raw.media_url || raw.mediaUrl || raw.image_url || raw.image || '';
+    const lat = raw.location?.lat ?? raw.lat;
+    const lng = raw.location?.lng ?? raw.lng;
+    const address = raw.location?.address ?? raw.address ?? '';
+    return {
+      id: String(id),
+      sellerId: String(raw.seller_id || raw.sellerId || ''),
+      productId: raw.product_id || raw.productId || String(id),
+      name: raw.name || raw.title || raw.product_name || 'Product',
+      description: raw.description || raw.summary || '',
+      price: parsePriceValue(raw.price ?? raw.current_price ?? raw.unit_price ?? raw.sale_price ?? raw.offer_price),
+      category: raw.category || raw.category_name || 'general',
+      mediaUrl,
+      mediaType: String(raw.media_type || raw.mediaType || '').toLowerCase() === 'video' ? 'video' : (mediaUrl ? 'image' : 'image'),
+      tags: Array.isArray(raw.tags) ? raw.tags : [],
+      stockLevel: parsePriceValue(raw.stock_level ?? raw.stockLevel ?? raw.stock ?? 0),
+      stockStatus: raw.stock_status || raw.stockStatus,
+      expiryDate: raw.expiry_date || raw.expiryDate,
+      isFeatured: raw.is_featured ?? raw.isFeatured,
+      discountPrice: raw.discount_price ?? raw.discountPrice,
+      location: Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+        ? { lat: Number(lat), lng: Number(lng), address }
+        : undefined,
+    };
+  }, []);
 
   const waitForMediaJob = React.useCallback(async (jobId: string) => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -822,38 +876,43 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   useEffect(() => {
     let ignore = false;
     const load = async () => {
-      try {
-        const [saved, recent, watchlist, alerts, favorites, trending, recs, locations] = await Promise.all([
-          listSavedSearches(),
-          listRecentSearches(),
-          listWatchlist(),
-          listSearchAlerts(),
-          listShopFavorites(),
-          searchTrending(),
-          searchRecommendations(),
-          listUserLocations().catch(() => [])
-        ]);
-        if (ignore) return;
-        setSavedSearches(saved);
-        setRecentSearches(recent);
-        setWatchlistItems(watchlist);
-        setSearchAlerts(alerts);
-        setFavoriteShopIds(favorites.map((item: any) => item.seller_id || item.id).filter(Boolean));
-        setTrendingQueries(trending);
-        setSavedLocations(locations || []);
-        const recProducts = await hydrateProductsFromResults(recs);
+      const authEnabled = hasAuthSession();
+      const [
+        savedRes,
+        recentRes,
+        watchlistRes,
+        alertsRes,
+        favoritesRes,
+        trendingRes,
+        recsRes,
+        locationsRes,
+      ] = await Promise.allSettled([
+        authEnabled ? listSavedSearches() : Promise.resolve([]),
+        authEnabled ? listRecentSearches() : Promise.resolve([]),
+        authEnabled ? listWatchlist() : Promise.resolve([]),
+        authEnabled ? listSearchAlerts() : Promise.resolve([]),
+        authEnabled ? listShopFavorites() : Promise.resolve([]),
+        searchTrending(),
+        searchRecommendations(),
+        authEnabled ? listUserLocations() : Promise.resolve([]),
+      ]);
+      if (ignore) return;
+      setSavedSearches(savedRes.status === 'fulfilled' ? savedRes.value : []);
+      setRecentSearches(recentRes.status === 'fulfilled' ? recentRes.value : []);
+      setWatchlistItems(watchlistRes.status === 'fulfilled' ? watchlistRes.value : []);
+      setSearchAlerts(alertsRes.status === 'fulfilled' ? alertsRes.value : []);
+      setFavoriteShopIds(
+        favoritesRes.status === 'fulfilled'
+          ? favoritesRes.value.map((item: any) => item.seller_id || item.id).filter(Boolean)
+          : []
+      );
+      setTrendingQueries(trendingRes.status === 'fulfilled' ? trendingRes.value : []);
+      setSavedLocations(locationsRes.status === 'fulfilled' ? locationsRes.value || [] : []);
+      if (recsRes.status === 'fulfilled') {
+        const recProducts = await hydrateProductsFromResults(recsRes.value);
         if (!ignore) setRecommendedProducts(recProducts);
-      } catch (err) {
-        if (!ignore) {
-          setSavedSearches([]);
-          setRecentSearches([]);
-          setWatchlistItems([]);
-          setSearchAlerts([]);
-          setFavoriteShopIds([]);
-          setTrendingQueries([]);
-          setSavedLocations([]);
-          setRecommendedProducts([]);
-        }
+      } else {
+        setRecommendedProducts([]);
       }
     };
     load();
@@ -861,6 +920,45 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
       ignore = true;
     };
   }, [hydrateProductsFromResults]);
+
+  useEffect(() => {
+    if (browseSeededRef.current) return;
+    if (typeof initialQuery === 'string' && initialQuery.trim()) return;
+    if (searchQuery.trim()) return;
+    if (searchLoading) return;
+    if (searchProducts.length > 0) return;
+    if (shopResults.length === 0) return;
+    let alive = true;
+    const loadBrowseProducts = async () => {
+      try {
+            const seedShops = shopResults.filter((shop) => shop.id || shop.seller_id);
+        const batches = await Promise.all(
+          seedShops.map(async (shop) => {
+            const sellerId = String(shop.id || shop.seller_id || '');
+            if (!sellerId) return [];
+            try {
+              return await getShopProducts(sellerId);
+            } catch {
+              return [];
+            }
+          })
+        );
+        const products = batches
+          .flat()
+          .map(normalizeShopProduct)
+          .filter((item): item is Product => Boolean(item?.id))
+            if (!alive || products.length === 0) return;
+            browseSeededRef.current = true;
+            setSearchProducts(products);
+      } catch {
+        if (!alive) return;
+      }
+    };
+    loadBrowseProducts();
+    return () => {
+      alive = false;
+    };
+  }, [initialQuery, normalizeShopProduct, searchLoading, searchProducts.length, searchQuery, shopResults]);
 
   const handleUseMyLocation = () => {
     if (isNearMeActive) {
@@ -1867,7 +1965,31 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
           lng: isNearMeActive ? userCoords?.lng : undefined,
           radiusKm: isNearMeActive ? maxDistance ?? undefined : undefined
         });
-        if (!ignore) setShopResults(shops);
+        if (!ignore) {
+          setShopResults(shops);
+          if (!searchQuery.trim() && searchProducts.length === 0 && !browseSeededRef.current) {
+            const seedShops = shops.filter((shop) => shop.id || shop.seller_id);
+            const batches = await Promise.all(
+              seedShops.map(async (shop) => {
+                const sellerId = String(shop.id || shop.seller_id || '');
+                if (!sellerId) return [];
+                try {
+                  return await getShopProducts(sellerId);
+                } catch {
+                  return [];
+                }
+              })
+            );
+            const products = batches
+              .flat()
+              .map(normalizeShopProduct)
+              .filter((item): item is Product => Boolean(item?.id))
+            if (!ignore && products.length > 0) {
+              browseSeededRef.current = true;
+              setSearchProducts(products);
+            }
+          }
+        }
       } catch {
         if (!ignore) setShopResults([]);
       }
@@ -1902,6 +2024,23 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
   }, [watchlistItems, hydrateProductsFromResults]);
 
   useEffect(() => {
+    let alive = true;
+    listCategories(100)
+      .then((items) => {
+        if (!alive) return;
+        setCatalogCategories(
+          Array.from(new Set(items.map((item) => item.name || item.path || '').filter(Boolean)))
+        );
+      })
+      .catch(() => {
+        if (alive) setCatalogCategories([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (Object.keys(sellerMeta).length === 0) return;
     const applyMeta = (items: Product[]) =>
       items.map((item) => {
@@ -1924,8 +2063,8 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
 
   const categories = useMemo(() => {
     const pool = [...searchProducts, ...recommendedProducts, ...watchlistProducts];
-    return Array.from(new Set(pool.map((p) => p.category).filter(Boolean)));
-  }, [searchProducts, recommendedProducts, watchlistProducts]);
+    return Array.from(new Set([...pool.map((p) => p.category).filter(Boolean), ...catalogCategories]));
+  }, [searchProducts, recommendedProducts, watchlistProducts, catalogCategories]);
 
   const watchlistById = useMemo(() => {
     const map = new Map<string, WatchlistItem>();
@@ -3354,8 +3493,8 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Shops</h3>
                 <span className="text-[10px] font-bold text-zinc-400">{filteredShops.length} Shops</span>
               </div>
-              <div className="grid grid-cols-1 gap-3">
-                {filteredShops.slice(0, 6).map((shop) => {
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                {filteredShops.slice(0, 12).map((shop) => {
                   const shopId = shop.id || shop.seller_id || '';
                   const shopLocation = normalizeLocation(shop.location);
                   const shopName = shop.name || 'Shop';
@@ -3429,7 +3568,7 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
             </div>
 
             {/* Results Grid */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4">
               {filteredProducts.map((product, i) => (
                 <motion.div
                   key={product.id}
@@ -3497,9 +3636,9 @@ export const Search: React.FC<SearchProps> = ({ onBack, onProductOpen, compariso
                     <p className="text-[10px] text-zinc-500 line-clamp-2 mb-2 flex-1">{product.description}</p>
                     <div className="flex items-center justify-between mt-auto">
                       <div className="flex flex-col">
-                        <span className="font-black text-indigo-600 text-sm">${product.price}</span>
+                        <span className="font-black text-indigo-600 text-sm">{formatKES(product.price)}</span>
                         {product.competitorPrice && (
-                          <span className="text-[9px] text-zinc-400 line-through">${product.competitorPrice}</span>
+                          <span className="text-[9px] text-zinc-400 line-through">{formatKES(product.competitorPrice)}</span>
                         )}
                       </div>
                       <button 

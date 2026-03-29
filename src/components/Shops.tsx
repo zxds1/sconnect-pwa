@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Search, Star, MapPin, ArrowRight, ArrowLeft, BadgeCheck } from 'lucide-react';
 import { searchShops, type ShopDirectoryEntry } from '../lib/shopDirectoryApi';
+import { listCategories } from '../lib/catalogApi';
 
 interface ShopsProps {
   onBack?: () => void;
@@ -19,6 +20,7 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
       || 'S';
   const [query, setQuery] = useState('');
   const [shops, setShops] = useState<ShopDirectoryEntry[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -45,6 +47,21 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
     };
   }, [query]);
 
+  useEffect(() => {
+    let alive = true;
+    listCategories(100)
+      .then((items) => {
+        if (!alive) return;
+        setCatalogCategories(Array.from(new Set(items.map((item) => item.name || item.path || '').filter(Boolean))));
+      })
+      .catch(() => {
+        if (alive) setCatalogCategories([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const shopCards = useMemo(() => {
     return shops.map((shop) => {
       const id = shop.seller_id || shop.id || '';
@@ -62,8 +79,8 @@ export const Shops: React.FC<ShopsProps> = ({ onBack, onShopClick }) => {
   }, [shops]);
 
   const availableCategories = useMemo(() => {
-    return Array.from(new Set(shopCards.map((shop) => shop.category).filter(Boolean)));
-  }, [shopCards]);
+    return Array.from(new Set([...shopCards.map((shop) => shop.category).filter(Boolean), ...catalogCategories]));
+  }, [shopCards, catalogCategories]);
 
   return (
     <div className="h-full bg-zinc-50 flex flex-col overflow-y-auto no-scrollbar">

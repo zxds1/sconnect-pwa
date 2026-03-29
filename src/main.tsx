@@ -113,6 +113,7 @@ const clearRuntimeCaches = async () => {
 
 const syncBuildVersion = async (): Promise<boolean> => {
   if (typeof window === 'undefined') return false;
+  if (isLocalRuntime) return false;
   try {
     const previousBuildId = localStorage.getItem(BUILD_ID_STORAGE_KEY);
     if (!previousBuildId) {
@@ -171,6 +172,11 @@ window.addEventListener('vite:preloadError', () => {
 const boot = async () => {
   const reloadingForFreshBuild = await syncBuildVersion();
   if (reloadingForFreshBuild) return;
+
+  if (isLocalRuntime) {
+    // Clear any stale service worker or cache state before the app mounts.
+    await Promise.allSettled([unregisterServiceWorkers(), clearRuntimeCaches()]);
+  }
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

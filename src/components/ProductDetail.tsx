@@ -103,6 +103,87 @@ const numberOrZero = (value: any) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const parsePriceValue = (value: any) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+  if (typeof value === 'string') {
+    const match = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+    if (match) {
+      const parsed = Number(match[0]);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+  }
+  return 0;
+};
+
+const formatKES = (value: any) => `KES ${parsePriceValue(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+const normalizeLabel = (value: any) => {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/\s+/g, ' ').trim();
+};
+
+const isPlaceholderSellerLabel = (value: string) => {
+  const normalized = normalizeLabel(value).toLowerCase();
+  if (!normalized) return true;
+  return new Set([
+    'seller',
+    'merchant',
+    'store',
+    'shop',
+    'seller profile',
+    'merchant profile',
+    'shop profile',
+    'publicly collected shop',
+    'publicly collected store',
+  ]).has(normalized);
+};
+
+const pickMeaningfulLabel = (...values: any[]) => {
+  for (const value of values) {
+    const label = normalizeLabel(value);
+    if (!label || isPlaceholderSellerLabel(label)) continue;
+    return label;
+  }
+  return '';
+};
+
+const formatCountLabel = (value: any, fallback: string) => {
+  if (value === null || value === undefined || value === '') return fallback;
+  const label = normalizeLabel(value);
+  if (!label) return fallback;
+  return label;
+};
+
+const deriveBrandFromUrl = (...values: any[]) => {
+  for (const value of values) {
+    const raw = normalizeLabel(value);
+    if (!raw) continue;
+    try {
+      const host = new URL(raw).hostname.replace(/^www\./i, '').toLowerCase();
+      if (!host) continue;
+      const parts = host.split('.').filter(Boolean);
+      if (parts.length === 0) continue;
+      const knownSecondLevelTlds = new Set(['co', 'com', 'org', 'net', 'go', 'ac']);
+      const brandIndex = parts.length > 2 && knownSecondLevelTlds.has(parts[parts.length - 2])
+        ? parts.length - 3
+        : parts.length - 2;
+      const candidate = parts[Math.max(0, brandIndex)] || parts[0];
+      const cleaned = candidate.replace(/[^a-z0-9-]/gi, '').replace(/[-_]+/g, ' ').trim();
+      if (!cleaned) continue;
+      return cleaned
+        .split(' ')
+        .filter(Boolean)
+        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(' ');
+    } catch {
+      continue;
+    }
+  }
+  return '';
+};
+
 const resolveMediaUrl = (media: any[]) => {
   if (!media?.length) return undefined;
   const item = media[0];
@@ -402,10 +483,77 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   const activeProduct = React.useMemo(() => ({ ...product, ...productDetail }), [product, productDetail]);
   const productId = activeProduct.id;
+  const displayPrice = React.useMemo(() => {
+    return parsePriceValue(
+      (activeProduct as any).current_price
+      ?? (activeProduct as any).price
+      ?? (activeProduct as any).unit_price
+      ?? (activeProduct as any).sale_price
+      ?? (activeProduct as any).offer_price
+    ) || 0;
+  }, [activeProduct]);
+  const displayDiscountPrice = React.useMemo(() => {
+    return parsePriceValue(
+      (activeProduct as any).discount_price
+      ?? (activeProduct as any).discountPrice
+      ?? (activeProduct as any).sale_price
+      ?? (activeProduct as any).offer_price
+    ) || 0;
+  }, [activeProduct]);
+  const priceLabel = displayPrice > 0 ? formatKES(displayPrice) : 'Price on request';
+  const previousPriceLabel = displayDiscountPrice > displayPrice ? formatKES(displayDiscountPrice) : '';
   const sellerId = (activeProduct as any).seller_id || activeProduct.sellerId || (productDetail as any).seller_id || product.sellerId;
   const sourceOrigin = String((activeProduct as any)?.sourceOrigin || (activeProduct as any)?.source_origin || (product as any)?.sourceOrigin || (product as any)?.source_origin || '').toLowerCase();
   const sourceLabel = (activeProduct as any)?.sourceLabel || (activeProduct as any)?.source_label || (product as any)?.sourceLabel || (product as any)?.source_label || '';
   const isPubliclyCollected = sourceOrigin === 'publicly_collected';
+  const rawSourceShopLabel = (() => {
+    const label = normalizeLabel(sourceLabel);
+    if (!label) return '';
+    return label.replace(/^publicly collected data from\s+/i, '').trim();
+  })();
+  const sellerUrlBrand = deriveBrandFromUrl(
+    sellerProfile?.shop_url,
+    sellerProfile?.website_url,
+    sellerProfile?.store_url,
+    sellerProfile?.external_url,
+    sellerProfile?.url,
+    (activeProduct as any)?.product_url,
+    (activeProduct as any)?.external_url,
+    (activeProduct as any)?.website_url,
+    (activeProduct as any)?.url,
+  );
+  const publicSourceShopLabel = pickMeaningfulLabel(
+    rawSourceShopLabel,
+    sellerUrlBrand,
+    (activeProduct as any)?.seller_name,
+    (activeProduct as any)?.sellerName,
+    (activeProduct as any)?.shop_name,
+    (activeProduct as any)?.shopName,
+    (activeProduct as any)?.merchant_name,
+    (activeProduct as any)?.merchantName,
+  );
+  const profileShopLabel = pickMeaningfulLabel(
+    sellerProfile?.shop_name,
+    sellerProfile?.display_name,
+    sellerProfile?.name,
+    sellerProfile?.market_name,
+  );
+  const marketplaceDisplayName = (isPubliclyCollected ? publicSourceShopLabel : profileShopLabel)
+    || publicSourceShopLabel
+    || profileShopLabel
+    || 'Shop';
+  const merchantProfileDisplayName = profileShopLabel || 'Merchant profile';
+  const sellerDisplaySubtitle = sellerProfile?.verified || sellerProfile?.isVerified
+    ? 'Verified merchant'
+    : publicSourceShopLabel
+      ? `Collected from ${publicSourceShopLabel}`
+      : isPubliclyCollected
+        ? 'Publicly collected shop'
+        : 'Merchant';
+  const sellerLocationLabel = sellerProfile?.market_name
+    || sellerProfile?.location?.address
+    || sellerProfile?.address
+    || '';
   const primaryMedia = resolveMediaUrl(media) || activeProduct.mediaUrl;
   const externalProductUrl = normalizeExternalUrl(
     (activeProduct as any).product_url
@@ -431,6 +579,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     ? deliveryDetails.payment_options.join(', ')
     : '';
   const sellerModeLabel = (sellerProfile?.seller_mode || sellerProfile?.sellerMode || '').toString();
+  const sellerRatingLabel = formatCountLabel(sellerReputation?.rating ?? sellerProfile?.rating, 'No rating yet');
+  const sellerFollowersLabel = formatCountLabel(sellerReputation?.followers ?? sellerProfile?.followers, 'No followers yet');
 
   const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
     const R = 6371;
@@ -545,12 +695,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         setError('Seller unavailable for this product.');
         return;
       }
-      await addCartItem({
-        product_id: productId,
-        seller_id: sellerId,
-        quantity,
-        unit_price: activeProduct.price,
-      });
+        await addCartItem({
+          product_id: productId,
+          seller_id: sellerId,
+          quantity,
+          unit_price: displayPrice,
+        });
       if (!hasSession) {
         onAddToBag?.(activeProduct);
         setError('Added to bag. Open your bag to checkout.');
@@ -569,12 +719,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         setError('Seller unavailable for this product.');
         return;
       }
-      await addCartItem({
-        product_id: productId,
-        seller_id: sellerId,
-        quantity,
-        unit_price: activeProduct.price,
-      });
+        await addCartItem({
+          product_id: productId,
+          seller_id: sellerId,
+          quantity,
+          unit_price: displayPrice,
+        });
       onAddToBag?.(activeProduct);
       void createAuditEvent({ action: 'add_to_cart', entity_type: 'product', entity_id: productId }).catch(() => {});
     } catch (err: any) {
@@ -667,8 +817,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     }
     try {
       if (!isWatched) {
-        const targetInput = window.prompt('Target price for alert (KES):', String(activeProduct.price));
-        const target = targetInput ? Number(targetInput) : activeProduct.price;
+        const targetInput = window.prompt('Target price for alert (KES):', String(displayPrice || 0));
+        const target = targetInput ? Number(targetInput) : displayPrice;
         await watchProduct(productId, { target_price: target });
         setIsWatched(true);
         setWatchTarget(target);
@@ -686,8 +836,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   const handleUpdateWatch = async () => {
     if (!isWatched) return;
-    const targetInput = window.prompt('Update target price (KES):', String(watchTarget ?? activeProduct.price));
-    const target = targetInput ? Number(targetInput) : watchTarget ?? activeProduct.price;
+    const targetInput = window.prompt('Update target price (KES):', String(watchTarget ?? displayPrice));
+    const target = targetInput ? Number(targetInput) : watchTarget ?? displayPrice;
     try {
       await updateWatch(productId, { target_price: target });
       setWatchTarget(target);
@@ -1014,6 +1164,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     let alive = true;
+    if (!getAuthItem('soko:auth_token')) {
+      setVoiceDirectionsEnabled(false);
+      return () => {
+        alive = false;
+      };
+    }
     getUiPreferences()
       .then((prefs) => {
         if (!alive) return;
@@ -1030,6 +1186,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     if (!showMapModal) return;
+    if (!getAuthItem('soko:auth_token')) return;
     let active = true;
     const hasCoords = (loc?: UserLocation | null) =>
       Boolean(loc && loc.lat !== undefined && loc.lng !== undefined && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)));
@@ -1640,18 +1797,21 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           </div>
         )}
 
-        <div className="aspect-square relative">
+        <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-zinc-100 via-white to-zinc-200 aspect-[4/3] lg:aspect-[21/9] lg:mx-auto lg:w-full lg:max-w-7xl lg:px-8">
           <img
             src={primaryMedia}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain object-center p-4 lg:p-8"
             alt={activeProduct.name}
             referrerPolicy="no-referrer"
             ref={imageRef}
           />
           <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-xl shadow-lg border border-white/20 flex flex-col items-end">
-            <span className="text-lg font-black text-zinc-900">KES {activeProduct.price}</span>
+            <span className="text-lg font-black text-zinc-900">{priceLabel}</span>
+            {previousPriceLabel && (
+              <span className="text-[10px] text-zinc-400 line-through">{previousPriceLabel}</span>
+            )}
             {benchmarkPrice > 0 && (
-              <span className="text-[10px] text-zinc-400 line-through">Market: KES {benchmarkPrice}</span>
+              <span className="text-[10px] text-zinc-400">Market: {formatKES(benchmarkPrice)}</span>
             )}
           </div>
 
@@ -1662,11 +1822,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           )}
         </div>
 
-        <div className="p-6">
+        <div className="mx-auto w-full max-w-7xl px-4 py-6 lg:px-8">
           <div className="flex justify-between items-start mb-4">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-black text-zinc-900 mb-1">{activeProduct.name}</h1>
+                <h1 className="text-2xl lg:text-4xl font-black text-zinc-900 mb-1 tracking-tight">{activeProduct.name}</h1>
                 {isPubliclyCollected && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">
                     <ShieldCheck className="w-3 h-3" />
@@ -1674,7 +1834,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase tracking-tight text-zinc-500">
                   {activeProduct.category}
                 </span>
@@ -1685,7 +1845,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 </div>
               </div>
             </div>
-            <button className="p-3 bg-zinc-50 rounded-2xl text-zinc-400 hover:text-red-500 transition-colors">
+            <button className="p-3 bg-zinc-50 rounded-2xl text-zinc-400 hover:text-red-500 transition-colors lg:shrink-0">
               <Heart className="w-6 h-6" />
             </button>
           </div>
@@ -1699,11 +1859,25 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </div>
           )}
 
-          <p className="text-zinc-500 text-sm leading-relaxed mb-6">
-            {activeProduct.description}
-          </p>
-
-          {benchmarkPrice > 0 && (
+          <div className="mb-6 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+            <div className="rounded-3xl border border-zinc-100 bg-white px-4 py-4 shadow-sm lg:min-h-[180px]">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Current Price</p>
+              <p className="mt-2 text-3xl font-black text-zinc-900">{priceLabel}</p>
+              {previousPriceLabel && (
+                <p className="mt-1 text-xs font-bold text-zinc-400 line-through">{previousPriceLabel}</p>
+              )}
+              {benchmarkPrice > 0 && (
+                <p className="mt-2 text-[11px] font-bold text-zinc-500">Market benchmark: {formatKES(benchmarkPrice)}</p>
+              )}
+            </div>
+            <div className="rounded-3xl border border-zinc-100 bg-zinc-50 px-4 py-4 lg:min-h-[180px]">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Listing Notes</p>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+                {activeProduct.description}
+              </p>
+            </div>
+          </div>
+          {benchmarkPrice > 0 && displayPrice > 0 && (
             <div className="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-3">
               <div className="p-2 bg-emerald-500 rounded-xl">
                 <TrendingDown className="w-5 h-5 text-white" />
@@ -1711,13 +1885,13 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               <div>
                 <p className="text-xs font-black text-emerald-900 uppercase tracking-tight">Price Fairness Indicator</p>
                 <p className="text-[10px] text-emerald-600 font-bold">
-                  This price is {Math.round(((benchmarkPrice - activeProduct.price) / benchmarkPrice) * 100)}% lower than nearby shops.
+                  This price is {Math.round(((benchmarkPrice - displayPrice) / benchmarkPrice) * 100)}% lower than nearby shops.
                 </p>
               </div>
             </div>
           )}
 
-          {benchmarkPrice > 0 && activeProduct.price < benchmarkPrice * anomalyThresholdRatio && (
+          {benchmarkPrice > 0 && displayPrice > 0 && displayPrice < benchmarkPrice * anomalyThresholdRatio && (
             <div className="mb-6 p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
               <div className="p-2 bg-amber-500 rounded-xl">
                 <AlertTriangle className="w-5 h-5 text-white" />
@@ -1799,83 +1973,122 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </div>
           )}
 
-          <div className="mb-8 p-4 bg-zinc-50 rounded-2xl flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Quantity</p>
-              <p className="text-xs font-bold text-zinc-900">Select amount</p>
+          <div className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+            <div className="p-5 bg-zinc-50 rounded-3xl border border-zinc-100 lg:sticky lg:top-6 lg:self-start">
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div className="flex items-center gap-4">
+                  <div className="relative shrink-0">
+                    {sellerProfile?.avatar || sellerProfile?.logo ? (
+                      <img src={sellerProfile?.avatar || sellerProfile?.logo} className="w-16 h-16 rounded-3xl border border-white shadow-sm object-cover bg-white" alt="seller" />
+                    ) : (
+                      <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-white bg-zinc-900 text-sm font-black text-white shadow-sm">
+                        {initials(marketplaceDisplayName)}
+                      </div>
+                    )}
+                    {(sellerProfile?.verified || sellerProfile?.isVerified) && (
+                      <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-1.5 rounded-full border-2 border-white shadow">
+                        <ShieldCheck className="w-3 h-3" />
+                      </div>
+                    )}
+                  </div>
+                <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-400">Sold by</p>
+                    <p className="mt-1 text-lg font-black text-zinc-900 truncate">{marketplaceDisplayName}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 border border-zinc-200">
+                        {sellerDisplaySubtitle}
+                      </span>
+                      {sellerModeLabel && (
+                        <span className="inline-flex items-center rounded-full bg-zinc-900 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+                          {sellerModeLabel.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                    </div>
+                    {isPubliclyCollected && merchantProfileDisplayName && merchantProfileDisplayName !== marketplaceDisplayName && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 border border-zinc-200">
+                          Merchant profile
+                        </span>
+                        <span className="text-xs font-bold text-zinc-900 truncate">{merchantProfileDisplayName}</span>
+                      </div>
+                    )}
+                    {sellerLocationLabel && (
+                      <p className="mt-2 text-xs font-medium text-zinc-500">{sellerLocationLabel}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end text-right">
+                  <div className="flex items-center gap-1 text-amber-500 mb-1">
+                    <Star className="w-3 h-3 fill-amber-500" />
+                    <span className="text-xs font-bold">{sellerRatingLabel}</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-400 font-bold">{sellerFollowersLabel} followers</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-2xl bg-white border border-zinc-200 px-3 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">Store</p>
+                  <p className="mt-1 text-xs font-bold text-zinc-900 truncate">{marketplaceDisplayName}</p>
+                  <p className="mt-1 text-[10px] font-medium text-zinc-500 truncate">{sellerDisplaySubtitle}</p>
+                </div>
+                <div className="rounded-2xl bg-white border border-zinc-200 px-3 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">Rating</p>
+                  <p className="mt-1 text-xs font-bold text-zinc-900">{sellerRatingLabel}</p>
+                </div>
+                <div className="rounded-2xl bg-white border border-zinc-200 px-3 py-3">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">Followers</p>
+                  <p className="mt-1 text-xs font-bold text-zinc-900">{sellerFollowersLabel}</p>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-4 bg-white p-2 rounded-xl border border-zinc-200">
-              <button
-                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                className="p-1 hover:bg-zinc-100 rounded-lg transition-colors text-zinc-400"
-              >
-                <Minus className="w-4 h-4" />
-              </button>
-              <span className="text-sm font-black text-zinc-900 min-w-[20px] text-center">{quantity}</span>
-              <button
-                onClick={() => setQuantity(Math.min(activeProduct.stockLevel || quantity + 1, quantity + 1))}
-                className="p-1 hover:bg-zinc-100 rounded-lg transition-colors text-zinc-400"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+
+            <div className="p-5 bg-zinc-50 rounded-3xl border border-zinc-100">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-400 mb-3">Quantity</p>
+              <p className="text-sm font-bold text-zinc-900 mb-4">Choose how many you want</p>
+              <div className="flex items-center justify-between gap-4 bg-white p-2.5 rounded-2xl border border-zinc-200">
+                <button
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  className="p-2 hover:bg-zinc-100 rounded-xl transition-colors text-zinc-400"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="text-base font-black text-zinc-900 min-w-[28px] text-center">{quantity}</span>
+                <button
+                  onClick={() => setQuantity(Math.min(activeProduct.stockLevel || quantity + 1, quantity + 1))}
+                  className="p-2 hover:bg-zinc-100 rounded-xl transition-colors text-zinc-400"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="mt-3 text-[10px] text-zinc-400 font-medium">Stock left: {activeProduct.stockLevel || '—'}</p>
             </div>
           </div>
 
-          <div className="p-6 bg-zinc-50 rounded-3xl mb-8">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  {sellerProfile?.avatar || sellerProfile?.logo ? (
-                    <img src={sellerProfile?.avatar || sellerProfile?.logo} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover" alt="seller" />
-                  ) : (
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-white bg-zinc-900 text-sm font-black text-white shadow-sm">
-                      {initials(sellerProfile?.name || sellerProfile?.display_name || 'Seller')}
-                    </div>
-                  )}
-                  {(sellerProfile?.verified || sellerProfile?.isVerified) && (
-                    <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-1 rounded-full border-2 border-white">
-                      <ShieldCheck className="w-3 h-3" />
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-zinc-900">{sellerProfile?.name || sellerProfile?.display_name || 'Seller'}</p>
-                  <p className="text-[10px] text-zinc-400 font-medium uppercase tracking-tighter">{sellerProfile?.verified ? 'Verified Merchant' : 'Merchant'}</p>
-                </div>
-              </div>
-              <div className="flex flex-col items-end">
-                <div className="flex items-center gap-1 text-amber-500 mb-1">
-                  <Star className="w-3 h-3 fill-amber-500" />
-                  <span className="text-xs font-bold">{sellerReputation?.rating || sellerProfile?.rating || '--'}</span>
-                </div>
-                <p className="text-[10px] text-zinc-400 font-bold">{sellerReputation?.followers || sellerProfile?.followers || '—'} Followers</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2.5 lg:gap-3">
               <button
                 onClick={() => onChatOpen(activeProduct)}
-                className="flex items-center justify-center gap-2 py-3 bg-white border border-zinc-200 rounded-2xl text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-colors"
+                className="flex items-center justify-center gap-2 py-2.5 bg-white border border-zinc-200 rounded-2xl text-[10px] font-bold text-zinc-600 hover:bg-zinc-100 transition-colors"
               >
-                <MessageCircle className="w-4 h-4" /> Chat
+                <MessageCircle className="w-3.5 h-3.5" /> Chat
               </button>
               <button
                 onClick={handleWhatsApp}
-                className="flex items-center justify-center gap-2 py-3 bg-emerald-500 text-white rounded-2xl text-xs font-bold hover:bg-emerald-600 transition-colors"
+                className="flex items-center justify-center gap-2 py-2.5 bg-emerald-500 text-white rounded-2xl text-[10px] font-bold hover:bg-emerald-600 transition-colors"
               >
-                <Phone className="w-4 h-4" /> WhatsApp
+                <Phone className="w-3.5 h-3.5" /> WhatsApp
               </button>
               <button
                 onClick={handleCallSeller}
-                className="flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-bold hover:bg-indigo-700 transition-colors"
+                className="flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white rounded-2xl text-[10px] font-bold hover:bg-indigo-700 transition-colors"
               >
-                <Phone className="w-4 h-4" /> Call
+                <Phone className="w-3.5 h-3.5" /> Call
               </button>
             </div>
             {onOpenSupportChat && (
               <button
                 onClick={onOpenSupportChat}
-                className="mt-3 w-full py-3 bg-[#1976D2] text-white rounded-2xl text-xs font-bold"
+                className="mt-3 w-full py-2.5 bg-[#1976D2] text-white rounded-2xl text-[10px] font-bold"
               >
                 Duka Support
               </button>
@@ -1922,8 +2135,6 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 )}
               </div>
             )}
-          </div>
-
           <div className="space-y-6 mb-8">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black uppercase tracking-widest text-zinc-400">Customer Reviews</h3>

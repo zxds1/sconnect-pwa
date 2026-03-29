@@ -7,6 +7,30 @@
     <link rel="apple-touch-icon" href="/logo.jpg" />
     <meta name="theme-color" content="#0b0b0d" />
     <title>Sconnect</title>
+    <script>
+      (function () {
+        var isLocalHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        if (!isLocalHost) return;
+        try {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+              registrations.forEach(function (registration) {
+                registration.unregister();
+              });
+            });
+          }
+        } catch (error) {}
+        try {
+          if ('caches' in window) {
+            caches.keys().then(function (keys) {
+              keys.forEach(function (key) {
+                caches.delete(key);
+              });
+            });
+          }
+        } catch (error) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app-splash" aria-hidden="true">

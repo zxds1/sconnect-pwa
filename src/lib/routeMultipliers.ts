@@ -1,4 +1,5 @@
 import { apiFetch } from './apiClient';
+import { getAuthItem, hasAuthSession } from './authStorage';
 
 export type RouteProfile = 'driving' | 'walking' | 'cycling' | 'motorbike' | 'scooter' | 'tuktuk';
 
@@ -49,6 +50,10 @@ const mergeConfig = (base: RouteMultipliersConfig, override?: RouteMultipliersCo
 });
 
 export const loadRouteMultipliers = async (): Promise<RouteMultipliersConfig> => {
+  const role = (getAuthItem('soko:role') || '').toLowerCase();
+  if (!hasAuthSession() || (role !== 'admin' && role !== 'super_admin')) {
+    return DEFAULT_CONFIG;
+  }
   try {
     const configResp = await apiFetch<{ config_key?: string; value?: RouteMultipliersConfig }>(`/v1/ops/configs/${OPS_CONFIG_KEY}`);
     if (configResp?.value) {

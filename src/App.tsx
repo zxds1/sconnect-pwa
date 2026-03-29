@@ -327,6 +327,8 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     const loadSessionRole = async () => {
+      const hasToken = Boolean(getAuthItem('soko:auth_token'));
+      if (!hasToken) return;
       try {
         const session = await getSessionInfo();
         const role = String(session?.role || '').toLowerCase();

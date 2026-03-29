@@ -56,7 +56,7 @@ import { getCompareList } from '../lib/compareApi';
 import { getComparisonPreferences } from '../lib/settingsApi';
 import { getRewardsBalance, getRewardStreaks, type RewardsBalance, type RewardsStreak } from '../lib/rewardsApi';
 import { listNotifications, type NotificationListResponse } from '../lib/notificationsApi';
-import { getAccountLabel, getAuthItem } from '../lib/authStorage';
+import { getAccountLabel, getAuthItem, hasAuthSession } from '../lib/authStorage';
 
 type AssistantAction = {
   label: string;
@@ -298,6 +298,7 @@ export const Assistant: React.FC<AssistantProps> = ({
 
   useEffect(() => {
     let alive = true;
+    if (!hasAuthSession()) return;
     const loadComparisonPrefs = async () => {
       try {
         const prefs = await getComparisonPreferences();
@@ -2154,6 +2155,7 @@ export const Assistant: React.FC<AssistantProps> = ({
 
   useEffect(() => {
     if (isSellerAccount !== false) return;
+    if (!hasAuthSession()) return;
     let alive = true;
     const loadBuyerSignals = async () => {
       try {

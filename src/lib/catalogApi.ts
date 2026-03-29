@@ -25,6 +25,15 @@ export type ProductCreate = {
   tags?: string[];
 };
 
+export type CatalogCategory = {
+  key?: string;
+  name: string;
+  path?: string;
+  parent_key?: string;
+  count?: number;
+  source_name?: string;
+};
+
 export const getProduct = async (id: string): Promise<any> => apiFetch(`/v1/products/${id}`);
 
 export const createProduct = async (payload: ProductCreate): Promise<any> =>
@@ -38,6 +47,9 @@ const unwrapList = <T>(data: any): T[] => {
   if (data?.items && Array.isArray(data.items)) return data.items;
   return [];
 };
+
+export const listCategories = async (limit = 50): Promise<CatalogCategory[]> =>
+  unwrapList(await apiFetch(`/v1/categories${limit ? `?limit=${limit}` : ''}`));
 
 export const listProductMedia = async (id: string): Promise<ProductMedia[]> =>
   unwrapList(await apiFetch(`/v1/products/${id}/media`));

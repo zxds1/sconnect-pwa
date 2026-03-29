@@ -72,3 +72,5 @@ export const getAccountLabel = () => {
   if (username) return username;
   return '';
 };
+
+export const hasAuthSession = () => Boolean(getAuthItem('soko:auth_token'));

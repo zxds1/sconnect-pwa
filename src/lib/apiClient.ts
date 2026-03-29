@@ -91,14 +91,32 @@ const getBaseUrl = () => {
   const configured = getStored('soko:api_base_url') ?? getEnv('VITE_API_BASE_URL') ?? '';
   return normalizeBaseUrl(configured);
 };
-const getGuestTenantId = () => getEnv('VITE_GUEST_TENANT_ID') ?? getEnv('VITE_TENANT_ID') ?? '';
-const getTenantId = (opts?: { token?: string; visitorId?: string }) => {
+const getGuestTenantId = () => getEnv('VITE_GUEST_TENANT_ID') ?? getEnv('VITE_TENANT_ID') ?? 'tenant_001';
+const isPublicBrowsePath = (path: string) => {
+  const pathOnly = path.split('?')[0];
+  return /^\/v1\/(?:search(?:\/|$)|shops(?:\/|$)|categories(?:\/|$)|compare(?:\/|$)|intelligence(?:\/|$)|paths(?:\/|$)|navigation(?:\/|$)|feed(?:\/|$)|posts(?:\/|$)|live(?:\/|$)|following(?:\/|$))/.test(pathOnly);
+};
+const isGuestAccessiblePath = (path: string) => {
+  const pathOnly = path.split('?')[0];
+  return /^\/v1\/(?:search(?:\/|$)|shops(?:\/|$)|categories(?:\/|$)|intelligence(?:\/|$)|locations(?:\/|$)|compare(?:\/|$)|paths(?:\/|$)|navigation(?:\/|$)|feed(?:\/|$)|posts(?:\/|$)|live(?:\/|$)|following(?:\/|$))/.test(pathOnly);
+};
+
+const isPublicReadPath = (path: string, method: string) => {
+  if (method !== 'GET') return false;
+  const pathOnly = path.split('?')[0];
+  return /^\/v1\/products\/[^/]+(?:\/(?:media|price-history|benchmark|good-deal|reviews|questions))?$/.test(pathOnly);
+};
+
+const getTenantId = (opts?: { token?: string; visitorId?: string; allowGuestFallback?: boolean; forceGuestTenant?: boolean }) => {
+  if (opts?.forceGuestTenant) return getGuestTenantId() || undefined;
   const explicit = getAuthItem('soko:tenant_id') ?? getEnv('VITE_TENANT_ID');
   if (explicit) return explicit;
   const token = opts?.token ?? getAuthToken();
-  if (token) return undefined;
+  if (token) {
+    return opts?.allowGuestFallback ? getGuestTenantId() || undefined : undefined;
+  }
   const visitorId = opts?.visitorId ?? getVisitorId();
-  if (visitorId) return getGuestTenantId();
+  if (visitorId) return getGuestTenantId() || undefined;
   return undefined;
 };
 const getUserId = () => getAuthItem('soko:user_id') ?? getEnv('VITE_USER_ID') ?? '';
@@ -133,7 +151,10 @@ const isAuthBootstrapPath = (path: string) => {
   return /^\/v1\/auth\/(?:login|register|password\/reset\/request|password\/reset\/confirm)(?:\/|$)/.test(pathOnly);
 };
 
-const buildHeaders = (extra?: HeadersInit, opts?: { suppressUserContext?: boolean }): HeadersInit => {
+const buildHeaders = (
+  extra?: HeadersInit,
+  opts?: { suppressUserContext?: boolean; tenantId?: string; visitorId?: string; guestRoute?: boolean; forceGuestTenant?: boolean }
+): HeadersInit => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -142,15 +163,15 @@ const buildHeaders = (extra?: HeadersInit, opts?: { suppressUserContext?: boolea
   const token = getAuthToken();
   const role = getRole();
   const correlationId = getCorrelationId();
-  const visitorId = !token && !opts?.suppressUserContext ? getVisitorId() : undefined;
-  const tenantId = getTenantId({ token, visitorId });
+  const visitorId = opts?.visitorId ?? (!token && !opts?.suppressUserContext ? getVisitorId() : undefined);
+  const tenantId = opts?.tenantId ?? getTenantId({ token, visitorId, forceGuestTenant: opts?.forceGuestTenant });
 
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
-  if (!opts?.suppressUserContext && userId) headers['X-User-Id'] = userId;
+  if (!opts?.suppressUserContext && !opts?.guestRoute && userId) headers['X-User-Id'] = userId;
   if (visitorId) headers['X-Visitor-Id'] = visitorId;
   if (correlationId) headers['X-Correlation-Id'] = correlationId;
-  if (!opts?.suppressUserContext && token) headers['Authorization'] = `Bearer ${token}`;
-  if (!opts?.suppressUserContext && role) headers['X-Role'] = role;
+  if (!opts?.suppressUserContext && !opts?.guestRoute && token) headers['Authorization'] = `Bearer ${token}`;
+  if (!opts?.suppressUserContext && !opts?.guestRoute && role) headers['X-Role'] = role;
   return {
     ...headers,
     ...(extra ?? {}),
@@ -280,15 +301,19 @@ const maybeHandleExpiredSession = (requestHeaders: HeadersInit, res: Response, e
 export const apiFetch = async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
   const baseUrl = getBaseUrl();
   const suppressUserContext = isAuthBootstrapPath(path);
+  const guestAccessible = isGuestAccessiblePath(path);
+  const publicBrowse = isPublicBrowsePath(path);
+  const method = (options.method || 'GET').toUpperCase();
+  const publicRead = isPublicReadPath(path, method);
+  const publicTenant = publicBrowse || publicRead;
   const token = getAuthToken();
-  const visitorId = !token && !suppressUserContext ? getVisitorId() : undefined;
-  const tenantId = getTenantId({ token, visitorId });
+  const visitorId = !suppressUserContext && (guestAccessible || publicRead || !token) ? getVisitorId() : undefined;
+  const tenantId = suppressUserContext ? undefined : getTenantId({ token, visitorId, allowGuestFallback: guestAccessible || publicRead, forceGuestTenant: publicTenant });
   if (!tenantId && !suppressUserContext) {
     throw new Error('Username is required. Please enter your username.');
   }
 
-  const method = (options.method || 'GET').toUpperCase();
-  const requestHeaders = buildHeaders(options.headers, { suppressUserContext });
+  const requestHeaders = buildHeaders(options.headers, { suppressUserContext, tenantId, visitorId, guestRoute: publicTenant || (guestAccessible && !token), forceGuestTenant: publicTenant });
   const cachePolicy = method === 'GET' ? getCachePolicy(path) : null;
   const locationConsent = getHeaderValue(requestHeaders, 'X-Location-Consent') ?? '';
   const cacheKey = buildApiCacheKey({
@@ -342,13 +367,18 @@ export const apiFetch = async <T = any>(path: string, options: RequestInit = {})
 export const apiFetchRaw = async (path: string, options: RequestInit = {}): Promise<Response> => {
   const baseUrl = getBaseUrl();
   const suppressUserContext = isAuthBootstrapPath(path);
+  const guestAccessible = isGuestAccessiblePath(path);
+  const publicBrowse = isPublicBrowsePath(path);
+  const method = (options.method || 'GET').toUpperCase();
+  const publicRead = isPublicReadPath(path, method);
+  const publicTenant = publicBrowse || publicRead;
   const token = getAuthToken();
-  const visitorId = !token && !suppressUserContext ? getVisitorId() : undefined;
-  const tenantId = getTenantId({ token, visitorId });
+  const visitorId = !suppressUserContext && (guestAccessible || publicRead || !token) ? getVisitorId() : undefined;
+  const tenantId = suppressUserContext ? undefined : getTenantId({ token, visitorId, allowGuestFallback: guestAccessible || publicRead, forceGuestTenant: publicTenant });
   if (!tenantId && !suppressUserContext) {
     throw new Error('Username is required. Please enter your username.');
   }
-  const requestHeaders = buildHeaders(options.headers, { suppressUserContext });
+  const requestHeaders = buildHeaders(options.headers, { suppressUserContext, tenantId, visitorId, guestRoute: publicTenant || (guestAccessible && !token), forceGuestTenant: publicTenant });
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: requestHeaders,

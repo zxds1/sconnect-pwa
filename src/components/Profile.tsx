@@ -84,6 +84,18 @@ const normalizeAccountName = (value?: string) => {
   return trimmed;
 };
 
+const parsePriceValue = (value: any) => {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+  const normalized = text.replace(/[, ]+/g, '').replace(/[^\d.-]/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatKES = (value: any) => `KES ${parsePriceValue(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
 const normalizeShopProduct = (raw: any): Product | null => {
   if (!raw) return null;
   const id = raw.id || raw.product_id || raw.productId;
@@ -98,12 +110,12 @@ const normalizeShopProduct = (raw: any): Product | null => {
     productId: raw.product_id || raw.productId || String(id),
     name: raw.name || raw.title || raw.product_name || 'Product',
     description: raw.description || raw.summary || '',
-    price: Number(raw.price ?? raw.current_price ?? raw.unit_price ?? 0),
+    price: parsePriceValue(raw.price ?? raw.current_price ?? raw.unit_price ?? raw.sale_price ?? raw.offer_price),
     category: raw.category || raw.category_name || 'general',
     mediaUrl,
     mediaType: String(raw.media_type || raw.mediaType || '').toLowerCase() === 'video' ? 'video' : guessMediaType(mediaUrl),
     tags: Array.isArray(raw.tags) ? raw.tags : [],
-    stockLevel: Number(raw.stock_level ?? raw.stockLevel ?? raw.stock ?? 0),
+    stockLevel: parsePriceValue(raw.stock_level ?? raw.stockLevel ?? raw.stock ?? 0),
     stockStatus: raw.stock_status || raw.stockStatus,
     expiryDate: raw.expiry_date || raw.expiryDate,
     isFeatured: raw.is_featured ?? raw.isFeatured,
@@ -1255,7 +1267,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
               <div className="bg-white p-4 rounded-2xl border border-zinc-100 shadow-sm">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">
                   {activeTab === 'intelligence' ? 'Total Reach' : 'Merchant Rating'}
@@ -1355,7 +1367,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
               <span className="text-[10px] font-bold text-zinc-400">{sellerProducts.length} Items</span>
             </div>
 
-            <div className="grid grid-cols-1 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
               {sellerProducts.length > 0 ? (
                 sellerProducts.map((product) => (
                   <motion.div
@@ -1372,7 +1384,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                         <img src={product.mediaUrl} className="w-full h-full object-cover" alt={product.name} />
                       )}
                       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg shadow-sm">
-                        <span className="text-xs font-black text-zinc-900">KES {product.price}</span>
+                        <span className="text-xs font-black text-zinc-900">{formatKES(product.price)}</span>
                       </div>
                       {product.stockLevel < 10 && (
                         <div className="absolute top-3 left-3 bg-red-500 text-white px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter">
@@ -1461,9 +1473,9 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
             )}
           </div>
         ) : activeTab === 'likes' ? (
-          <div className="grid grid-cols-2 gap-3 p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3 p-4">
             {likedProducts.length === 0 && (
-              <div className="col-span-2 p-6 bg-zinc-50 rounded-2xl text-center text-[10px] font-bold text-zinc-500">
+              <div className="col-span-2 sm:col-span-3 lg:col-span-4 2xl:col-span-5 p-6 bg-zinc-50 rounded-2xl text-center text-[10px] font-bold text-zinc-500">
                 No liked products yet.
               </div>
             )}
@@ -1478,7 +1490,7 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                 </div>
                 <div className="p-3">
                   <p className="text-xs font-bold text-zinc-900 line-clamp-1">{product.name}</p>
-                  <p className="text-[10px] text-zinc-400">KES {product.price}</p>
+                  <p className="text-[10px] text-zinc-400">{formatKES(product.price)}</p>
                 </div>
               </div>
             ))}
@@ -1543,9 +1555,9 @@ export const Profile: React.FC<ProfileProps> = ({ onBack, onSettingsOpen, onRequ
                 </button>
               </div>
             )}
-            <div className="grid grid-cols-3 gap-0.5">
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6 gap-1">
               {posts.length === 0 && (
-                <div className="col-span-3 p-6 bg-zinc-50 rounded-2xl text-center text-[10px] font-bold text-zinc-500">
+                <div className="col-span-3 sm:col-span-4 lg:col-span-5 2xl:col-span-6 p-6 bg-zinc-50 rounded-2xl text-center text-[10px] font-bold text-zinc-500">
                   No posts yet.
                 </div>
               )}
