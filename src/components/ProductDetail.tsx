@@ -234,6 +234,11 @@ const toMapboxProfile = (profile: RouteProfile) => {
   return 'driving-traffic';
 };
 
+const DEFAULT_PRICING_WARNING_CONFIG = {
+  threshold_pct: 40,
+  message: 'This price is significantly below market average. Verify seller and product authenticity.',
+};
+
 export const ProductDetail: React.FC<ProductDetailProps> = ({
   product,
   onClose,
@@ -443,14 +448,21 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   React.useEffect(() => {
     let active = true;
+    const hasAuthSession = Boolean(getAuthItem('soko:auth_token'));
+    if (!hasAuthSession) {
+      setPricingWarningConfig(DEFAULT_PRICING_WARNING_CONFIG);
+      return () => {
+        active = false;
+      };
+    }
     getOpsConfig('pricing.anomaly_warning')
       .then((resp) => {
         if (!active) return;
-        setPricingWarningConfig((resp as any)?.value ?? null);
+        setPricingWarningConfig((resp as any)?.value ?? DEFAULT_PRICING_WARNING_CONFIG);
       })
       .catch(() => {
         if (!active) return;
-        setPricingWarningConfig(null);
+        setPricingWarningConfig(DEFAULT_PRICING_WARNING_CONFIG);
       });
     return () => {
       active = false;
