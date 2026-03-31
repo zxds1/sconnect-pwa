@@ -1,6 +1,6 @@
 # SConnect PWA
 
-This repository contains the customer-facing PWA plus a separate admin panel.
+SConnect is a software system with a customer-facing web application and a separate admin panel. This repository contains the PWA side of that system.
 
 ## Apps in this repo
 
