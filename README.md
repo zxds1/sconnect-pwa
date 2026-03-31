@@ -1,42 +1,74 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# SConnect PWA
 
-# Run and deploy your AI Studio app
+This repository contains the customer-facing PWA plus a separate admin panel.
 
-This contains everything you need to run your app locally.
+## Apps in this repo
 
-View your app in AI Studio: https://ai.studio/apps/1795b079-8993-4fc6-a5b4-88a75b375e8a
+- Root app: the main SConnect web experience for customers and sellers.
+- `admin-panel/`: a standalone Vite app for admin and operations workflows.
 
-## Run Locally
+## Main PWA
 
-**Prerequisites:** Node.js
+### Scripts
 
-1. Install dependencies: `npm install`
-2. Create `.env.local` (or copy `PWA/.env.example`) and set `VITE_API_BASE_URL` plus any optional auth fields.
-3. Run the app: `npm run dev`
+From `PWA/`:
 
-For guest/public flows in the local stack, set `VITE_GUEST_TENANT_ID=tenant_001` unless your backend uses a different seed tenant.
+```bash
+npm install
+npm run dev
+npm run build
+npm run preview
+npm run lint
+```
 
-## Netlify Deployment
-1. Connect the repository in Netlify and select the `PWA` directory as the base.
-2. Build command: `npm run build`
-3. Publish directory: `dist`
-4. Set environment variables in Netlify: `VITE_API_BASE_URL` (required), `VITE_TENANT_ID` (optional), `VITE_USER_ID` (optional), `VITE_AUTH_TOKEN` (optional), `VITE_ROLE` (optional).
+### Environment
 
-The Netlify configuration file is already provided at `PWA/netlify.toml`.
+Create `PWA/.env.local` from `PWA/.env.example` and set:
 
-## Local Docker (PWA only)
+- `VITE_API_BASE_URL` required, usually your Kong or API gateway URL.
+- `VITE_GUEST_TENANT_ID` for guest and public flows in local development.
+- `VITE_TENANT_ID`, `VITE_USER_ID`, `VITE_AUTH_TOKEN`, and `VITE_ROLE` for optional session overrides.
 
-This runs only the Vite PWA container and connects to the backend gateway already running on the host (`http://localhost:8000`).
+For the local backend stack, `VITE_API_BASE_URL=http://localhost:8000` and `VITE_GUEST_TENANT_ID=tenant_001` are the usual defaults.
 
-1. From `PWA/`, ensure `.env.docker.local` exists (defaults are already provided).
-2. Start container: `docker compose -f docker-compose.local.yml up -d --build`
-3. Open app: `http://localhost:3000`
-4. Check health: `docker compose -f docker-compose.local.yml ps`
-5. Tail logs: `docker compose -f docker-compose.local.yml logs -f pwa`
+### Local Docker
 
-Notes:
-- Browser API calls use `VITE_API_BASE_URL`; for your full backend stack this should be `http://localhost:8000`.
-- Guest/public routes in the local stack expect a tenant header too; the checked-in local env uses `VITE_GUEST_TENANT_ID=tenant_001`.
-- If you expose Kong on a different port, update `VITE_API_BASE_URL` in `.env.docker.local`.
+Run only the PWA container and connect it to a backend already running on the host:
+
+```bash
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+The app will be available at `http://localhost:3000`.
+
+### Netlify
+
+The checked-in `netlify.toml` builds the root app with `npm run build` and publishes `dist/`.
+
+## Admin Panel
+
+The admin panel is a separate Vite app located in `PWA/admin-panel/`.
+
+### Scripts
+
+From `PWA/admin-panel/`:
+
+```bash
+npm install
+npm run dev
+npm run build
+npm run preview
+```
+
+### Notes
+
+- The admin panel is intentionally separate from the main PWA so it can be deployed and scaled independently.
+- Point its API client at the backend gateway used by your environment.
+
+## Project Structure
+
+- `src/` main PWA source code.
+- `admin-panel/src/` admin panel source code.
+- `Dockerfile.local` local container image for the PWA.
+- `docker-compose.local.yml` local container setup for the PWA.
+- `netlify.toml` production build configuration for the root app.
